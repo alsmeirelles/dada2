@@ -1,0 +1,64 @@
+[project]
+name = "dada-api"
+version = "0.1.0"
+description = "Data Aware Data Acquisition (DADA) - Active Learning Backend API"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "André LS Meirelles", email = "alsmeirelles@gmail.com" }
+]
+dependencies = [
+    # Core Framework
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.1",
+    "pydantic>=2.7.4",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+
+    # Database
+    "sqlalchemy[asyncio]>=2.0.31",
+    "asyncpg>=0.29.0",
+
+    # Background Tasks
+    "celery>=5.4.0",
+    "redis>=5.0.6",
+
+    # ML & Computer Vision
+    "torch",
+    "torchvision",
+    "ultralytics>=8.2.0",
+    "opencv-python-headless>=4.10.0",
+    "pillow>=10.3.0",
+    "numpy>=1.26.4"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.2",
+    "httpx>=0.27.0",
+    "ruff>=0.4.0", # Swapped black/isort for Ruff, Astral's ultra-fast linter
+    "rg"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# ---------------------------------------------------------
+# uv-specific configurations
+# ---------------------------------------------------------
+[tool.uv]
+# Tell uv to use Hatchling for building if ever packaged
+# Tell uv where to find the PyTorch CUDA wheels
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+# Route torch and torchvision to the explicit CUDA index
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+
+# Example of how you would pull Segment Anything Fast directly from Git using uv
+# segment-anything-fast = { git = "https://github.com/pytorch-labs/segment-anything-fast.git" }

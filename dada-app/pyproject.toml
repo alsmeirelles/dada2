@@ -1,0 +1,35 @@
+[project]
+name = "dada-app"
+version = "0.1.0"
+description = "Data Aware Data Acquisition (DADA) - Frontend Interactive Web Client"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "André LS Meirelles", email = "alsmeirelles@gmail.com" }
+]
+# No core Python dependencies are needed since this is a TypeScript app
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    # poethepoet acts as our bridge between Python and Node.js
+    "poethepoet>=0.26.1"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# ---------------------------------------------------------
+# Frontend Task Orchestration
+# ---------------------------------------------------------
+[tool.poe.tasks]
+# These commands bridge the Python environment to the local Node environment
+install-node = "npm install"
+dev = "npm run dev"
+build = "npm run build"
+preview = "npm run preview"
+lint = "npm run lint"
+
+# Optional: A clean command to wipe out node_modules if things get stuck
+clean = "rm -rf node_modules package-lock.json dist"
