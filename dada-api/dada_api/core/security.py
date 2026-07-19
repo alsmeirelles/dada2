@@ -4,21 +4,21 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+from pwdlib import PasswordHash
 
 from dada_api.core.config import get_settings
 
-password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+password_hasher = PasswordHash.recommended()
 
 
 def hash_password(password: str) -> str:
-    """Hash a plaintext password with bcrypt."""
-    return password_context.hash(password)
+    """Hash a plaintext password with the recommended password hasher."""
+    return password_hasher.hash(password)
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
     """Return whether a plaintext password matches a stored password hash."""
-    return password_context.verify(plain_password, password_hash)
+    return password_hasher.verify(plain_password, password_hash)
 
 
 def create_access_token(subject: str, roles: list[str]) -> str:
@@ -35,7 +35,7 @@ def create_access_token(subject: str, roles: list[str]) -> str:
     }
     return jwt.encode(
         payload,
-        settings.jwt_secret_key,
+        settings.jwt_secret_key.get_secret_value(),
         algorithm=settings.jwt_algorithm,
     )
 
@@ -46,7 +46,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
     try:
         payload = jwt.decode(
             token,
-            settings.jwt_secret_key,
+            settings.jwt_secret_key.get_secret_value(),
             algorithms=[settings.jwt_algorithm],
         )
     except JWTError as error:

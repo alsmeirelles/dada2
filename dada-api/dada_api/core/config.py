@@ -1,43 +1,89 @@
-"""Application configuration loaded from environment variables."""
+"""Application configuration loaded from dotenv and environment variables."""
 
 from functools import lru_cache
 import os
+from pathlib import Path
+
+from pydantic import Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
 
 
-class Settings:
+def resolve_env_file() -> Path | None:
+    """Return the dotenv file path to use when one is available."""
+    explicit_env_file = os.getenv("DADA_ENV_FILE")
+    if explicit_env_file:
+        return Path(explicit_env_file)
+
+    candidate_paths = (
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parents[2] / ".env",
+    )
+    for candidate_path in candidate_paths:
+        if candidate_path.exists():
+            return candidate_path
+
+    return None
+
+
+class Settings(BaseSettings):
     """Runtime settings for the DADA API."""
 
     app_name: str = "DADA API"
     api_v1_prefix: str = "/api/v1"
-    environment: str
-    database_url: str
-    jwt_secret_key: str
-    jwt_algorithm: str
-    access_token_expire_minutes: int
-    seed_admin_username: str | None
-    seed_admin_password: str | None
+    environment: str = "development"
+    database_url: str | None = None
+    postgres_host: str = "localhost"
+    postgres_host_port: int = 5432
+    postgres_user: str = "dada"
+    postgres_password: SecretStr = Field(default=SecretStr("dada"), repr=False)
+    postgres_db: str = "dada"
+    jwt_secret_key: SecretStr = Field(
+        default=SecretStr("change-this-development-secret"),
+        repr=False,
+    )
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60
+    seed_admin_username: str | None = None
+    seed_admin_password: SecretStr | None = Field(default=None, repr=False)
+    seed_service_username: str | None = None
+    seed_service_password: SecretStr | None = Field(default=None, repr=False)
 
-    def __init__(self) -> None:
-        """Load settings from process environment."""
-        self.environment = os.getenv("DADA_ENVIRONMENT", "development")
-        self.database_url = os.getenv(
-            "DADA_DATABASE_URL",
-            "postgresql+asyncpg://dada:dada@localhost:5432/dada",
+    model_config = SettingsConfigDict(
+        env_prefix="DADA_",
+        env_file=resolve_env_file(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    def sqlalchemy_database_url(self) -> str | URL:
+        """Return the SQLAlchemy database URL.
+
+        Explicit runtime ``DADA_DATABASE_URL`` values are returned as-is for
+        managed deployments. Local development settings use ``URL.create`` so
+        string representations mask the password by default.
+        """
+        if self.database_url:
+            return self.database_url
+
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.postgres_user,
+            password=self.postgres_password.get_secret_value(),
+            host=self.postgres_host,
+            port=self.postgres_host_port,
+            database=self.postgres_db,
         )
-        self.jwt_secret_key = os.getenv(
-            "DADA_JWT_SECRET_KEY",
-            "change-this-development-secret",
-        )
-        self.jwt_algorithm = os.getenv("DADA_JWT_ALGORITHM", "HS256")
-        self.access_token_expire_minutes = int(
-            os.getenv("DADA_ACCESS_TOKEN_EXPIRE_MINUTES", "60")
-        )
-        self.seed_admin_username = os.getenv("DADA_SEED_ADMIN_USERNAME")
-        self.seed_admin_password = os.getenv("DADA_SEED_ADMIN_PASSWORD")
+
+    def model_post_init(self, _: object) -> None:
+        """Validate settings that depend on multiple values."""
+        if self.seed_service_username is None:
+            self.seed_service_username = self.postgres_user
 
         if (
             self.environment.lower() == "production"
-            and self.jwt_secret_key == "change-this-development-secret"
+            and self.jwt_secret_key.get_secret_value()
+            == "change-this-development-secret"
         ):
             raise RuntimeError("DADA_JWT_SECRET_KEY must be set in production.")
 

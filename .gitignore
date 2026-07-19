@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+**/.uv-cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Local environment configuration
+.env
+**/.env
+.env.*
+**/.env.*
+!.env.example
+!**/.env.example

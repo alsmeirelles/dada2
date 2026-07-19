@@ -30,6 +30,8 @@ dev = "npm run dev"
 build = "npm run build"
 preview = "npm run preview"
 lint = "npm run lint"
+test = "npm run test"
+check = ["lint", "test", "build"]
 
 # Optional: A clean command to wipe out node_modules if things get stuck
 clean = "rm -rf node_modules package-lock.json dist"
