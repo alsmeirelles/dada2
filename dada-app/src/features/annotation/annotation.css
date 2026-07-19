@@ -1,6 +1,6 @@
 .annotation-workspace { --header-height: 58px; width: 100vw; height: 100vh; overflow: hidden; display: grid; grid-template: var(--header-height) 1fr / 236px 1fr 270px; color: #e5e7eb; background: #171a21; }
 .annotation-workspace--classes-hidden { grid-template-columns: 236px 1fr; }
-.annotation-header { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(160px, 1fr) minmax(180px, 340px) auto auto auto; align-items: center; gap: 1rem; padding: 0 .8rem; border-bottom: 1px solid #30343d; background: #20242c; z-index: 5; }
+.annotation-header { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(160px, 1fr) minmax(180px, 340px) auto auto auto auto; align-items: center; gap: 1rem; padding: 0 .8rem; border-bottom: 1px solid #30343d; background: #20242c; z-index: 5; }
 .annotation-header > a { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 7px; color: #aeb4c0; }
 .annotation-header > div:nth-child(2) { min-width: 0; display: grid; }
 .annotation-header > div:nth-child(2) strong, .annotation-header > div:nth-child(2) span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -10,6 +10,8 @@
 .save-indicator { display: inline-flex; align-items: center; gap: .35rem; color: #8f96a3; font-size: .72rem; white-space: nowrap; }
 .save-indicator--saved { color: #6ee7b7; }
 .save-indicator--error { color: #fda4af; }
+.realtime-indicator { display: inline-flex; align-items: center; gap: .3rem; color: #8f96a3; font-size: .68rem; }
+.realtime-indicator--live { color: #6ee7b7; }
 .annotation-workspace .button--ghost { color: #aeb4c0; }
 .annotation-workspace .button--ghost:hover { color: white; background: #303641; }
 
@@ -42,7 +44,20 @@
 .image-stage--dragging { cursor: grabbing; }
 .image-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; box-shadow: 0 8px 30px rgb(0 0 0 / 35%); }
 .image-layer img { width: 100%; height: 100%; display: block; pointer-events: none; }
-.annotation-overlay { position: absolute; inset: 0; pointer-events: none; }
+.annotation-overlay { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: auto; }
+.annotation-overlay--box { cursor: crosshair; }
+.annotation-overlay--polygon { cursor: crosshair; }
+.annotation-overlay--sam-point { cursor: cell; }
+.annotation-shape { fill: color-mix(in srgb, currentColor 18%, transparent); stroke: currentColor; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; }
+.annotation-shape:hover, .annotation-shape.selected { fill: color-mix(in srgb, currentColor 30%, transparent); stroke-width: 3; }
+.annotation-shape.selected { stroke-dasharray: 7 4; }
+.shape-draft { fill: color-mix(in srgb, currentColor 16%, transparent); stroke: currentColor; stroke-width: 2; stroke-dasharray: 7 5; vector-effect: non-scaling-stroke; pointer-events: none; }
+polyline.shape-draft { fill: none; }
+.polygon-point { fill: white; stroke: currentColor; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.shape-label { fill: white; stroke: #111318; stroke-width: 3px; paint-order: stroke; font-size: 12px; font-weight: 700; pointer-events: none; }
+.sam-progress { position: absolute; left: 50%; top: 1rem; transform: translateX(-50%); padding: .55rem .8rem; border: 1px solid #514985; border-radius: 7px; display: flex; align-items: center; gap: .45rem; color: #ddd8ff; background: #302b4b; font-size: .75rem; z-index: 4; }
+.sam-progress svg { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .zoom-controls { position: absolute; right: 1rem; bottom: 1rem; min-height: 38px; display: flex; align-items: center; padding: .15rem; border: 1px solid #3b404b; border-radius: 8px; background: rgb(31 35 43 / 94%); box-shadow: 0 8px 24px rgb(0 0 0 / 25%); }
 .zoom-controls .button { min-height: 32px; padding: .35rem; }
 .zoom-value { min-width: 58px; border: 0; color: #d4d7dd; background: transparent; font-size: .7rem; cursor: pointer; }
@@ -67,9 +82,17 @@
 .class-options button span { display: grid; gap: .1rem; }
 .class-options strong { font-size: .75rem; }
 .class-options small { color: #7f8794; font-size: .62rem; }
-.object-panel { padding: 1rem; display: grid; grid-template-columns: 1fr auto; align-content: start; gap: .5rem; }
+.object-panel { min-height: 0; padding: 1rem .5rem .5rem; display: grid; grid-template: auto 1fr / 1fr auto; align-content: start; gap: .5rem; }
 .object-panel > span { min-width: 23px; height: 23px; display: grid; place-items: center; border-radius: 999px; color: #aeb4c0; background: #343943; font-size: .65rem; }
-.object-panel p { grid-column: 1 / -1; color: #7f8794; font-size: .72rem; line-height: 1.5; }
+.object-panel p { color: #7f8794; font-size: .72rem; line-height: 1.5; }
+.object-list { grid-column: 1 / -1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: .25rem; }
+.object-list button { width: 100%; min-height: 38px; padding: .4rem .5rem; border: 1px solid transparent; border-radius: 6px; display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: .5rem; color: #cfd3da; background: transparent; text-align: left; cursor: pointer; }
+.object-list button:hover, .object-list button.selected { background: #2b3039; }
+.object-list button.selected { border-color: #545b67; }
+.object-list i { width: 9px; height: 9px; border-radius: 2px; }
+.object-list span { overflow: hidden; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
+.object-list small { color: #737b88; font-size: .6rem; text-transform: capitalize; }
+.object-list > p { padding: .5rem; }
 .shortcut-popover { position: fixed; top: 68px; right: 12px; width: 280px; padding: 1rem; border: 1px solid #454b57; border-radius: 10px; color: #e5e7eb; background: #272c35; box-shadow: 0 18px 50px rgb(0 0 0 / 40%); z-index: 20; }
 .shortcut-popover > div { display: flex; justify-content: space-between; }
 .shortcut-popover button { border: 0; color: #aeb4c0; background: transparent; font-size: 1.3rem; cursor: pointer; }
@@ -82,7 +105,7 @@
   .annotation-workspace { grid-template-columns: 190px 1fr; }
   .class-panel { display: none; }
   .annotation-header { grid-template-columns: auto 1fr auto auto; }
-  .iteration-progress, .save-indicator { display: none; }
+  .iteration-progress, .save-indicator, .realtime-indicator { display: none; }
 }
 
 @media (max-width: 620px) {
@@ -93,4 +116,8 @@
   .annotation-header .button--primary svg { margin: 0; }
   .annotation-toolbar button span { display: none; }
   .annotation-toolbar button { min-width: 40px; grid-template-columns: 1fr; justify-items: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sam-progress svg { animation: none; }
 }

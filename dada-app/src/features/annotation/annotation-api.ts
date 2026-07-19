@@ -3,8 +3,12 @@ import type { Page, Project, ProjectClassInput } from '../projects/types'
 import type {
   AnnotationDocument,
   AnnotationQueue,
+  EventTicket,
   IterationList,
   Lease,
+  ProjectStatistics,
+  SamPrediction,
+  SamPrompt,
   WorkspaceBootstrap,
 } from './types'
 
@@ -61,5 +65,48 @@ export function completeAnnotation(leaseId: string, document: AnnotationDocument
     method: 'POST', token,
     headers: { 'Idempotency-Key': crypto.randomUUID() },
     body: document,
+  })
+}
+
+export function predictSegmentation(
+  projectId: string,
+  lease: Lease,
+  prompts: SamPrompt[],
+  token: string,
+) {
+  return apiRequest<SamPrediction>('/api/v1/inference/sam-predict', {
+    method: 'POST', token,
+    body: {
+      project_id: projectId,
+      lease_id: lease.lease_id,
+      image_id: lease.media.id,
+      prompts,
+    },
+  })
+}
+
+export function closeIteration(projectId: string, iterationId: string, token: string) {
+  return apiRequest<IterationList['current_iteration']>(
+    `/api/v1/projects/${projectId}/iterations/${iterationId}/close`,
+    {
+      method: 'POST', token,
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: {},
+    },
+  )
+}
+
+export async function getProjectActivity(projectId: string, token: string) {
+  const [project, iterations, statistics] = await Promise.all([
+    apiRequest<Project>(`/api/v1/projects/${projectId}`, { token }),
+    apiRequest<IterationList>(`/api/v1/projects/${projectId}/iterations`, { token }),
+    apiRequest<ProjectStatistics>(`/api/v1/projects/${projectId}/statistics`, { token }),
+  ])
+  return { project, iterations, statistics }
+}
+
+export function createEventTicket(projectId: string, token: string) {
+  return apiRequest<EventTicket>(`/api/v1/projects/${projectId}/events/ticket`, {
+    method: 'POST', token, body: {},
   })
 }

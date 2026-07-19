@@ -67,6 +67,11 @@ export function ProjectsPage() {
                   Open annotation workspace
                 </Link>
               )}
+              {(project.status === 'training' || project.status === 'completed' || project.status === 'failed') && (
+                <Link className="project-card__action" to={`/projects/${project.id}/activity`}>
+                  View iteration activity
+                </Link>
+              )}
             </article>
           ))}
         </section>

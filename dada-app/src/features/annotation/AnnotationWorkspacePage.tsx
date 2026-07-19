@@ -8,29 +8,38 @@ import {
   Hand,
   Lock,
   MousePointer2,
+  Pentagon,
   PanelRightClose,
   PanelRightOpen,
   Save,
-  Tags,
+  Sparkles,
+  Square,
+  Trash2,
+  Undo2,
+  Redo2,
+  Radio,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
 import {
   acquireLease,
+  closeIteration,
   completeAnnotation,
   getQueue,
   getWorkspaceBootstrap,
+  predictSegmentation,
   releaseLease,
   renewLease,
   saveAnnotationDraft,
 } from './annotation-api'
 import { ImageStage } from './ImageStage'
-import type { AnnotationDocument, Lease, QueueItem } from './types'
+import { useProjectEvents } from './useProjectEvents'
+import type { AnnotationDocument, AnnotationObject, AnnotationTool, Lease, QueueItem } from './types'
 import './annotation.css'
 
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
@@ -38,19 +47,23 @@ type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
 export function AnnotationWorkspacePage() {
   const { projectId = '' } = useParams()
   const { token } = useAuth()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [lease, setLease] = useState<Lease | null>(null)
   const [document, setDocument] = useState<AnnotationDocument | null>(null)
   const documentRef = useRef<AnnotationDocument | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [leaseLost, setLeaseLost] = useState(false)
-  const [panMode, setPanMode] = useState(false)
-  const [creatingObject, setCreatingObject] = useState(false)
+  const [tool, setTool] = useState<AnnotationTool>('select')
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null)
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
+  const undoStack = useRef<AnnotationDocument[]>([])
+  const redoStack = useRef<AnnotationDocument[]>([])
   const [showClasses, setShowClasses] = useState(true)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const classPanelRef = useRef<HTMLElement>(null)
+  const closeAttemptRef = useRef<string | null>(null)
 
   const bootstrap = useQuery({
     queryKey: ['annotation-workspace', projectId],
@@ -65,10 +78,80 @@ export function AnnotationWorkspacePage() {
     refetchInterval: lease ? 15_000 : 5_000,
   })
 
+  const handleProjectEvent = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['annotation-queue', projectId] })
+    void queryClient.invalidateQueries({ queryKey: ['annotation-workspace', projectId] })
+    void queryClient.invalidateQueries({ queryKey: ['project-activity', projectId] })
+  }, [projectId, queryClient])
+  const realtimeStatus = useProjectEvents(projectId, token, handleProjectEvent)
+
+  const closeCurrentIteration = useMutation({
+    mutationFn: () => closeIteration(projectId, iterationId!, token!),
+    onSuccess: () => navigate(`/projects/${projectId}/activity`, { replace: true }),
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === 'iteration_incomplete') {
+        void queue.refetch()
+        window.setTimeout(() => {
+          closeAttemptRef.current = null
+          void queue.refetch()
+        }, 5_000)
+      } else {
+        setNotice(error instanceof Error ? error.message : 'The iteration could not be closed.')
+      }
+    },
+  })
+
+  useEffect(() => {
+    const current = queue.data
+    if (!iterationId || !current || closeCurrentIteration.isPending) return
+    const total = current.available_count + current.leased_count + current.completed_count
+    const signature = `${iterationId}:${current.available_count}:${current.leased_count}:${current.completed_count}`
+    if (total > 0 && current.completed_count === total && closeAttemptRef.current !== signature) {
+      closeAttemptRef.current = signature
+      closeCurrentIteration.mutate()
+    }
+  }, [closeCurrentIteration, iterationId, queue.data, queue.dataUpdatedAt])
+
   const setCurrentDocument = useCallback((value: AnnotationDocument | null) => {
     documentRef.current = value
     setDocument(value)
   }, [])
+
+  const changeDocument = useCallback((value: AnnotationDocument) => {
+    const current = documentRef.current
+    if (current) undoStack.current.push(current)
+    if (undoStack.current.length > 100) undoStack.current.shift()
+    redoStack.current = []
+    setCurrentDocument(value)
+    setSaveState('dirty')
+  }, [setCurrentDocument])
+
+  const undo = useCallback(() => {
+    const previous = undoStack.current.pop()
+    const current = documentRef.current
+    if (!previous || !current) return
+    redoStack.current.push(current)
+    setCurrentDocument({ ...previous, version: current.version })
+    setSelectedObjectId(null)
+    setSaveState('dirty')
+  }, [setCurrentDocument])
+
+  const redo = useCallback(() => {
+    const next = redoStack.current.pop()
+    const current = documentRef.current
+    if (!next || !current) return
+    undoStack.current.push(current)
+    setCurrentDocument({ ...next, version: current.version })
+    setSelectedObjectId(null)
+    setSaveState('dirty')
+  }, [setCurrentDocument])
+
+  const removeSelected = useCallback(() => {
+    const current = documentRef.current
+    if (!current || !selectedObjectId) return
+    changeDocument({ ...current, objects: current.objects.filter((item) => item.id !== selectedObjectId) })
+    setSelectedObjectId(null)
+  }, [changeDocument, selectedObjectId])
 
   const saveNow = useCallback(async () => {
     const current = documentRef.current
@@ -76,8 +159,14 @@ export function AnnotationWorkspacePage() {
     setSaveState('saving')
     try {
       const saved = await saveAnnotationDraft(lease.lease_id, current, token!)
-      setCurrentDocument(saved)
-      setSaveState('saved')
+      const latest = documentRef.current
+      if (latest === current) {
+        setCurrentDocument(saved)
+        setSaveState('saved')
+      } else if (latest) {
+        setCurrentDocument({ ...latest, version: saved.version })
+        setSaveState('dirty')
+      }
       return saved
     } catch (error) {
       setSaveState('error')
@@ -112,7 +201,11 @@ export function AnnotationWorkspacePage() {
     onSuccess: (nextLease) => {
       setLease(nextLease)
       setCurrentDocument(nextLease.annotation)
+      undoStack.current = []
+      redoStack.current = []
+      setSelectedObjectId(null)
       setSelectedClassId(nextLease.annotation.objects[0]?.class_id ?? bootstrap.data?.classes[0]?.id ?? null)
+      setTool(defaultTool(nextLease.annotation.task_type))
       setSaveState('idle')
       setLeaseLost(false)
       setNotice(null)
@@ -120,6 +213,54 @@ export function AnnotationWorkspacePage() {
     },
     onError: (error) => setNotice(error instanceof Error ? error.message : 'The image is no longer available.'),
   })
+
+  const sam = useMutation({
+    mutationFn: (point: { x: number; y: number }) => predictSegmentation(
+      projectId,
+      lease!,
+      [{ type: 'point', coordinates: [point.x, point.y], label: 'foreground' }],
+      token!,
+    ),
+    onSuccess: (prediction) => {
+      const current = documentRef.current
+      if (!current || !selectedClassId) return
+      const objects: AnnotationObject[] = prediction.polygons
+        .map((polygon) => Array.isArray(polygon) ? polygon : polygon.coordinates)
+        .filter((coordinates) => (coordinates[0]?.length ?? 0) >= 6)
+        .map((coordinates) => ({
+          id: crypto.randomUUID(),
+          class_id: selectedClassId,
+          geometry: { type: 'polygon', coordinates },
+          attributes: { assisted: true },
+        }))
+      if (!objects.length) return setNotice('The model did not return a usable mask for that point.')
+      changeDocument({ ...current, objects: [...current.objects, ...objects] })
+      setSelectedObjectId(objects[0]!.id)
+      setNotice(`Added ${objects.length} assisted mask${objects.length === 1 ? '' : 's'}.`)
+    },
+    onError: (error) => setNotice(error instanceof Error ? error.message : 'Assisted segmentation failed.'),
+  })
+
+  const selectClass = useCallback((classId: string) => {
+    setSelectedClassId(classId)
+    const current = documentRef.current
+    if (!current) return
+    if (current.task_type !== 'classification') {
+      if (!selectedObjectId) return
+      changeDocument({
+        ...current,
+        objects: current.objects.map((item) => item.id === selectedObjectId
+          ? { ...item, class_id: classId }
+          : item),
+      })
+      return
+    }
+    const existing = current.objects.find((item) => item.class_id === classId)
+    const objects: AnnotationObject[] = existing
+      ? current.objects.filter((item) => item.id !== existing.id)
+      : [...current.objects, { id: crypto.randomUUID(), class_id: classId, geometry: null, attributes: {} }]
+    changeDocument({ ...current, objects })
+  }, [changeDocument, selectedObjectId])
 
   async function openItem(item: QueueItem) {
     if (item.status === 'leased' && item.media_id !== lease?.media.id) return
@@ -129,6 +270,7 @@ export function AnnotationWorkspacePage() {
       if (lease && !leaseLost) await releaseLease(lease.lease_id, token!)
       setLease(null)
       setCurrentDocument(null)
+      setSelectedObjectId(null)
       acquire.mutate(item.media_id)
     } catch {
       setNotice('Save the current annotation before changing images.')
@@ -147,6 +289,7 @@ export function AnnotationWorkspacePage() {
       await completeAnnotation(lease.lease_id, document, token!)
       setLease(null)
       setCurrentDocument(null)
+      setSelectedObjectId(null)
       setSaveState('idle')
       await queue.refetch()
       setNotice('Annotation completed. Choose the next available image.')
@@ -159,9 +302,10 @@ export function AnnotationWorkspacePage() {
 
   const navigateQueue = useCallback((direction: -1 | 1) => {
     if (!queue.data?.items.length) return
-    const currentIndex = queue.data.items.findIndex((item) => item.media_id === lease?.media.id)
-    const nextIndex = Math.min(queue.data.items.length - 1, Math.max(0, currentIndex + direction))
-    const item = queue.data.items[nextIndex]
+    const navigable = queue.data.items.filter((item) => item.status !== 'leased' || item.media_id === lease?.media.id)
+    const currentIndex = navigable.findIndex((item) => item.media_id === lease?.media.id)
+    const nextIndex = Math.min(navigable.length - 1, Math.max(0, currentIndex + direction))
+    const item = navigable[nextIndex]
     if (item) void openItem(item)
     // openItem deliberately owns save/release sequencing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -173,27 +317,44 @@ export function AnnotationWorkspacePage() {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault(); void saveNow(); return
       }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault(); if (event.shiftKey) redo(); else undo(); return
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
+        event.preventDefault(); redo(); return
+      }
       if (event.key === 'ArrowLeft') navigateQueue(-1)
       if (event.key === 'ArrowRight') navigateQueue(1)
-      if (event.key.toLowerCase() === 'n' && lease && !leaseLost) setCreatingObject((value) => !value)
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedObjectId) {
+        event.preventDefault(); removeSelected()
+      }
+      if (event.key.toLowerCase() === 'v') setTool('select')
+      if (event.key.toLowerCase() === 'h') setTool('pan')
+      if (event.key.toLowerCase() === 'b' && bootstrap.data?.project.task_type === 'detection') setTool('box')
+      if (event.key.toLowerCase() === 'p' && bootstrap.data?.project.task_type === 'segmentation') setTool('polygon')
+      if (event.key.toLowerCase() === 'm' && bootstrap.data?.project.task_type === 'segmentation') setTool('sam-point')
+      if (event.key.toLowerCase() === 'n' && lease && !leaseLost && bootstrap.data?.project.task_type !== 'classification') {
+        setTool(bootstrap.data?.project.task_type === 'detection' ? 'box' : 'polygon')
+      }
       if (event.key.toLowerCase() === 'c') {
         setShowClasses(true)
         window.setTimeout(() => classPanelRef.current?.focus(), 0)
       }
       const classIndex = Number(event.key) - 1
       const classItem = classIndex >= 0 ? bootstrap.data?.classes[classIndex] : undefined
-      if (classItem) setSelectedClassId(classItem.id)
+      if (classItem) selectClass(classItem.id)
       if (event.key === '?') setShowShortcuts((value) => !value)
     }
     window.addEventListener('keydown', keyboard)
     return () => window.removeEventListener('keydown', keyboard)
-  }, [bootstrap.data, lease, leaseLost, navigateQueue, saveNow])
+  }, [bootstrap.data, lease, leaseLost, navigateQueue, redo, removeSelected, saveNow, selectClass, selectedObjectId, undo])
 
   if (bootstrap.isLoading) return <div className="centered-status">Loading annotation workspace…</div>
   if (bootstrap.isError) return <WorkspaceError error={bootstrap.error} />
   if (!bootstrap.data?.iteration) return <NoIteration projectName={bootstrap.data?.project.name ?? 'Project'} />
 
   const available = queue.data?.items.filter((item) => item.status === 'available') ?? []
+  const visibleQueueItems = queue.data?.items.filter((item) => item.status !== 'leased' || item.media_id === lease?.media.id) ?? []
 
   return (
     <main className={`annotation-workspace ${showClasses ? '' : 'annotation-workspace--classes-hidden'}`}>
@@ -202,15 +363,16 @@ export function AnnotationWorkspacePage() {
         <div><strong>{bootstrap.data.project.name}</strong><span>Iteration {bootstrap.data.iteration.number}</span></div>
         <div className="iteration-progress"><span>{queue.data?.completed_count ?? 0} of {bootstrap.data.iteration.total_count} complete</span><progress max={bootstrap.data.iteration.total_count || 1} value={queue.data?.completed_count ?? 0} /></div>
         <SaveIndicator state={saveState} />
+        <span className={`realtime-indicator realtime-indicator--${realtimeStatus}`} title={realtimeStatus === 'live' ? 'Live collaboration connected' : 'Polling for collaboration updates'}><Radio size={13} />{realtimeStatus === 'live' ? 'Live' : 'Polling'}</span>
         <Button variant="ghost" onClick={() => setShowShortcuts((value) => !value)} aria-label="Keyboard shortcuts"><CircleHelp size={19} /></Button>
         <Button onClick={complete} disabled={!lease || leaseLost || saveState === 'saving'}><Check size={17} /> Complete</Button>
       </header>
 
       <aside className="annotation-queue" aria-label="Annotation queue">
-        <div className="queue-heading"><strong>Images</strong><span>{available.length} available</span></div>
+        <div className="queue-heading"><strong>Images</strong><span>{available.length} available · {queue.data?.leased_count ?? 0} in use</span></div>
         <div className="queue-list">
           {queue.isLoading && <p className="queue-message">Loading queue…</p>}
-          {queue.data?.items.map((item, index) => (
+          {visibleQueueItems.map((item, index) => (
             <button key={item.media_id} className={`queue-item queue-item--${item.status} ${lease?.media.id === item.media_id ? 'selected' : ''}`} onClick={() => void openItem(item)} disabled={item.status === 'leased' && lease?.media.id !== item.media_id}>
               <span className="queue-thumb">{item.thumbnail_url ? <img src={item.thumbnail_url} alt="" /> : index + 1}</span>
               <span><strong>{item.relative_path.split('/').at(-1)}</strong><small>{item.status === 'leased' ? item.leased_by?.display_name ?? 'In use' : item.status}</small></span>
@@ -223,14 +385,35 @@ export function AnnotationWorkspacePage() {
 
       <section className="annotation-main">
         <div className="annotation-toolbar" aria-label="Annotation tools">
-          <button className={!panMode ? 'active' : ''} onClick={() => setPanMode(false)} title="Select (V)"><MousePointer2 size={19} /><span>Select</span></button>
-          <button className={panMode ? 'active' : ''} onClick={() => setPanMode(true)} title="Pan (hold Space)"><Hand size={19} /><span>Pan</span></button>
+          <button className={tool === 'select' ? 'active' : ''} onClick={() => setTool('select')} title="Select (V)"><MousePointer2 size={19} /><span>Select</span></button>
+          <button className={tool === 'pan' ? 'active' : ''} onClick={() => setTool('pan')} title="Pan (H or Space)"><Hand size={19} /><span>Pan</span></button>
           <span className="tool-divider" />
-          <button className={creatingObject ? 'active' : ''} onClick={() => setCreatingObject((value) => !value)} disabled={!lease || leaseLost} title="New object (N)"><Tags size={19} /><span>{creatingObject ? 'Finish' : 'New'}</span></button>
+          {bootstrap.data.project.task_type === 'detection' && <button className={tool === 'box' ? 'active' : ''} onClick={() => setTool('box')} disabled={!lease || leaseLost} title="Bounding box (B)"><Square size={19} /><span>Box</span></button>}
+          {bootstrap.data.project.task_type === 'segmentation' && <>
+            <button className={tool === 'polygon' ? 'active' : ''} onClick={() => setTool('polygon')} disabled={!lease || leaseLost} title="Polygon (P)"><Pentagon size={19} /><span>Polygon</span></button>
+            <button className={tool === 'sam-point' ? 'active' : ''} onClick={() => setTool('sam-point')} disabled={!lease || leaseLost || sam.isPending} title="Assisted mask point (M)"><Sparkles size={19} /><span>Assist</span></button>
+          </>}
+          <span className="tool-divider" />
+          <button onClick={undo} disabled={!undoStack.current.length || !lease || leaseLost} title="Undo (Ctrl Z)"><Undo2 size={18} /><span>Undo</span></button>
+          <button onClick={redo} disabled={!redoStack.current.length || !lease || leaseLost} title="Redo (Ctrl Y)"><Redo2 size={18} /><span>Redo</span></button>
+          <button onClick={removeSelected} disabled={!selectedObjectId || leaseLost} title="Delete selected"><Trash2 size={18} /><span>Delete</span></button>
           {!showClasses && <button onClick={() => setShowClasses(true)} title="Show classes (C)"><PanelRightOpen size={19} /><span>Classes</span></button>}
         </div>
         {lease ? (
-          <ImageStage media={lease.media} panMode={panMode} locked={leaseLost} />
+          <ImageStage
+            media={lease.media}
+            document={document!}
+            classes={bootstrap.data.classes}
+            tool={tool}
+            selectedClassId={selectedClassId}
+            selectedObjectId={selectedObjectId}
+            locked={leaseLost}
+            samPending={sam.isPending}
+            onChange={changeDocument}
+            onSelectObject={setSelectedObjectId}
+            onSamPoint={(point) => sam.mutate(point)}
+            onNotice={setNotice}
+          />
         ) : (
           <div className="canvas-empty">
             <MousePointer2 size={38} />
@@ -252,12 +435,20 @@ export function AnnotationWorkspacePage() {
           <div className="class-panel__heading"><div><strong>Classes</strong><span>Press C to focus</span></div><Button variant="ghost" onClick={() => setShowClasses(false)} aria-label="Close classes"><PanelRightClose size={17} /></Button></div>
           <div className="class-options">
             {bootstrap.data.classes.map((item, index) => (
-              <button key={item.id} className={selectedClassId === item.id ? 'selected' : ''} onClick={() => setSelectedClassId(item.id)}>
-                <i style={{ background: item.color }} /><span><strong>{item.name}</strong><small>Key {index + 1}</small></span>{selectedClassId === item.id && <Check size={15} />}
+              <button key={item.id} className={selectedClassId === item.id ? 'selected' : ''} onClick={() => selectClass(item.id)}>
+                <i style={{ background: item.color }} /><span><strong>{item.name}</strong><small>{bootstrap.data.project.task_type === 'classification' && document?.objects.some((object) => object.class_id === item.id) ? 'Assigned' : `Key ${index + 1}`}</small></span>{(selectedClassId === item.id || document?.objects.some((object) => object.class_id === item.id)) && <Check size={15} />}
               </button>
             ))}
           </div>
-          <div className="object-panel"><strong>Objects</strong><span>{document?.objects.length ?? 0}</span><p>Task-specific annotation objects appear here in task 5.</p></div>
+          <div className="object-panel"><strong>{bootstrap.data.project.task_type === 'classification' ? 'Labels' : 'Objects'}</strong><span>{document?.objects.length ?? 0}</span>
+            <div className="object-list">
+              {document?.objects.map((object, index) => {
+                const objectClass = bootstrap.data.classes.find((item) => item.id === object.class_id)
+                return <button key={object.id} className={selectedObjectId === object.id ? 'selected' : ''} onClick={() => { setSelectedObjectId(object.id); setSelectedClassId(object.class_id) }}><i style={{ background: objectClass?.color }} /><span>{index + 1}. {objectClass?.name ?? 'Unknown class'}</span><small>{object.geometry?.type ?? 'label'}</small></button>
+              })}
+              {!document?.objects.length && <p>No annotations yet.</p>}
+            </div>
+          </div>
         </aside>
       )}
 
@@ -280,13 +471,22 @@ function NoIteration({ projectName }: { projectName: string }) {
 }
 
 function ShortcutPanel({ onClose }: { onClose: () => void }) {
-  return <div className="shortcut-popover" role="dialog" aria-modal="false" aria-label="Keyboard shortcuts"><div><strong>Keyboard shortcuts</strong><button onClick={onClose}>×</button></div><dl><dt>N</dt><dd>Start or finish object</dd><dt>C</dt><dd>Focus classes</dd><dt>← / →</dt><dd>Previous / next image</dd><dt>Space</dt><dd>Pan image</dd><dt>+ / −</dt><dd>Zoom</dd><dt>0</dt><dd>Fit image</dd><dt>Ctrl S</dt><dd>Save draft</dd></dl></div>
+  return <div className="shortcut-popover" role="dialog" aria-modal="false" aria-label="Keyboard shortcuts"><div><strong>Keyboard shortcuts</strong><button onClick={onClose}>×</button></div><dl><dt>N / Enter</dt><dd>Start or finish object</dd><dt>B / P / M</dt><dd>Box / polygon / assisted mask</dd><dt>V / H</dt><dd>Select / pan</dd><dt>1–9</dt><dd>Choose class</dd><dt>C</dt><dd>Focus classes</dd><dt>Delete</dt><dd>Remove selected object</dd><dt>Ctrl Z / Y</dt><dd>Undo / redo</dd><dt>← / →</dt><dd>Previous / next image</dd><dt>Space</dt><dd>Pan image</dd><dt>+ / −</dt><dd>Zoom</dd><dt>0</dt><dd>Fit image</dd><dt>Ctrl S</dt><dd>Save draft</dd></dl></div>
 }
 
 function validateDocument(document: AnnotationDocument) {
   if (!document.objects.length) return 'Add at least one annotation before completing this image.'
   if (document.objects.some((item) => !item.class_id)) return 'Every annotation needs a class.'
+  if (document.task_type === 'detection' && document.objects.some((item) => item.geometry?.type !== 'rectangle')) return 'Detection annotations must use bounding boxes.'
+  if (document.task_type === 'segmentation' && document.objects.some((item) => item.geometry?.type !== 'polygon')) return 'Segmentation annotations must use polygons or masks.'
+  if (document.task_type === 'classification' && document.objects.some((item) => item.geometry !== null)) return 'Classification labels cannot contain geometry.'
   return ''
+}
+
+function defaultTool(taskType: AnnotationDocument['task_type']): AnnotationTool {
+  if (taskType === 'detection') return 'box'
+  if (taskType === 'segmentation') return 'polygon'
+  return 'select'
 }
 
 function isLeaseConflict(error: unknown) {

@@ -239,6 +239,12 @@ original-image pixel convention as stored annotations.
 uses a short-lived WebSocket ticket obtained through an authenticated REST
 request, avoiding access tokens in URLs.
 
+The App obtains that ticket with
+`POST /api/v1/projects/{project_id}/events/ticket`. The response contains
+`ticket`, `expires_at`, and an optional deployment-specific `websocket_url`.
+The single-use ticket may be placed in the WebSocket connection URL; bearer
+access tokens must not be placed there.
+
 ```json
 {
   "sequence": 418,

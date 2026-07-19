@@ -10,6 +10,11 @@ export type Iteration = {
   leased_count: number
   completed_count: number
   total_count: number
+  training_progress?: number | null
+  eta_seconds?: number | null
+  started_at?: string | null
+  completed_at?: string | null
+  metrics?: Record<string, number>
 }
 
 export type IterationList = {
@@ -62,6 +67,20 @@ export type AnnotationDocument = {
   objects: AnnotationObject[]
 }
 
+export type AnnotationTool = 'select' | 'pan' | 'box' | 'polygon' | 'sam-point'
+
+export type SamPrompt = {
+  type: 'point' | 'box'
+  coordinates: number[]
+  label?: string
+}
+
+export type SamPrediction = {
+  image_id: string
+  polygons: Array<{ coordinates: number[][] } | number[][]>
+  embedding_cache_key?: string | null
+}
+
 export type Lease = {
   lease_id: string
   expires_at: string
@@ -80,4 +99,43 @@ export type WorkspaceBootstrap = {
   project: Project
   classes: ProjectClassInput[]
   iteration: Iteration | null
+}
+
+export type ProjectStatistics = {
+  iterations: Array<{
+    iteration_id: string
+    iteration_number: number
+    annotated_images: number
+    metrics: Record<string, number>
+    completed_at?: string | null
+  }>
+  totals: {
+    images: number
+    annotated_images: number
+    iterations_completed: number
+  }
+}
+
+export type ProjectEventType =
+  | 'upload.progress'
+  | 'upload.completed'
+  | 'lease.acquired'
+  | 'lease.released'
+  | 'annotation.completed'
+  | 'iteration.status_changed'
+  | 'training.progress'
+  | 'training.eta_updated'
+
+export type ProjectEvent = {
+  sequence: number
+  type: ProjectEventType
+  project_id: string
+  occurred_at: string
+  data: Record<string, unknown>
+}
+
+export type EventTicket = {
+  ticket: string
+  websocket_url?: string
+  expires_at: string
 }
