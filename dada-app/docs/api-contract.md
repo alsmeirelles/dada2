@@ -190,6 +190,12 @@ metadata, a signed `image_url`, `expires_at`, `renew_after`, annotation version,
 and any existing draft. Other users see that item as leased but receive no
 sensitive user data beyond display information permitted by the project.
 
+`renew_after` is the number of seconds after acquisition or the last renewal
+before the App should renew. Queue responses contain `items`, status counts,
+and `next_cursor`; each item contains `media_id`, `relative_path`, `status`,
+dimensions, an optional thumbnail URL, and limited lease display information.
+The iteration-list response includes the nullable `current_iteration` object.
+
 Draft saving does not release the lease. Completion is idempotent and does.
 Disconnecting does not immediately release a lease; expiry prevents two users
 from editing during transient network loss. Owners/managers may explicitly

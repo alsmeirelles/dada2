@@ -62,6 +62,11 @@ export function ProjectsPage() {
                 <div><dt>Annotated</dt><dd>{project.completed_annotations ?? '—'}</dd></div>
                 <div><dt>Batch</dt><dd>{project.iteration_batch_size}</dd></div>
               </dl>
+              {(project.status === 'active' || project.status === 'ready') && (
+                <Link className="project-card__action" to={`/projects/${project.id}/annotate`}>
+                  Open annotation workspace
+                </Link>
+              )}
             </article>
           ))}
         </section>
