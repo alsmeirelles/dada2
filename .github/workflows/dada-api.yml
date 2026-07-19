@@ -1,0 +1,64 @@
+name: dada-api
+
+on:
+  push:
+    paths:
+      - "dada-api/**"
+      - ".github/workflows/dada-api.yml"
+  pull_request:
+    paths:
+      - "dada-api/**"
+      - ".github/workflows/dada-api.yml"
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: dada
+          POSTGRES_PASSWORD: dada-ci
+          POSTGRES_DB: dada
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dada -d dada"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: dada-api
+    env:
+      DADA_ENVIRONMENT: test
+      DADA_DATABASE_URL: postgresql+asyncpg://dada:dada-ci@localhost:5432/dada
+      DADA_REDIS_URL: redis://localhost:6379/0
+      DADA_JWT_SECRET_KEY: ci-only-secret
+      DADA_CURSOR_SECRET_KEY: ci-only-cursor-secret
+      DADA_RUN_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --extra dev --frozen
+      - run: uv run alembic upgrade head
+      - run: uv run alembic check
+      - run: uv run ruff check dada_api tests alembic
+      - run: uv run ruff format --check dada_api tests alembic
+      - run: uv run pytest
+      - run: uv run dada-api export-openapi --output openapi.json
+      - run: git diff --exit-code -- openapi.json

@@ -1,10 +1,10 @@
 """Application configuration loaded from dotenv and environment variables."""
 
-from functools import lru_cache
 import os
+from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -32,12 +32,22 @@ class Settings(BaseSettings):
     app_name: str = "DADA API"
     api_v1_prefix: str = "/api/v1"
     environment: str = "development"
+    log_level: str = "INFO"
+    cors_origins: str = "http://localhost:5173"
     database_url: str | None = None
     postgres_host: str = "localhost"
     postgres_host_port: int = 5432
     postgres_user: str = "dada"
     postgres_password: SecretStr = Field(default=SecretStr("dada"), repr=False)
     postgres_db: str = "dada"
+    redis_url: str = "redis://localhost:6379/0"
+    readiness_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
+    cursor_secret_key: SecretStr | None = Field(default=None, repr=False)
+    supported_image_media_types: str = "image/jpeg,image/png,image/webp"
+    max_file_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
+    max_project_files: int = Field(default=100_000, gt=0)
+    upload_chunk_bytes: int = Field(default=8 * 1024 * 1024, gt=0)
+    realtime_transport: str = "websocket"
     jwt_secret_key: SecretStr = Field(
         default=SecretStr("change-this-development-secret"),
         repr=False,
@@ -75,17 +85,57 @@ class Settings(BaseSettings):
             database=self.postgres_db,
         )
 
+    @property
+    def allowed_cors_origins(self) -> list[str]:
+        """Return normalized configured browser origins."""
+        return [
+            origin.strip() for origin in self.cors_origins.split(",") if origin.strip()
+        ]
+
+    @property
+    def image_media_types(self) -> list[str]:
+        """Return normalized advertised image media types."""
+        return [
+            media_type.strip().lower()
+            for media_type in self.supported_image_media_types.split(",")
+            if media_type.strip()
+        ]
+
+    @property
+    def effective_cursor_secret(self) -> str:
+        """Return the dedicated cursor secret or fall back to the JWT secret."""
+        if self.cursor_secret_key is not None:
+            return self.cursor_secret_key.get_secret_value()
+        return self.jwt_secret_key.get_secret_value()
+
+    @field_validator("environment")
+    @classmethod
+    def normalize_environment(cls, value: str) -> str:
+        """Normalize and validate the deployment environment name."""
+        normalized = value.strip().lower()
+        if normalized not in {"development", "test", "staging", "production"}:
+            raise ValueError(
+                "environment must be development, test, staging, or production"
+            )
+        return normalized
+
     def model_post_init(self, _: object) -> None:
         """Validate settings that depend on multiple values."""
         if self.seed_service_username is None:
             self.seed_service_username = self.postgres_user
 
         if (
-            self.environment.lower() == "production"
+            self.environment == "production"
             and self.jwt_secret_key.get_secret_value()
             == "change-this-development-secret"
         ):
             raise RuntimeError("DADA_JWT_SECRET_KEY must be set in production.")
+        if self.environment == "production" and any(
+            "localhost" in origin for origin in self.allowed_cors_origins
+        ):
+            raise RuntimeError(
+                "DADA_CORS_ORIGINS must not contain localhost in production."
+            )
 
 
 @lru_cache

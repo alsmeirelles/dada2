@@ -2,9 +2,19 @@
 
 from fastapi import APIRouter
 
-from dada_api.api.v1.endpoints import admin, auth, inference, queue, users
+from dada_api.api.v1.endpoints import (
+    admin,
+    auth,
+    capabilities,
+    inference,
+    projects,
+    queue,
+    users,
+)
 
 router = APIRouter()
+router.include_router(capabilities.router, tags=["capabilities"])
+router.include_router(projects.router, tags=["projects"])
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
 router.include_router(users.router, prefix="/users", tags=["users"])
 router.include_router(queue.router, prefix="/queue", tags=["queue"])

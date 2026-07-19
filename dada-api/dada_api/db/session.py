@@ -19,3 +19,8 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     """Yield an async SQLAlchemy session for request dependencies."""
     async with async_session_factory() as session:
         yield session
+
+
+async def close_database() -> None:
+    """Dispose pooled database connections during application shutdown."""
+    await engine.dispose()

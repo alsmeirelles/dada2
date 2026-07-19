@@ -17,3 +17,6 @@ venv/
 **/.env.*
 !.env.example
 !**/.env.example
+.idea/
+.agents/
+.codex/
