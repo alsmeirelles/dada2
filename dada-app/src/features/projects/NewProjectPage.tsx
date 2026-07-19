@@ -131,7 +131,7 @@ export function NewProjectPage() {
             <div><p className="eyebrow">Step 1</p><h2 id="step-0-title">Project basics</h2><p className="muted">Name the dataset and select its computer-vision task.</p></div>
             <div className="field-grid">
               <label className="field field--wide">Project name
-                <input value={draft.name} maxLength={120} autoFocus onChange={(e) => updateDraft({ name: e.target.value })} placeholder="Road surface defects" />
+                <input value={draft.name} maxLength={120} onChange={(e) => updateDraft({ name: e.target.value })} placeholder="Road surface defects" />
               </label>
               <label className="field field--wide">Description <span className="optional">Optional</span>
                 <textarea value={draft.description} maxLength={500} onChange={(e) => updateDraft({ description: e.target.value })} placeholder="What should annotators know?" />
@@ -139,8 +139,8 @@ export function NewProjectPage() {
             </div>
             <fieldset className="task-picker"><legend>Annotation task</legend>
               {taskOptions.map((task) => (
-                <label key={task.value} className={draft.taskType === task.value ? 'task-option selected' : 'task-option'}>
-                  <input type="radio" name="task" value={task.value} checked={draft.taskType === task.value} onChange={() => updateDraft({ taskType: task.value })} />
+                <label aria-label={task.title} htmlFor={`task-${task.value}`} key={task.value} className={draft.taskType === task.value ? 'task-option selected' : 'task-option'}>
+                  <input id={`task-${task.value}`} type="radio" name="task" value={task.value} checked={draft.taskType === task.value} onChange={() => updateDraft({ taskType: task.value })} />
                   <span><strong>{task.title}</strong><small>{task.description}</small></span>
                 </label>
               ))}

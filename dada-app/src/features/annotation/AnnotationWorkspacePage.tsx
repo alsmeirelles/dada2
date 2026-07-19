@@ -38,6 +38,7 @@ import {
   saveAnnotationDraft,
 } from './annotation-api'
 import { ImageStage } from './ImageStage'
+import { clearRecovery, loadRecovery, saveRecovery } from './recovery'
 import { useProjectEvents } from './useProjectEvents'
 import type { AnnotationDocument, AnnotationObject, AnnotationTool, Lease, QueueItem } from './types'
 import './annotation.css'
@@ -123,8 +124,9 @@ export function AnnotationWorkspacePage() {
     if (undoStack.current.length > 100) undoStack.current.shift()
     redoStack.current = []
     setCurrentDocument(value)
+    saveRecovery(projectId, value)
     setSaveState('dirty')
-  }, [setCurrentDocument])
+  }, [projectId, setCurrentDocument])
 
   const undo = useCallback(() => {
     const previous = undoStack.current.pop()
@@ -163,6 +165,7 @@ export function AnnotationWorkspacePage() {
       if (latest === current) {
         setCurrentDocument(saved)
         setSaveState('saved')
+        clearRecovery(projectId, saved.media_id)
       } else if (latest) {
         setCurrentDocument({ ...latest, version: saved.version })
         setSaveState('dirty')
@@ -171,15 +174,20 @@ export function AnnotationWorkspacePage() {
     } catch (error) {
       setSaveState('error')
       if (isLeaseConflict(error)) setLeaseLost(true)
+      else if (error instanceof ApiError && error.status === 409) {
+        setNotice('This annotation changed on the server. Your local recovery snapshot was retained; reopen the image to reconcile it.')
+      }
       throw error
     }
-  }, [lease, leaseLost, saveState, setCurrentDocument, token])
+  }, [lease, leaseLost, projectId, saveState, setCurrentDocument, token])
 
   useEffect(() => {
     if (saveState !== 'dirty' || !lease || leaseLost) return
-    const timer = window.setTimeout(() => void saveNow(), 1_500)
+    const current = documentRef.current
+    if (current) saveRecovery(projectId, current)
+    const timer = window.setTimeout(() => void saveNow().catch(() => undefined), 1_500)
     return () => window.clearTimeout(timer)
-  }, [lease, leaseLost, saveNow, saveState])
+  }, [lease, leaseLost, projectId, saveNow, saveState])
 
   useEffect(() => {
     if (!lease || leaseLost) return
@@ -199,16 +207,21 @@ export function AnnotationWorkspacePage() {
   const acquire = useMutation({
     mutationFn: (mediaId: string | null) => acquireLease(projectId, iterationId!, mediaId, token!),
     onSuccess: (nextLease) => {
+      const recovered = loadRecovery(projectId, nextLease.media.id)
+      const usingRecovery = Boolean(recovered && recovered.version >= nextLease.annotation.version)
+      const recoveredDocument = usingRecovery && recovered
+        ? { ...recovered, version: nextLease.annotation.version }
+        : nextLease.annotation
       setLease(nextLease)
-      setCurrentDocument(nextLease.annotation)
+      setCurrentDocument(recoveredDocument)
       undoStack.current = []
       redoStack.current = []
       setSelectedObjectId(null)
-      setSelectedClassId(nextLease.annotation.objects[0]?.class_id ?? bootstrap.data?.classes[0]?.id ?? null)
-      setTool(defaultTool(nextLease.annotation.task_type))
-      setSaveState('idle')
+      setSelectedClassId(recoveredDocument.objects[0]?.class_id ?? bootstrap.data?.classes[0]?.id ?? null)
+      setTool(defaultTool(recoveredDocument.task_type))
+      setSaveState(usingRecovery ? 'dirty' : 'idle')
       setLeaseLost(false)
-      setNotice(null)
+      setNotice(usingRecovery ? 'Recovered unsaved annotations from this browser tab.' : null)
       void queryClient.invalidateQueries({ queryKey: ['annotation-queue', projectId] })
     },
     onError: (error) => setNotice(error instanceof Error ? error.message : 'The image is no longer available.'),
@@ -287,6 +300,7 @@ export function AnnotationWorkspacePage() {
     try {
       setSaveState('saving')
       await completeAnnotation(lease.lease_id, document, token!)
+      clearRecovery(projectId, document.media_id)
       setLease(null)
       setCurrentDocument(null)
       setSelectedObjectId(null)
@@ -490,7 +504,9 @@ function defaultTool(taskType: AnnotationDocument['task_type']): AnnotationTool 
 }
 
 function isLeaseConflict(error: unknown) {
-  return error instanceof ApiError && (error.status === 409 || error.code === 'lease_expired')
+  return error instanceof ApiError && [
+    'lease_expired', 'lease_conflict', 'lease_not_owned', 'lease_revoked',
+  ].includes(error.code ?? '')
 }
 
 function isEditingText(target: EventTarget | null) {
