@@ -302,8 +302,6 @@ test harness before durable domain behavior is added.
 
 - Object-storage product, version, and local development strategy (required in
   Phase 3).
-- Whether refresh cookies can be first-party in the intended deployment
-  topology; if not, the approved credential-storage alternative (Phase 1).
 - Dataset and object retention rules after upload cancellation or project
   deletion (Phase 3).
 - Invitation identity: existing username only versus email/pending invitation
@@ -311,6 +309,10 @@ test harness before durable domain behavior is added.
 - The versioned command/result payload the later active-learning package will
   implement (Phase 6). Celery with Redis is the transport, not the domain API.
 
+### Decisions defined by phase
+- Whether refresh cookies can be first-party in the intended deployment
+  topology; if not, the approved credential-storage alternative (Phase 1).
+  - Decision: use a local reverse proxy (Nginx) to act as a unified local domain, so to the browser, everything looks like a standard, single-origin website. Refresh cookies can remain strictly first-party and SameSite-compatible.
 ## Deferred work
 
 Only the concrete active-learning and GPU/model implementations are deferred.
