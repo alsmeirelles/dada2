@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from dada_api.api.deps import RequireAnnotator
+from dada_api.api.deps import get_current_user
 from dada_api.models.user import User
 from dada_api.schemas.queue import (
     AnnotationSubmitRequest,
@@ -14,11 +14,16 @@ router = APIRouter()
 
 
 @router.get("/next", response_model=QueueItemResponse)
-async def get_next_queue_item(_: User = Depends(RequireAnnotator)) -> QueueItemResponse:
+async def get_next_queue_item(
+    _: User = Depends(get_current_user),
+) -> QueueItemResponse:
     """Lease the next image for annotation.
 
-    The storage and active-learning queue implementation will replace this
-    placeholder once image persistence is available.
+    Args:
+        _: Authenticated user.
+
+    Raises:
+        HTTPException: 501 until Phase 5 implements project-scoped leasing.
     """
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -29,9 +34,17 @@ async def get_next_queue_item(_: User = Depends(RequireAnnotator)) -> QueueItemR
 @router.post("/annotations", response_model=AnnotationSubmitResponse)
 async def submit_annotations(
     payload: AnnotationSubmitRequest,
-    _: User = Depends(RequireAnnotator),
+    _: User = Depends(get_current_user),
 ) -> AnnotationSubmitResponse:
-    """Submit completed COCO-style polygons for a leased image."""
+    """Submit completed COCO-style polygons for a leased image.
+
+    Args:
+        payload: Submitted annotations.
+        _: Authenticated user.
+
+    Returns:
+        The acceptance result.
+    """
     return AnnotationSubmitResponse(
         status="accepted",
         accepted_annotations=len(payload.annotations),

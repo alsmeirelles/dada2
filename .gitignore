@@ -20,3 +20,7 @@ venv/
 .idea/
 .agents/
 .codex/
+
+# Local assistant working context
+.claude/
+CLAUDE.md

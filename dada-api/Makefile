@@ -22,6 +22,7 @@ help:
 	  'infra-down       Stop local infrastructure without deleting volumes.' \
 	  'migrate          Upgrade the database explicitly to the migration head.' \
 	  'migration-check  Fail if ORM metadata differs from migration head.' \
+	  'bootstrap-admin  Create the initial administrator. Safe to rerun.' \
 	  'run              Run the API; does not migrate or seed the database.' \
 	  'openapi          Export the generated OpenAPI document.' \
 	  'lint             Run Ruff lint and formatting checks.' \
@@ -48,6 +49,10 @@ migrate:
 
 migration-check:
 	uv run alembic check
+
+.PHONY: bootstrap-admin
+bootstrap-admin:
+	uv run dada-api bootstrap-admin
 
 .PHONY: run
 run:

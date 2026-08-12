@@ -1,5 +1,7 @@
-"""Password hashing and JWT helpers."""
+"""Password hashing, refresh credential, and JWT helpers."""
 
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -9,6 +11,7 @@ from pwdlib import PasswordHash
 from dada_api.core.config import get_settings
 
 password_hasher = PasswordHash.recommended()
+REFRESH_TOKEN_BYTES = 48
 
 
 def hash_password(password: str) -> str:
@@ -19,6 +22,31 @@ def hash_password(password: str) -> str:
 def verify_password(plain_password: str, password_hash: str) -> bool:
     """Return whether a plaintext password matches a stored password hash."""
     return password_hasher.verify(plain_password, password_hash)
+
+
+def hash_refresh_token(token: str) -> str:
+    """Return the storage hash of a refresh token.
+
+    Refresh tokens are high-entropy random values, so a single SHA-256 pass is
+    enough to keep the database free of usable credentials.
+
+    Args:
+        token: Plaintext refresh token.
+
+    Returns:
+        The hexadecimal digest stored in the database.
+    """
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def create_refresh_token() -> tuple[str, str]:
+    """Create a refresh token and its storage hash.
+
+    Returns:
+        The plaintext token to send to the client and the hash to persist.
+    """
+    token = secrets.token_urlsafe(REFRESH_TOKEN_BYTES)
+    return token, hash_refresh_token(token)
 
 
 def create_access_token(subject: str, roles: list[str]) -> str:
