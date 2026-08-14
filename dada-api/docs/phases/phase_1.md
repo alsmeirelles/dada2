@@ -93,13 +93,19 @@ forma explícita. Valem uma confirmação.
    ação, mas não lista as ações. Apenas `revoke_lease` (owner e manager) está
    escrito na documentação. As outras seis ações foram derivadas do propósito
    evidente de cada papel.
+
+   - 1.1 Atualização: O mapeamento de ações por papel é definido no módulo dada_api.services.authorization.ROLE_ACTIONS 
 2. **Efeito do `replace-bootstrap-admin` sobre o administrador anterior.** A
    escolha foi não destrutiva: a conta antiga continua existindo e continua
    administradora. Retirar acesso de alguém é um ato deliberado e separado.
+
+   - 2.1 Atualização: ao executar replace-bootstrap-admin questionar o usuário se o administrador anterior deve ser removido e remover o status de administrador da conta.
 3. **Formato de `GET /api/v1/auth/me`.** O campo `role` foi substituído por
    `is_administrator`, consequência direta da decisão sobre autoridade global.
    O tipo correspondente no dada-app ficou desatualizado, embora nada quebre em
    execução porque o app não lê esse campo.
+
+   - 3.1 Atualização: a correção em dada-app deve ser realizada
 
 ## O que ficou de fora
 

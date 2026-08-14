@@ -143,7 +143,7 @@ scenarios pass through real HTTP requests.
 
 - Implement project list/create/read/versioned update and explicit activation.
 - Implement ordered class CRUD with color validation and optimistic versions.
-- Implement member listing, invitation, role change, and removal, including
+- Implement member listing, ~~invitation~~, role change, and removal, including
   protections for the sole owner.
 - Keep projects in `draft` until ingestion begins; reject activation until
   classes, media, and requested split sizes are valid.
@@ -313,6 +313,10 @@ test harness before durable domain behavior is added.
 - Whether refresh cookies can be first-party in the intended deployment
   topology; if not, the approved credential-storage alternative (Phase 1).
   - Decision: use a local reverse proxy (Nginx) to act as a unified local domain, so to the browser, everything looks like a standard, single-origin website. Refresh cookies can remain strictly first-party and SameSite-compatible.
+
+- Phase 2: Invitation identity: existing username only versus email/pending invitation
+  - Decision: user accounts should be created by the admin with all user data, skip email confirmation or invitation for now.
+
 ## Deferred work
 
 Only the concrete active-learning and GPU/model implementations are deferred.
