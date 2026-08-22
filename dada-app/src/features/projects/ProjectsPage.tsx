@@ -59,7 +59,7 @@ export function ProjectsPage() {
               <p>{project.description || 'No description'}</p>
               <dl>
                 <div><dt>Images</dt><dd>{project.media_count ?? '—'}</dd></div>
-                <div><dt>Annotated</dt><dd>{project.completed_annotations ?? '—'}</dd></div>
+                <div><dt>Resolved</dt><dd>{project.resolved_images ?? project.completed_annotations ?? '—'}</dd></div>
                 <div><dt>Batch</dt><dd>{project.iteration_batch_size}</dd></div>
               </dl>
               {(project.status === 'active' || project.status === 'ready') && (
@@ -70,6 +70,11 @@ export function ProjectsPage() {
               {(project.status === 'training' || project.status === 'completed' || project.status === 'failed') && (
                 <Link className="project-card__action" to={`/projects/${project.id}/activity`}>
                   View iteration activity
+                </Link>
+              )}
+              {(project.review_required_count ?? 0) > 0 && (
+                <Link className="project-card__action" to={`/projects/${project.id}/consensus`}>
+                  Review {project.review_required_count} consensus item{project.review_required_count === 1 ? '' : 's'}
                 </Link>
               )}
             </article>

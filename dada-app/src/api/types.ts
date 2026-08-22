@@ -1,10 +1,8 @@
-export type UserRole = 'admin' | 'annotator'
-
 export type User = {
   id: string
   username: string
   display_name: string
-  role: UserRole
+  is_administrator: boolean
   is_active: boolean
   created_at: string
 }

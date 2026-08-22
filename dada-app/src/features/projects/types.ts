@@ -23,6 +23,29 @@ export type Project = {
   updated_at: string
   media_count?: number
   completed_annotations?: number
+  resolved_images?: number
+  review_required_count?: number
+}
+
+export type AnnotationMode = 'single' | 'consensus'
+
+export type AnnotationPolicyDraft =
+  | { mode: 'single' }
+  | {
+      mode: 'consensus'
+      annotatorUsernames: string[]
+      resolver: 'majority_vote' | 'weighted_box_fusion' | 'staple'
+      reviewThreshold: number
+    }
+
+export type AnnotationPolicy = {
+  mode: AnnotationMode
+  version: number
+  annotator_ids: string[]
+  resolver?: string | null
+  resolver_version?: string | null
+  parameters?: Record<string, number | string | boolean>
+  review_thresholds?: Record<string, number>
 }
 
 export type ProjectClassInput = {
@@ -40,6 +63,7 @@ export type ProjectDraft = {
   testSetSize: number
   iterationBatchSize: number
   collaborators: string[]
+  annotationPolicy: AnnotationPolicyDraft
 }
 
 export type Page<T> = { items: T[]; next_cursor: string | null }

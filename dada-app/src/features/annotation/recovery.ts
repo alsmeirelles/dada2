@@ -5,10 +5,10 @@ export const RECOVERY_TTL_MS = 24 * 60 * 60 * 1_000
 
 type RecoverySnapshot = { savedAt: number; document: AnnotationDocument }
 
-export function saveRecovery(projectId: string, document: AnnotationDocument, now = Date.now()) {
+export function saveRecovery(projectId: string, assignmentId: string, document: AnnotationDocument, now = Date.now()) {
   try {
     sessionStorage.setItem(
-      key(projectId, document.media_id),
+      key(projectId, assignmentId),
       JSON.stringify({ savedAt: now, document } satisfies RecoverySnapshot),
     )
   } catch {
@@ -16,9 +16,9 @@ export function saveRecovery(projectId: string, document: AnnotationDocument, no
   }
 }
 
-export function loadRecovery(projectId: string, mediaId: string, now = Date.now()) {
+export function loadRecovery(projectId: string, assignmentId: string, mediaId: string, now = Date.now()) {
   try {
-    const storageKey = key(projectId, mediaId)
+    const storageKey = key(projectId, assignmentId)
     const raw = sessionStorage.getItem(storageKey)
     if (!raw) return null
     const snapshot = JSON.parse(raw) as Partial<RecoverySnapshot>
@@ -32,21 +32,21 @@ export function loadRecovery(projectId: string, mediaId: string, now = Date.now(
     }
     return snapshot.document
   } catch {
-    clearRecovery(projectId, mediaId)
+    clearRecovery(projectId, assignmentId)
     return null
   }
 }
 
-export function clearRecovery(projectId: string, mediaId: string) {
+export function clearRecovery(projectId: string, assignmentId: string) {
   try {
-    sessionStorage.removeItem(key(projectId, mediaId))
+    sessionStorage.removeItem(key(projectId, assignmentId))
   } catch {
     // A blocked storage API does not affect server persistence.
   }
 }
 
-function key(projectId: string, mediaId: string) {
-  return `${PREFIX}:${projectId}:${mediaId}`
+function key(projectId: string, assignmentId: string) {
+  return `${PREFIX}:${projectId}:${assignmentId}`
 }
 
 function isAnnotationDocument(

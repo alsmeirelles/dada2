@@ -13,6 +13,7 @@ must be available in DADA API for live operation. Implementation follows:
 - [System architecture](docs/architecture.md)
 - [Frontend/API contract](docs/api-contract.md)
 - [API implementation plan](../dada-api/docs/api-implementation-plan.md)
+- [Annotator disagreement adaptation plan](docs/annotator-disagreement-adaptation-plan.md)
 
 Product requirements are recorded in [DESCRIPTION.md](DESCRIPTION.md).
 

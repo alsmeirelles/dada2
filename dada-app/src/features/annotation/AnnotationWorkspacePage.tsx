@@ -105,9 +105,10 @@ export function AnnotationWorkspacePage() {
   useEffect(() => {
     const current = queue.data
     if (!iterationId || !current || closeCurrentIteration.isPending) return
-    const total = current.available_count + current.leased_count + current.completed_count
-    const signature = `${iterationId}:${current.available_count}:${current.leased_count}:${current.completed_count}`
-    if (total > 0 && current.completed_count === total && closeAttemptRef.current !== signature) {
+    const total = current.total_count ?? current.available_count + current.leased_count + current.completed_count
+    const resolved = current.resolved_count ?? current.completed_count
+    const signature = `${iterationId}:${current.available_count}:${current.leased_count}:${resolved}`
+    if (total > 0 && resolved === total && closeAttemptRef.current !== signature) {
       closeAttemptRef.current = signature
       closeCurrentIteration.mutate()
     }
@@ -124,9 +125,9 @@ export function AnnotationWorkspacePage() {
     if (undoStack.current.length > 100) undoStack.current.shift()
     redoStack.current = []
     setCurrentDocument(value)
-    saveRecovery(projectId, value)
+    if (lease) saveRecovery(projectId, currentAssignmentId(lease), value)
     setSaveState('dirty')
-  }, [projectId, setCurrentDocument])
+  }, [lease, projectId, setCurrentDocument])
 
   const undo = useCallback(() => {
     const previous = undoStack.current.pop()
@@ -165,7 +166,7 @@ export function AnnotationWorkspacePage() {
       if (latest === current) {
         setCurrentDocument(saved)
         setSaveState('saved')
-        clearRecovery(projectId, saved.media_id)
+        clearRecovery(projectId, currentAssignmentId(lease))
       } else if (latest) {
         setCurrentDocument({ ...latest, version: saved.version })
         setSaveState('dirty')
@@ -184,7 +185,7 @@ export function AnnotationWorkspacePage() {
   useEffect(() => {
     if (saveState !== 'dirty' || !lease || leaseLost) return
     const current = documentRef.current
-    if (current) saveRecovery(projectId, current)
+    if (current) saveRecovery(projectId, currentAssignmentId(lease), current)
     const timer = window.setTimeout(() => void saveNow().catch(() => undefined), 1_500)
     return () => window.clearTimeout(timer)
   }, [lease, leaseLost, projectId, saveNow, saveState])
@@ -205,9 +206,9 @@ export function AnnotationWorkspacePage() {
   }, [lease, leaseLost, token])
 
   const acquire = useMutation({
-    mutationFn: (mediaId: string | null) => acquireLease(projectId, iterationId!, mediaId, token!),
+    mutationFn: (assignmentId: string | null) => acquireLease(projectId, iterationId!, assignmentId, token!),
     onSuccess: (nextLease) => {
-      const recovered = loadRecovery(projectId, nextLease.media.id)
+      const recovered = loadRecovery(projectId, currentAssignmentId(nextLease), nextLease.media.id)
       const usingRecovery = Boolean(recovered && recovered.version >= nextLease.annotation.version)
       const recoveredDocument = usingRecovery && recovered
         ? { ...recovered, version: nextLease.annotation.version }
@@ -276,15 +277,15 @@ export function AnnotationWorkspacePage() {
   }, [changeDocument, selectedObjectId])
 
   async function openItem(item: QueueItem) {
-    if (item.status === 'leased' && item.media_id !== lease?.media.id) return
-    if (lease?.media.id === item.media_id) return
+    const itemAssignmentId = item.assignment_id ?? item.media_id
+    if (lease && currentAssignmentId(lease) === itemAssignmentId) return
     try {
       if (saveState === 'dirty') await saveNow()
       if (lease && !leaseLost) await releaseLease(lease.lease_id, token!)
       setLease(null)
       setCurrentDocument(null)
       setSelectedObjectId(null)
-      acquire.mutate(item.media_id)
+      acquire.mutate(itemAssignmentId)
     } catch {
       setNotice('Save the current annotation before changing images.')
     }
@@ -300,13 +301,13 @@ export function AnnotationWorkspacePage() {
     try {
       setSaveState('saving')
       await completeAnnotation(lease.lease_id, document, token!)
-      clearRecovery(projectId, document.media_id)
+      clearRecovery(projectId, currentAssignmentId(lease))
       setLease(null)
       setCurrentDocument(null)
       setSelectedObjectId(null)
       setSaveState('idle')
       await queue.refetch()
-      setNotice('Annotation completed. Choose the next available image.')
+      setNotice('Submission received. Resolution progress is updated by the API.')
     } catch (error) {
       setSaveState('error')
       if (isLeaseConflict(error)) setLeaseLost(true)
@@ -316,14 +317,14 @@ export function AnnotationWorkspacePage() {
 
   const navigateQueue = useCallback((direction: -1 | 1) => {
     if (!queue.data?.items.length) return
-    const navigable = queue.data.items.filter((item) => item.status !== 'leased' || item.media_id === lease?.media.id)
-    const currentIndex = navigable.findIndex((item) => item.media_id === lease?.media.id)
+    const navigable = queue.data.items.filter((item) => item.status !== 'submitted' && item.status !== 'completed')
+    const currentIndex = navigable.findIndex((item) => (item.assignment_id ?? item.media_id) === (lease ? currentAssignmentId(lease) : ''))
     const nextIndex = Math.min(navigable.length - 1, Math.max(0, currentIndex + direction))
     const item = navigable[nextIndex]
     if (item) void openItem(item)
     // openItem deliberately owns save/release sequencing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lease?.media.id, queue.data?.items])
+  }, [lease, queue.data?.items])
 
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
@@ -368,14 +369,15 @@ export function AnnotationWorkspacePage() {
   if (!bootstrap.data?.iteration) return <NoIteration projectName={bootstrap.data?.project.name ?? 'Project'} />
 
   const available = queue.data?.items.filter((item) => item.status === 'available') ?? []
-  const visibleQueueItems = queue.data?.items.filter((item) => item.status !== 'leased' || item.media_id === lease?.media.id) ?? []
+  const visibleQueueItems = queue.data?.items ?? []
+  const resolvedCount = queue.data?.resolved_count ?? queue.data?.completed_count ?? 0
 
   return (
     <main className={`annotation-workspace ${showClasses ? '' : 'annotation-workspace--classes-hidden'}`}>
       <header className="annotation-header">
         <Link to="/projects" aria-label="Back to projects"><ArrowLeft size={19} /></Link>
         <div><strong>{bootstrap.data.project.name}</strong><span>Iteration {bootstrap.data.iteration.number}</span></div>
-        <div className="iteration-progress"><span>{queue.data?.completed_count ?? 0} of {bootstrap.data.iteration.total_count} complete</span><progress max={bootstrap.data.iteration.total_count || 1} value={queue.data?.completed_count ?? 0} /></div>
+        <div className="iteration-progress"><span>{resolvedCount} of {bootstrap.data.iteration.total_count} images resolved</span><progress max={bootstrap.data.iteration.total_count || 1} value={resolvedCount} /></div>
         <SaveIndicator state={saveState} />
         <span className={`realtime-indicator realtime-indicator--${realtimeStatus}`} title={realtimeStatus === 'live' ? 'Live collaboration connected' : 'Polling for collaboration updates'}><Radio size={13} />{realtimeStatus === 'live' ? 'Live' : 'Polling'}</span>
         <Button variant="ghost" onClick={() => setShowShortcuts((value) => !value)} aria-label="Keyboard shortcuts"><CircleHelp size={19} /></Button>
@@ -383,15 +385,15 @@ export function AnnotationWorkspacePage() {
       </header>
 
       <aside className="annotation-queue" aria-label="Annotation queue">
-        <div className="queue-heading"><strong>Images</strong><span>{available.length} available · {queue.data?.leased_count ?? 0} in use</span></div>
+        <div className="queue-heading"><strong>My assignments</strong><span>{available.length} available · {queue.data?.leased_count ?? 0} in progress</span></div>
         <div className="queue-list">
           {queue.isLoading && <p className="queue-message">Loading queue…</p>}
           {visibleQueueItems.map((item, index) => (
-            <button key={item.media_id} className={`queue-item queue-item--${item.status} ${lease?.media.id === item.media_id ? 'selected' : ''}`} onClick={() => void openItem(item)} disabled={item.status === 'leased' && lease?.media.id !== item.media_id}>
+            <button key={item.assignment_id ?? item.media_id} className={`queue-item queue-item--${item.status} ${lease && currentAssignmentId(lease) === (item.assignment_id ?? item.media_id) ? 'selected' : ''}`} onClick={() => void openItem(item)} disabled={item.status === 'submitted' || item.status === 'completed'}>
               <span className="queue-thumb">{item.thumbnail_url ? <img src={item.thumbnail_url} alt="" /> : index + 1}</span>
-              <span><strong>{item.relative_path.split('/').at(-1)}</strong><small>{item.status === 'leased' ? item.leased_by?.display_name ?? 'In use' : item.status}</small></span>
+              <span><strong>{item.relative_path.split('/').at(-1)}</strong><small>{item.status === 'leased' ? 'In progress' : item.status}</small></span>
               {item.status === 'leased' && <Lock size={13} />}
-              {item.status === 'completed' && <Check size={14} />}
+              {(item.status === 'completed' || item.status === 'submitted') && <Check size={14} />}
             </button>
           ))}
         </div>
@@ -469,6 +471,10 @@ export function AnnotationWorkspacePage() {
       {showShortcuts && <ShortcutPanel onClose={() => setShowShortcuts(false)} />}
     </main>
   )
+}
+
+function currentAssignmentId(lease: Lease) {
+  return lease.assignment_id ?? lease.media.id
 }
 
 function SaveIndicator({ state }: { state: SaveState }) {

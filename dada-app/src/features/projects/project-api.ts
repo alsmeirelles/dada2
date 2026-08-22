@@ -1,7 +1,7 @@
 import { apiRequest } from '../../api/client'
 import { config } from '../../config/env'
 import type { LocalImage } from './ingest'
-import type { Page, Project, ProjectDraft } from './types'
+import type { AnnotationPolicy, Page, Project, ProjectDraft } from './types'
 
 type UploadDisposition = 'upload_required' | 'already_present' | 'rejected'
 type UploadItem = {
@@ -15,6 +15,8 @@ type UploadSession = {
   items: UploadItem[]
   error?: { message: string }
 }
+
+type ProjectMember = { user_id: string; username: string; role: string }
 
 export async function listProjects(token: string): Promise<Page<Project>> {
   return apiRequest('/api/v1/projects', { token })
@@ -50,12 +52,31 @@ export async function createProjectWithDataset(
   }
 
   onProgress(12, 'Inviting collaborators…')
-  for (const username of draft.collaborators) {
-    await apiRequest(`/api/v1/projects/${project.id}/members`, {
+  const members = await Promise.all(draft.collaborators.map(async (username) => {
+    return apiRequest<ProjectMember>(`/api/v1/projects/${project.id}/members`, {
       method: 'POST', token,
       body: { username, role: 'annotator' },
     })
-  }
+  }))
+
+  onProgress(14, 'Saving annotation strategy…')
+  const memberIds = new Map(members.map((member) => [member.username, member.user_id]))
+  const policy = draft.annotationPolicy.mode === 'single'
+    ? { mode: 'single', annotator_ids: [] }
+    : {
+        mode: 'consensus',
+        annotator_ids: draft.annotationPolicy.annotatorUsernames.map((username) => {
+          const userId = memberIds.get(username)
+          if (!userId) throw new Error(`The API did not return a member ID for ${username}.`)
+          return userId
+        }),
+        resolver: draft.annotationPolicy.resolver,
+        parameters: {},
+        review_thresholds: { agreement: draft.annotationPolicy.reviewThreshold },
+      }
+  await apiRequest<AnnotationPolicy>(`/api/v1/projects/${project.id}/annotation-policy`, {
+    method: 'PUT', token, headers: idempotencyHeaders(), body: policy,
+  })
 
   onProgress(15, 'Preparing upload…')
   const upload = await apiRequest<UploadSession>(
