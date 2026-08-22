@@ -38,6 +38,18 @@ export const router = createBrowserRouter([
               Component: (await import('../features/annotation/ProjectActivityPage')).ProjectActivityPage,
             }),
           },
+          {
+            path: '/projects/:projectId/consensus',
+            lazy: async () => ({
+              Component: (await import('../features/consensus/ConsensusReviewQueuePage')).ConsensusReviewQueuePage,
+            }),
+          },
+          {
+            path: '/projects/:projectId/consensus/:batchItemId',
+            lazy: async () => ({
+              Component: (await import('../features/consensus/ConsensusReviewPage')).ConsensusReviewPage,
+            }),
+          },
         ],
       },
     ],

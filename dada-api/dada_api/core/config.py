@@ -54,7 +54,11 @@ class Settings(BaseSettings):
     )
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
+    refresh_token_expire_days: int = Field(default=14, gt=0)
+    refresh_cookie_secure: bool = True
+    refresh_cookie_samesite: str = "lax"
     seed_admin_username: str | None = None
+    seed_admin_display_name: str | None = None
     seed_admin_password: SecretStr | None = Field(default=None, repr=False)
     seed_service_username: str | None = None
     seed_service_password: SecretStr | None = Field(default=None, repr=False)
@@ -107,6 +111,15 @@ class Settings(BaseSettings):
         if self.cursor_secret_key is not None:
             return self.cursor_secret_key.get_secret_value()
         return self.jwt_secret_key.get_secret_value()
+
+    @field_validator("refresh_cookie_samesite")
+    @classmethod
+    def normalize_cookie_samesite(cls, value: str) -> str:
+        """Normalize and validate the refresh cookie SameSite policy."""
+        normalized = value.strip().lower()
+        if normalized not in {"lax", "strict", "none"}:
+            raise ValueError("refresh_cookie_samesite must be lax, strict, or none")
+        return normalized
 
     @field_validator("environment")
     @classmethod

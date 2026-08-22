@@ -561,7 +561,7 @@
         "type": "object"
       },
       "UserCreate": {
-        "description": "Admin request to create a user.",
+        "description": "Administrator request to create a user.",
         "properties": {
           "display_name": {
             "maxLength": 120,
@@ -574,15 +574,16 @@
             "title": "Is Active",
             "type": "boolean"
           },
+          "is_administrator": {
+            "default": false,
+            "title": "Is Administrator",
+            "type": "boolean"
+          },
           "password": {
             "maxLength": 128,
             "minLength": 8,
             "title": "Password",
             "type": "string"
-          },
-          "role": {
-            "$ref": "#/components/schemas/UserRole",
-            "default": "annotator"
           },
           "username": {
             "maxLength": 64,
@@ -619,8 +620,9 @@
             "title": "Is Active",
             "type": "boolean"
           },
-          "role": {
-            "$ref": "#/components/schemas/UserRole"
+          "is_administrator": {
+            "title": "Is Administrator",
+            "type": "boolean"
           },
           "username": {
             "title": "Username",
@@ -631,21 +633,12 @@
           "id",
           "username",
           "display_name",
-          "role",
+          "is_administrator",
           "is_active",
           "created_at"
         ],
         "title": "UserRead",
         "type": "object"
-      },
-      "UserRole": {
-        "description": "Supported DADA API roles.",
-        "enum": [
-          "annotator",
-          "admin"
-        ],
-        "title": "UserRole",
-        "type": "string"
       }
     },
     "securitySchemes": {
@@ -663,7 +656,7 @@
   "paths": {
     "/api/v1/admin/status": {
       "get": {
-        "description": "Return an admin-only operational status response.",
+        "description": "Return an administrator-only operational status response.\n\nArgs:\n    _: Authenticated administrator.\n\nReturns:\n    A static status payload confirming administrator authority.",
         "operationId": "read_admin_status_api_v1_admin_status_get",
         "responses": {
           "200": {
@@ -732,9 +725,64 @@
         ]
       }
     },
+    "/api/v1/auth/logout": {
+      "post": {
+        "description": "Revoke the presented refresh session and clear its cookie.\n\nArgs:\n    request: Request carrying the refresh cookie.\n    response: Response clearing the cookie.\n    session: Active database session.",
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/me": {
       "get": {
-        "description": "Return the currently authenticated user.",
+        "description": "Return the currently authenticated user.\n\nArgs:\n    user: Authenticated user.\n\nReturns:\n    The authenticated user.",
         "operationId": "read_current_user_api_v1_auth_me_get",
         "responses": {
           "200": {
@@ -799,9 +847,71 @@
         ]
       }
     },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "description": "Rotate the refresh credential and issue a fresh access token.\n\nArgs:\n    request: Request carrying the refresh cookie.\n    response: Response carrying the rotated cookie.\n    session: Active database session.\n\nReturns:\n    A new bearer access token.\n\nRaises:\n    ApiError: 401 when no refresh credential is present.",
+        "operationId": "refresh_access_token_api_v1_auth_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Refresh Access Token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/token": {
       "post": {
-        "description": "Authenticate a user and return a bearer token.",
+        "description": "Authenticate a user, returning a bearer token and a refresh cookie.\n\nArgs:\n    credentials: Supplied username and password.\n    response: Response carrying the refresh cookie.\n    session: Active database session.\n\nReturns:\n    The bearer access token.\n\nRaises:\n    HTTPException: 401 when the credentials are invalid.",
         "operationId": "login_for_access_token_api_v1_auth_token_post",
         "requestBody": {
           "content": {
@@ -935,7 +1045,7 @@
     },
     "/api/v1/inference/sam-predict": {
       "post": {
-        "description": "Run SAM prompted segmentation for an assigned image.",
+        "description": "Run SAM prompted segmentation for an assigned image.\n\nArgs:\n    _: Prompt payload.\n    __: Authenticated user.\n\nRaises:\n    HTTPException: 501 until Phase 6 implements the assisted segmentation\n        contract and lease authorization.",
         "operationId": "predict_sam_polygons_api_v1_inference_sam_predict_post",
         "requestBody": {
           "content": {
@@ -1012,7 +1122,7 @@
     },
     "/api/v1/projects": {
       "get": {
-        "description": "Expose the future project-list contract.",
+        "description": "Expose the future project-list contract.\n\nRaises:\n    HTTPException: 501 until Phase 2 implements project persistence.",
         "operationId": "list_projects_api_v1_projects_get",
         "responses": {
           "200": {
@@ -1072,7 +1182,7 @@
         ]
       },
       "post": {
-        "description": "Expose the future project-create contract.",
+        "description": "Expose the future project-create contract.\n\nRaises:\n    HTTPException: 501 until Phase 2 implements project persistence.",
         "operationId": "create_project_api_v1_projects_post",
         "requestBody": {
           "content": {
@@ -1142,9 +1252,87 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}": {
+      "get": {
+        "description": "Return one project when the caller holds a role permitting reads.\n\nArgs:\n    project: Project resolved and authorized by the dependency.\n\nReturns:\n    The authorized project.",
+        "operationId": "read_project_api_v1_projects__project_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
     "/api/v1/queue/annotations": {
       "post": {
-        "description": "Submit completed COCO-style polygons for a leased image.",
+        "description": "Submit completed COCO-style polygons for a leased image.\n\nArgs:\n    payload: Submitted annotations.\n    _: Authenticated user.\n\nReturns:\n    The acceptance result.",
         "operationId": "submit_annotations_api_v1_queue_annotations_post",
         "requestBody": {
           "content": {
@@ -1221,7 +1409,7 @@
     },
     "/api/v1/queue/next": {
       "get": {
-        "description": "Lease the next image for annotation.\n\nThe storage and active-learning queue implementation will replace this\nplaceholder once image persistence is available.",
+        "description": "Lease the next image for annotation.\n\nArgs:\n    _: Authenticated user.\n\nRaises:\n    HTTPException: 501 until Phase 5 implements project-scoped leasing.",
         "operationId": "get_next_queue_item_api_v1_queue_next_get",
         "responses": {
           "200": {
@@ -1288,7 +1476,7 @@
     },
     "/api/v1/users/": {
       "get": {
-        "description": "List users. Admin-only.",
+        "description": "List users. Administrators only.\n\nArgs:\n    _: Authenticated administrator.\n    session: Active database session.\n\nReturns:\n    Every user ordered by username.",
         "operationId": "list_users_api_v1_users__get",
         "responses": {
           "200": {
@@ -1357,7 +1545,7 @@
         ]
       },
       "post": {
-        "description": "Create a user. Admin-only.",
+        "description": "Create a user. Administrators only.\n\nArgs:\n    user_create: Validated creation request.\n    _: Authenticated administrator.\n    session: Active database session.\n\nReturns:\n    The created user.\n\nRaises:\n    HTTPException: 409 when the username is already taken.",
         "operationId": "create_api_user_api_v1_users__post",
         "requestBody": {
           "content": {

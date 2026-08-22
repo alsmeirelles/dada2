@@ -7,8 +7,12 @@ contract.
 Phase 0 provides the FastAPI application foundation, PostgreSQL/Alembic
 persistence boundary, Redis connectivity, health/readiness probes, structured
 errors and tracing, CORS, durable idempotency, capability discovery, and the
-generated OpenAPI artifact. Active-learning algorithms are deferred behind a
-later worker adapter.
+generated OpenAPI artifact.
+
+Phase 1 adds the identity layer: an idempotent administrator bootstrap command,
+refresh-token rotation with replay detection, logout and revocation, and
+centralized project-role authorization. Active-learning algorithms are deferred
+behind a later worker adapter.
 
 See:
 
@@ -23,8 +27,13 @@ cp .env.example .env
 make sync-dev
 make infra-up
 make migrate
+make bootstrap-admin
 make run
 ```
 
 The default API URL is `http://localhost:8000`; liveness and readiness are
 available at `/health` and `/ready`.
+
+A migrated database has no users and no route that can create the first one, so
+`make bootstrap-admin` is required before the first login. It is idempotent and
+safe to rerun.

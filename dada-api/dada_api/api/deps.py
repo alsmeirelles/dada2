@@ -1,6 +1,7 @@
 """FastAPI dependencies for authentication and authorization."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -8,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dada_api.core.security import decode_access_token
 from dada_api.db.session import get_session
-from dada_api.models.user import User, UserRole
+from dada_api.models.project import Project
+from dada_api.models.user import User
+from dada_api.services.authorization import ProjectAction, authorize_project_action
 from dada_api.services.users import get_user_by_username
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -18,7 +21,19 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    """Resolve the authenticated user from the bearer token."""
+    """Resolve the authenticated user from the bearer token.
+
+    Args:
+        credentials: Bearer credentials supplied by the client.
+        session: Active database session.
+
+    Returns:
+        The authenticated, active user.
+
+    Raises:
+        HTTPException: 401 when credentials are missing, invalid, or belong to
+            an unknown or deactivated user.
+    """
     unauthorized_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Authentication credentials were not provided or are invalid.",
@@ -40,21 +55,44 @@ async def get_current_user(
     return user
 
 
-def require_roles(*allowed_roles: UserRole) -> Callable[[User], User]:
-    """Build a dependency that requires any one of the provided roles."""
-    allowed_role_set = set(allowed_roles)
+async def require_administrator(user: User = Depends(get_current_user)) -> User:
+    """Return the current user when they hold global administrator authority.
 
-    async def dependency(user: User = Depends(get_current_user)) -> User:
-        """Return the current user when role authorization passes."""
-        if user.role not in allowed_role_set:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="The authenticated user is not allowed to perform this action.",
-            )
-        return user
+    Args:
+        user: Authenticated user.
+
+    Returns:
+        The authenticated administrator.
+
+    Raises:
+        HTTPException: 403 when the user is not a global administrator.
+    """
+    if not user.is_administrator:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The authenticated user is not allowed to perform this action.",
+        )
+    return user
+
+
+def require_project_action(
+    action: ProjectAction,
+) -> Callable[..., Coroutine[Any, Any, Project]]:
+    """Build a dependency authorizing one project-scoped action.
+
+    Args:
+        action: Operation the route performs.
+
+    Returns:
+        A dependency returning the authorized project.
+    """
+
+    async def dependency(
+        project_id: str,
+        user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session),
+    ) -> Project:
+        """Return the project when the caller may perform the action."""
+        return await authorize_project_action(session, user, project_id, action)
 
     return dependency
-
-
-RequireAnnotator = require_roles(UserRole.annotator, UserRole.admin)
-RequireAdmin = require_roles(UserRole.admin)

@@ -29,7 +29,7 @@ export function ProjectActivityPage() {
     enabled: Boolean(projectId && token),
     refetchInterval: (query) => {
       const status = query.state.data?.iterations.current_iteration?.status
-      return status === 'training' || status === 'closing' || status === 'preparing' ? 5_000 : 30_000
+      return status === 'training' || status === 'closing' || status === 'consolidating' || status === 'preparing' ? 5_000 : 30_000
     },
   })
   const handleEvent = useCallback(() => {
@@ -98,6 +98,9 @@ function CurrentIteration({ projectId, iteration }: { projectId: string; iterati
   const progress = Math.max(0, Math.min(100, iteration.training_progress ?? 0))
   const annotating = iteration.status === 'annotating' || iteration.status === 'ready'
   const failed = iteration.status === 'failed'
+  const resolved = iteration.resolved_count ?? iteration.completed_count
+  const submitted = iteration.submitted_assignment_count ?? iteration.completed_count
+  const assignments = iteration.total_assignment_count ?? iteration.total_count
 
   return (
     <section className={`activity-hero activity-hero--${iteration.status}`}>
@@ -107,11 +110,12 @@ function CurrentIteration({ projectId, iteration }: { projectId: string; iterati
         <h2>{iterationTitle(iteration.status)}</h2>
         <p>{iterationDescription(iteration.status)}</p>
         {iteration.status === 'training' && <div className="training-progress"><div><span>Model training</span><strong>{Math.round(progress)}%</strong></div><progress max="100" value={progress} /></div>}
-        <div className="iteration-counts"><span><strong>{iteration.completed_count}</strong> completed</span><span><strong>{iteration.available_count}</strong> available</span><span><strong>{iteration.leased_count}</strong> in progress</span></div>
+        <div className="iteration-counts"><span><strong>{submitted} / {assignments}</strong> submissions</span><span><strong>{resolved} / {iteration.total_count}</strong> resolved images</span><span><strong>{iteration.available_count}</strong> available</span><span><strong>{iteration.leased_count}</strong> in progress</span></div>
       </div>
       <div className="activity-hero__aside">
         {(iteration.status === 'training' || iteration.status === 'preparing' || iteration.status === 'closing') && <div className="eta"><Clock3 /><span>Estimated time</span><strong>{eta === null ? 'Calculating…' : formatDuration(eta)}</strong></div>}
         {annotating && <Link to={`/projects/${projectId}/annotate`} className="button button--primary">Open annotation workspace</Link>}
+        {(iteration.review_required_count ?? 0) > 0 && <Link to={`/projects/${projectId}/consensus`} className="button button--secondary">Review {iteration.review_required_count} consensus item{iteration.review_required_count === 1 ? '' : 's'}</Link>}
         {failed && <p>Review the API worker logs or retry from project administration.</p>}
       </div>
     </section>
@@ -145,11 +149,11 @@ function useCountdown(initial?: number | null) {
 }
 
 function iterationTitle(status: Iteration['status']) {
-  return { preparing: 'Preparing the next batch', annotating: 'Annotation in progress', closing: 'Finalizing annotations', training: 'Training the next model', ready: 'Ready for annotation', failed: 'Iteration needs attention' }[status]
+  return { preparing: 'Preparing the next batch', annotating: 'Annotation in progress', consolidating: 'Resolving annotator disagreement', closing: 'Finalizing annotations', training: 'Training the next model', ready: 'Ready for annotation', failed: 'Iteration needs attention' }[status]
 }
 
 function iterationDescription(status: Iteration['status']) {
-  return { preparing: 'The API is selecting the most informative images for the next cycle.', annotating: 'Annotators can claim available images from the shared queue.', closing: 'The API is validating the completed batch before training.', training: 'GPU workers are training and evaluating the next model.', ready: 'A new batch of images is available for annotation.', failed: 'The API reported a processing failure for this iteration.' }[status]
+  return { preparing: 'The API is selecting the most informative images for the next cycle.', annotating: 'Annotators can claim their independent assignments from the queue.', consolidating: 'The API is measuring disagreement and resolving submitted annotations.', closing: 'The API is validating resolved images before training.', training: 'GPU workers are training and evaluating the next model.', ready: 'A new batch of images is available for annotation.', failed: 'The API reported a processing failure for this iteration.' }[status]
 }
 
 function formatDuration(seconds: number) {

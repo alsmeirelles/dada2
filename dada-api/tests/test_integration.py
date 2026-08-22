@@ -11,7 +11,7 @@ from dada_api.db.migrations import current_revision, migration_head
 from dada_api.db.session import async_session_factory, engine
 from dada_api.main import app
 from dada_api.models.idempotency import IdempotencyRecord
-from dada_api.models.user import User, UserRole
+from dada_api.models.user import User
 
 pytestmark = pytest.mark.skipif(
     os.getenv("DADA_RUN_INTEGRATION") != "1",
@@ -42,13 +42,13 @@ async def test_migrations_and_readiness() -> None:
             username="phase0-integration",
             display_name="Phase 0 Integration",
             password_hash="not-used-by-this-test",
-            role=UserRole.annotator,
+            is_administrator=False,
             is_active=True,
         )
         session.add(user)
         await session.commit()
 
-    token = create_access_token("phase0-integration", ["annotator"])
+    token = create_access_token("phase0-integration", [])
     headers = {
         "Authorization": f"Bearer {token}",
         "Idempotency-Key": "phase0-idempotency-test",

@@ -31,14 +31,14 @@ export function getQueue(projectId: string, iterationId: string, token: string) 
 export function acquireLease(
   projectId: string,
   iterationId: string,
-  mediaId: string | null,
+  assignmentId: string | null,
   token: string,
 ) {
   return apiRequest<Lease>(
     `/api/v1/projects/${projectId}/iterations/${iterationId}/leases`,
     {
       method: 'POST', token,
-      body: mediaId ? { media_id: mediaId } : { selection: 'next' },
+      body: assignmentId ? { assignment_id: assignmentId } : { selection: 'next' },
     },
   )
 }
