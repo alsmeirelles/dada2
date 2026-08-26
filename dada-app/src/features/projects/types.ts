@@ -34,7 +34,7 @@ export type AnnotationPolicyDraft =
   | {
       mode: 'consensus'
       annotatorUsernames: string[]
-      resolver: 'majority_vote' | 'weighted_box_fusion' | 'staple'
+      resolver: string
       reviewThreshold: number
     }
 

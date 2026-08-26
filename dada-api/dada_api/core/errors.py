@@ -1,6 +1,7 @@
 """Application exceptions and common FastAPI exception handlers."""
 
 import logging
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -56,6 +57,27 @@ def error_response(
     )
 
 
+def redact_validation_errors(
+    errors: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drop the submitted value from validation errors before returning them.
+
+    Pydantic reports the rejected value under ``input``. Echoing it would leak
+    passwords and other credentials into the response body, which the
+    idempotency middleware then persists.
+
+    Args:
+        errors: Validation errors reported by Pydantic.
+
+    Returns:
+        The same errors without their ``input`` entries.
+    """
+    return [
+        {key: value for key, value in error.items() if key != "input"}
+        for error in errors
+    ]
+
+
 def install_exception_handlers(app: FastAPI) -> None:
     """Install handlers that normalize framework and application errors."""
 
@@ -77,7 +99,7 @@ def install_exception_handlers(app: FastAPI) -> None:
             422,
             "validation_error",
             "The request did not pass validation.",
-            details={"errors": error.errors()},
+            details={"errors": redact_validation_errors(error.errors())},
         )
 
     @app.exception_handler(StarletteHTTPException)

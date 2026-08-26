@@ -1,7 +1,20 @@
 import { apiRequest } from '../../api/client'
 import { config } from '../../config/env'
 import type { LocalImage } from './ingest'
-import type { AnnotationPolicy, Page, Project, ProjectDraft } from './types'
+import {
+  clearSetup,
+  loadSetup,
+  saveSetup,
+  stageIndex,
+  type SetupStage,
+} from './setup-recovery'
+import type {
+  AnnotationPolicy,
+  Page,
+  Project,
+  ProjectClassInput,
+  ProjectDraft,
+} from './types'
 
 type UploadDisposition = 'upload_required' | 'already_present' | 'rejected'
 type UploadItem = {
@@ -16,10 +29,72 @@ type UploadSession = {
   error?: { message: string }
 }
 
-type ProjectMember = { user_id: string; username: string; role: string }
+export type ProjectMember = {
+  user_id: string
+  username: string
+  display_name: string
+  role: string
+}
 
 export async function listProjects(token: string): Promise<Page<Project>> {
   return apiRequest('/api/v1/projects', { token })
+}
+
+export function listMembers(projectId: string, token: string) {
+  return apiRequest<Page<ProjectMember>>(`/api/v1/projects/${projectId}/members`, {
+    token,
+  })
+}
+
+export function getAnnotationPolicy(projectId: string, token: string) {
+  return apiRequest<AnnotationPolicy>(
+    `/api/v1/projects/${projectId}/annotation-policy`,
+    { token },
+  )
+}
+
+export function saveAnnotationPolicy(
+  projectId: string,
+  body: Record<string, unknown>,
+  token: string,
+) {
+  return apiRequest<AnnotationPolicy>(
+    `/api/v1/projects/${projectId}/annotation-policy`,
+    { method: 'PUT', token, headers: idempotencyHeaders(), body },
+  )
+}
+
+export function resolveAnnotatorIds(
+  members: ProjectMember[],
+  usernames: string[],
+): string[] {
+  const byUsername = new Map(members.map((member) => [member.username, member.user_id]))
+  return usernames.map((username) => {
+    const userId = byUsername.get(username)
+    if (!userId) throw new Error(`${username} is not a project member.`)
+    return userId
+  })
+}
+
+export function buildPolicyBody(
+  draft: ProjectDraft,
+  members: ProjectMember[],
+  version: number,
+): Record<string, unknown> {
+  if (draft.annotationPolicy.mode === 'single') {
+    return { mode: 'single', annotator_ids: [], version }
+  }
+  return {
+    mode: 'consensus',
+    annotator_ids: resolveAnnotatorIds(
+      members,
+      draft.annotationPolicy.annotatorUsernames,
+    ),
+    resolver: draft.annotationPolicy.resolver,
+    parameters: {},
+    review_thresholds: { agreement: draft.annotationPolicy.reviewThreshold },
+    version,
+  }
 }
 
 export async function createProjectWithDataset(
@@ -28,55 +103,86 @@ export async function createProjectWithDataset(
   token: string,
   onProgress: (progress: number, message: string) => void,
 ): Promise<Project> {
-  onProgress(2, 'Creating project…')
-  const project = await apiRequest<Project>('/api/v1/projects', {
-    method: 'POST',
-    token,
-    headers: idempotencyHeaders(),
-    body: {
-      name: draft.name.trim(),
-      description: draft.description.trim() || null,
-      task_type: draft.taskType,
-      initial_training_size: draft.initialTrainingSize,
-      test_set_size: draft.testSetSize,
-      iteration_batch_size: draft.iterationBatchSize,
-    },
-  })
+  const snapshot = loadSetup()
+  let project: Project
+  let stage: SetupStage
 
-  onProgress(8, 'Saving classes…')
-  for (const [index, item] of draft.classes.entries()) {
-    await apiRequest(`/api/v1/projects/${project.id}/classes`, {
-      method: 'POST', token,
-      body: { name: item.name.trim(), color: item.color, display_order: index },
+  if (snapshot) {
+    onProgress(2, 'Resuming project setup…')
+    project = await apiRequest<Project>(`/api/v1/projects/${snapshot.projectId}`, {
+      token,
     })
+    stage = snapshot.stage
+  } else {
+    onProgress(2, 'Creating project…')
+    project = await apiRequest<Project>('/api/v1/projects', {
+      method: 'POST',
+      token,
+      headers: idempotencyHeaders(),
+      body: {
+        name: draft.name.trim(),
+        description: draft.description.trim() || null,
+        task_type: draft.taskType,
+        initial_training_size: draft.initialTrainingSize,
+        test_set_size: draft.testSetSize,
+        iteration_batch_size: draft.iterationBatchSize,
+      },
+    })
+    stage = 'created'
+    saveSetup({ projectId: project.id, stage })
   }
 
-  onProgress(12, 'Inviting collaborators…')
-  const members = await Promise.all(draft.collaborators.map(async (username) => {
-    return apiRequest<ProjectMember>(`/api/v1/projects/${project.id}/members`, {
-      method: 'POST', token,
-      body: { username, role: 'annotator' },
-    })
-  }))
+  const pending = (target: SetupStage) => stageIndex(stage) < stageIndex(target)
+  const complete = (target: SetupStage) => {
+    stage = target
+    saveSetup({ projectId: project.id, stage })
+  }
 
-  onProgress(14, 'Saving annotation strategy…')
-  const memberIds = new Map(members.map((member) => [member.username, member.user_id]))
-  const policy = draft.annotationPolicy.mode === 'single'
-    ? { mode: 'single', annotator_ids: [] }
-    : {
-        mode: 'consensus',
-        annotator_ids: draft.annotationPolicy.annotatorUsernames.map((username) => {
-          const userId = memberIds.get(username)
-          if (!userId) throw new Error(`The API did not return a member ID for ${username}.`)
-          return userId
-        }),
-        resolver: draft.annotationPolicy.resolver,
-        parameters: {},
-        review_thresholds: { agreement: draft.annotationPolicy.reviewThreshold },
-      }
-  await apiRequest<AnnotationPolicy>(`/api/v1/projects/${project.id}/annotation-policy`, {
-    method: 'PUT', token, headers: idempotencyHeaders(), body: policy,
-  })
+  if (pending('classes')) {
+    onProgress(8, 'Saving classes…')
+    const existing = await apiRequest<Page<ProjectClassInput>>(
+      `/api/v1/projects/${project.id}/classes`,
+      { token },
+    )
+    const saved = new Set(existing.items.map((item) => item.name))
+    for (const [index, item] of draft.classes.entries()) {
+      const name = item.name.trim()
+      if (saved.has(name)) continue
+      await apiRequest(`/api/v1/projects/${project.id}/classes`, {
+        method: 'POST', token,
+        body: { name, color: item.color, display_order: index },
+      })
+    }
+    complete('classes')
+  }
+
+  if (pending('members')) {
+    onProgress(12, 'Adding collaborators…')
+    const existing = await listMembers(project.id, token)
+    const known = new Set(existing.items.map((member) => member.username))
+    for (const username of draft.collaborators) {
+      if (known.has(username)) continue
+      await apiRequest<ProjectMember>(`/api/v1/projects/${project.id}/members`, {
+        method: 'POST', token,
+        body: { username, role: 'annotator' },
+      })
+    }
+    complete('members')
+  }
+
+  if (pending('policy')) {
+    onProgress(14, 'Saving annotation strategy…')
+    const [current, members] = await Promise.all([
+      getAnnotationPolicy(project.id, token),
+      listMembers(project.id, token),
+    ])
+    await saveAnnotationPolicy(
+      project.id,
+      buildPolicyBody(draft, members.items, current.version),
+      token,
+    )
+    complete('policy')
+  }
 
   onProgress(15, 'Preparing upload…')
   const upload = await apiRequest<UploadSession>(
@@ -115,11 +221,14 @@ export async function createProjectWithDataset(
     method: 'POST', token, headers: idempotencyHeaders(), body: {},
   })
   await waitForUploadProcessing(upload.id, token, (message) => onProgress(96, message))
+  complete('uploaded')
 
   onProgress(98, 'Activating project…')
   const activated = await apiRequest<Project>(`/api/v1/projects/${project.id}/activate`, {
     method: 'POST', token, headers: idempotencyHeaders(), body: {},
   })
+  complete('activated')
+  clearSetup()
   onProgress(100, 'Project ready')
   return activated
 }

@@ -93,20 +93,25 @@ async def replace_bootstrap_administrator(
     username: str,
     display_name: str,
     password: str,
-) -> User:
+    *,
+    demote_previous: bool = False,
+) -> tuple[User, str | None]:
     """Point the bootstrap record at a newly created administrator.
 
-    The previous administrator keeps its own account and authority; revoking
-    access is a separate, deliberate act.
+    The previous administrator keeps its account either way. Withdrawing its
+    global authority is deliberate, so the caller must ask for it.
 
     Args:
         session: Active database session.
         username: Username for the new bootstrap administrator.
         display_name: Human-readable name.
         password: Plaintext password, hashed before persistence.
+        demote_previous: Whether to clear the previous administrator's global
+            administrator flag.
 
     Returns:
-        The new bootstrap administrator.
+        The new bootstrap administrator and the username of the account that
+        lost its administrator flag, if any.
 
     Raises:
         BootstrapError: When no bootstrap administrator exists yet, or when the
@@ -123,7 +128,13 @@ async def replace_bootstrap_administrator(
             f"User {username!r} already exists. Choose a different username."
         )
 
+    previous = await session.get(User, record.user_id)
+    demoted: str | None = None
+    if demote_previous and previous is not None:
+        previous.is_administrator = False
+        demoted = previous.username
+
     user = await _create_administrator(session, username, display_name, password)
     record.user_id = user.id
     await session.commit()
-    return user
+    return user, demoted

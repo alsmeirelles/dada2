@@ -4,9 +4,12 @@ from fastapi import APIRouter
 
 from dada_api.api.v1.endpoints import (
     admin,
+    annotation_policy,
     auth,
     capabilities,
     inference,
+    project_classes,
+    project_members,
     projects,
     queue,
     users,
@@ -15,6 +18,9 @@ from dada_api.api.v1.endpoints import (
 router = APIRouter()
 router.include_router(capabilities.router, tags=["capabilities"])
 router.include_router(projects.router, tags=["projects"])
+router.include_router(project_classes.router, tags=["classes"])
+router.include_router(project_members.router, tags=["members"])
+router.include_router(annotation_policy.router, tags=["annotation-policy"])
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
 router.include_router(users.router, prefix="/users", tags=["users"])
 router.include_router(queue.router, prefix="/queue", tags=["queue"])

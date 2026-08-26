@@ -13,4 +13,6 @@ class CapabilitiesResponse(BaseModel):
     max_project_files: int = Field(gt=0)
     upload_chunk_bytes: int = Field(gt=0)
     supported_task_types: list[Literal["classification", "detection", "segmentation"]]
+    supported_annotation_modes: list[Literal["single", "consensus"]]
+    consensus_resolvers: dict[str, list[str]]
     realtime_transport: Literal["websocket", "polling"]

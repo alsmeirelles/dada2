@@ -1,4 +1,4 @@
-"""Project and project membership persistence backing role authorization."""
+"""Project, membership, and object-class persistence."""
 
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -8,10 +8,12 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -64,12 +66,23 @@ class Project(Base):
     )
 
 
+ANNOTATION_ROLES = frozenset(
+    {ProjectRole.owner, ProjectRole.manager, ProjectRole.annotator}
+)
+
+
 class ProjectMember(Base):
     """Role a user holds in one project."""
 
     __tablename__ = "project_members"
     __table_args__ = (
         UniqueConstraint("project_id", "user_id", name="uq_project_member"),
+        Index(
+            "uq_project_single_owner",
+            "project_id",
+            unique=True,
+            postgresql_where=text("role = 'owner'"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(
@@ -89,4 +102,37 @@ class ProjectMember(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
+    )
+
+
+class ProjectClass(Base):
+    """One object class annotators may assign inside a project."""
+
+    __tablename__ = "project_classes"
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_project_class_name"),
+        UniqueConstraint("project_id", "display_order", name="uq_project_class_order"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid4()),
+    )
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(100))
+    color: Mapped[str] = mapped_column(String(7))
+    display_order: Mapped[int] = mapped_column(Integer)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
