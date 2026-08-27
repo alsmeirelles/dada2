@@ -1,0 +1,11 @@
+.consensus-page { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+.consensus-list { display: grid; gap: .75rem; }
+.consensus-card { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: white; }
+.consensus-card p { margin: .25rem 0 0; color: var(--muted); }
+.consensus-warning { display: flex; align-items: center; gap: .35rem; color: var(--danger); }
+.consensus-evidence { display: grid; grid-template-columns: 260px 1fr; gap: 1.5rem; }
+.consensus-evidence > aside, .evidence-grid article { padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: white; }
+.consensus-evidence dl { display: grid; gap: .55rem; margin: 1rem 0; }.consensus-evidence dl div { display: flex; justify-content: space-between; gap: 1rem; }.consensus-evidence dt { color: var(--muted); text-transform: capitalize; }.consensus-evidence dd { margin: 0; font-weight: 700; }
+.consensus-actions { display: grid; gap: .6rem; }.evidence-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .75rem; }.evidence-grid h3 { margin-top: 0; }.evidence-grid pre { max-height: 360px; overflow: auto; font-size: .72rem; white-space: pre-wrap; }.evidence-proposal { border-color: #6558d3 !important; }.resolution-status { text-transform: capitalize; font-weight: 700; }.resolution-status--review_required { color: var(--danger); }
+.adjudication-editor { margin-top: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: white; }.adjudication-editor textarea { box-sizing: border-box; width: 100%; min-height: 240px; margin: .75rem 0; font-family: ui-monospace, monospace; font-size: .8rem; }
+@media (max-width: 720px) { .consensus-page { padding: 1rem; }.consensus-evidence { grid-template-columns: 1fr; }.consensus-card { align-items: flex-start; flex-direction: column; } }
