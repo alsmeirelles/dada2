@@ -45,7 +45,7 @@ const initialDraft: ProjectDraft = {
 }
 
 export function NewProjectPage() {
-  const { token } = useAuth()
+  const { token, user } = useAuth()
   const navigate = useNavigate()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [step, setStep] = useState(0)
@@ -67,6 +67,10 @@ export function NewProjectPage() {
     staleTime: Infinity,
   })
   const resolverOptions = capabilities.data?.consensus_resolvers[draft.taskType] ?? []
+  const eligibleAnnotators = [...new Set([
+    ...(user ? [user.username] : []),
+    ...draft.collaborators,
+  ])]
 
   const validationError = validateStep(step, draft, images)
 
@@ -206,7 +210,7 @@ export function NewProjectPage() {
                 <span><strong>Single annotation</strong><small>One submission resolves each selected image.</small></span>
               </label>
               <label aria-label="Consensus annotation" htmlFor="annotation-mode-consensus" className={draft.annotationPolicy.mode === 'consensus' ? 'task-option selected' : 'task-option'}>
-                <input id="annotation-mode-consensus" type="radio" name="annotation-mode" checked={draft.annotationPolicy.mode === 'consensus'} onChange={() => updateDraft({ annotationPolicy: { mode: 'consensus', annotatorUsernames: draft.collaborators, resolver: resolverOptions[0] ?? '', reviewThreshold: 0.75 } })} />
+                <input id="annotation-mode-consensus" type="radio" name="annotation-mode" checked={draft.annotationPolicy.mode === 'consensus'} onChange={() => updateDraft({ annotationPolicy: { mode: 'consensus', annotatorUsernames: eligibleAnnotators, resolver: resolverOptions[0] ?? '', reviewThreshold: 0.75 } })} />
                 <span><strong>Consensus annotation</strong><small>Each group member labels every selected image independently.</small></span>
               </label>
             </fieldset>
@@ -214,9 +218,9 @@ export function NewProjectPage() {
               <div className="field-grid">
                 <label className="field" htmlFor="consensus-annotators">Consensus annotators
                   <select id="consensus-annotators" multiple value={consensusPolicy.annotatorUsernames} onChange={(event) => updateDraft({ annotationPolicy: { ...consensusPolicy, annotatorUsernames: [...event.currentTarget.selectedOptions].map((option) => option.value) } })}>
-                    {draft.collaborators.map((username) => <option key={username} value={username}>{username}</option>)}
+                    {eligibleAnnotators.map((username) => <option key={username} value={username}>{username}{username === user?.username ? ' (you, owner)' : ''}</option>)}
                   </select>
-                  <small>Select at least two invited annotators. The API validates final membership and authority.</small>
+                  <small>Select at least two members. You, as the project owner, may annotate too. The API validates final membership and authority.</small>
                 </label>
                 <label className="field" htmlFor="consensus-resolver">Resolution method
                   <select id="consensus-resolver" value={consensusPolicy.resolver} onChange={(event) => updateDraft({ annotationPolicy: { ...consensusPolicy, resolver: event.target.value } })}>
@@ -264,7 +268,11 @@ export function NewProjectPage() {
               <ReviewItem label="Team" value={`${draft.collaborators.length} collaborator${draft.collaborators.length === 1 ? '' : 's'}`} detail={draft.collaborators.join(', ') || 'Owner only'} />
               <ReviewItem label="Initial / test" value={`${draft.initialTrainingSize} / ${draft.testSetSize}`} detail="images" />
               <ReviewItem label="Iteration batch" value={`${draft.iterationBatchSize}`} detail="images per cycle" />
-              <ReviewItem label="Strategy" value={draft.annotationPolicy.mode === 'single' ? 'Single annotation' : 'Consensus'} detail={draft.annotationPolicy.mode === 'single' ? `${draft.initialTrainingSize + draft.testSetSize + draft.iterationBatchSize} initial work items` : `${draft.annotationPolicy.annotatorUsernames.length} annotators · ${(draft.initialTrainingSize + draft.testSetSize + draft.iterationBatchSize) * draft.annotationPolicy.annotatorUsernames.length} initial work items`} />
+              <ReviewItem label="Strategy" value={draft.annotationPolicy.mode === 'single' ? 'Single annotation' : 'Consensus'} detail={strategySummary(draft)} />
+              {draft.annotationPolicy.mode === 'consensus' && <>
+                <ReviewItem label="Resolver" value={resolverLabel(draft.annotationPolicy.resolver)} detail="Provisional API catalog entry" />
+                <ReviewItem label="Review threshold" value={`${Math.round(draft.annotationPolicy.reviewThreshold * 100)}%`} detail="Agreement below this value requires review" />
+              </>}
             </div>
             {duplicateGroups.length > 0 && <p className="notice">{duplicateGroups.length} duplicate content group(s) will be reported to the API for deduplication.</p>}
             {isSubmitting && <Progress value={submitProgress} label={submitMessage} />}
@@ -316,13 +324,25 @@ function validateStep(step: number, draft: ProjectDraft, images: LocalImage[]) {
   if (step === 2 && [draft.initialTrainingSize, draft.testSetSize, draft.iterationBatchSize].some((size) => !Number.isInteger(size) || size < 1)) return 'All set sizes must be positive whole numbers.'
   if (step === 3 && draft.annotationPolicy.mode === 'consensus') {
     if (draft.annotationPolicy.annotatorUsernames.length < 2) return 'Consensus annotation needs at least two selected annotators.'
-    if (draft.annotationPolicy.annotatorUsernames.some((username) => !draft.collaborators.includes(username))) return 'Every consensus annotator must be invited to the project.'
+    if (!draft.annotationPolicy.resolver) return 'Choose a resolution method offered by the API.'
   }
   if (step === 4) {
     if (!images.length) return 'Select a folder containing supported images.'
     if (draft.initialTrainingSize + draft.testSetSize > images.length) return `The initial and test sets need ${draft.initialTrainingSize + draft.testSetSize} images; this folder has ${images.length}.`
   }
   return ''
+}
+
+function strategySummary(draft: ProjectDraft) {
+  const multiplier = draft.annotationPolicy.mode === 'consensus'
+    ? draft.annotationPolicy.annotatorUsernames.length
+    : 1
+  const describe = (label: string, images: number) => `${label}: ${images * multiplier} work items`
+  return [
+    describe('Initial training', draft.initialTrainingSize),
+    describe('Test', draft.testSetSize),
+    describe('One acquisition batch', draft.iterationBatchSize),
+  ].join(' · ')
 }
 
 function validateAll(draft: ProjectDraft, images: LocalImage[]) {

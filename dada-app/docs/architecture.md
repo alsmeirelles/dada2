@@ -8,15 +8,18 @@ ordinary workstations.
 
 ```text
 Browser -> DADA App static web host -> DADA API -> database
-                                      -> object storage
+                                      -> self-hosted persistent volume
                                       -> active-learning workers / GPU models
 ```
 
-The browser communicates directly with the API over HTTPS. Production images,
-masks, and other large artifacts should live in object storage and be accessed
-through short-lived signed URLs. The API remains the authority for users,
-projects, membership, media metadata, annotations, leases, and iteration state.
-The App may cache server data but must not become a second source of truth.
+The browser communicates directly with the API over HTTPS. In the initial
+self-hosted deployment, images, masks, and other large artifacts live on
+configured host paths bind-mounted into the API/worker containers; the browser
+accesses them only through API-controlled URLs. The storage boundary permits a
+later migration to cloud object storage and short-lived signed URLs without
+changing the App contract. The API remains the authority for users, projects,
+membership, media metadata, annotations, leases, and iteration state. The App
+may cache server data but must not become a second source of truth.
 
 ## Responsibilities
 

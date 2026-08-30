@@ -166,16 +166,21 @@ attempt currently reports missing media.
 advertised per task through `GET /api/v1/capabilities`. Clients may only choose
 an advertised identifier; anything else is `422 unsupported_resolver`.
 
-The current identifiers are **provisional**. The plan assigns the final
-vocabulary, parameter schemas, and package versions to Phase 6, so the registry
-lives in one place to keep renaming it a single edit plus a data migration.
-Resolver parameters are stored opaquely for the same reason.
+The current identifiers are a **provisional catalog**. Clients discover and
+persist them without hard-coding behavior around their names. Phase 6 will
+migrate them to the target pipeline vocabulary: `cleanlab_multiannotator`,
+`two_stage_detection_consensus`, and `two_stage_segmentation_consensus`.
+`staple` remains a segmentation-refinement option, never a top-level resolver.
+The Phase 2 parameter contract is closed: clients send `parameters: {}` and
+may expose only `review_thresholds.agreement`. Resolver-specific schemas,
+defaults, package versions, and advanced controls belong to Phase 6; the API
+stores the fields opaquely until then.
 
 ## Current placeholders
 
 Existing prototype queue and inference routes remain so later phases can evolve
 them without losing behavior.
 
-`GET /api/v1/capabilities` is served from validated settings. It cannot yet
-advertise object-store limits because the storage product is an open decision
-that blocks Phase 3.
+`GET /api/v1/capabilities` is served from validated settings. Phase 3 will add
+limits for the configured self-hosted persistent-volume store; the storage
+choice is settled, but the ingestion implementation has not yet been added.

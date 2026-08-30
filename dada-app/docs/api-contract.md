@@ -110,8 +110,10 @@ The App first builds a local manifest and then creates an upload session:
 ```
 
 The response reports each item as `upload_required`, `already_present`, or
-`rejected`, and supplies either resumable API URLs or signed object-storage
-URLs. It must not require the API to access a client-local path.
+`rejected`, and supplies resumable API URLs. The initial self-hosted deployment
+stores bytes on persistent server volumes; a future cloud deployment may
+replace applicable URLs with signed object-storage URLs without exposing a
+client-local path.
 
 ```json
 {

@@ -33,6 +33,12 @@ export const router = createBrowserRouter([
             }),
           },
           {
+            path: '/projects/:projectId/settings',
+            lazy: async () => ({
+              Component: (await import('../features/projects/ProjectSettingsPage')).ProjectSettingsPage,
+            }),
+          },
+          {
             path: '/projects/:projectId/activity',
             lazy: async () => ({
               Component: (await import('../features/annotation/ProjectActivityPage')).ProjectActivityPage,

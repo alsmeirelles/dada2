@@ -52,10 +52,11 @@ contract tests, and an OpenAPI compatibility check. The API repository should
 provide one command that runs this complete local gate.
 
 Tests must use production-equivalent PostgreSQL behavior rather than replacing
-transactions with an in-memory database. Object upload integration tests may
-use a local S3-compatible service. Until the concrete active-learning package
-is integrated, all learning work uses a deterministic adapter; GPU tests are
-outside the current implementation phases.
+transactions with an in-memory database. Phase 3 upload integration tests must
+use configured host-path volumes mounted into the API/worker containers and
+verify immediate purge after cancellation and project deletion. Until the
+concrete active-learning package is integrated, all learning work uses a
+deterministic adapter; GPU tests are outside the current implementation phases.
 
 The minimum API regression matrix includes:
 

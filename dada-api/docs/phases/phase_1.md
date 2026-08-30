@@ -111,7 +111,7 @@ forma explícita. Valem uma confirmação.
 
 | Item | Motivo |
 | --- | --- |
-| Limites de object storage em `/api/v1/capabilities` | Depende da escolha do produto de armazenamento, que é uma decisão em aberto e bloqueia a Fase 3 |
+| Limites de armazenamento em `/api/v1/capabilities` | A escolha foi feita depois da Fase 1: a Fase 3 implementará armazenamento local em volume persistente configurado |
 | Ajustes no dada-app | Fora da fronteira deste plano, que trata apenas da API |
 | Rotas de projeto além da leitura | Pertencem à Fase 2 |
 

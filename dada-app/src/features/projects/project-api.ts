@@ -40,6 +40,10 @@ export async function listProjects(token: string): Promise<Page<Project>> {
   return apiRequest('/api/v1/projects', { token })
 }
 
+export function getProject(projectId: string, token: string) {
+  return apiRequest<Project>(`/api/v1/projects/${projectId}`, { token })
+}
+
 export function listMembers(projectId: string, token: string) {
   return apiRequest<Page<ProjectMember>>(`/api/v1/projects/${projectId}/members`, {
     token,
@@ -82,7 +86,14 @@ export function buildPolicyBody(
   version: number,
 ): Record<string, unknown> {
   if (draft.annotationPolicy.mode === 'single') {
-    return { mode: 'single', annotator_ids: [], version }
+    return {
+      mode: 'single',
+      annotator_ids: [],
+      resolver: null,
+      parameters: {},
+      review_thresholds: {},
+      version,
+    }
   }
   return {
     mode: 'consensus',

@@ -86,18 +86,23 @@ idempotência do `bootstrap-admin` normal não mudou.
 | Momento da escrita de auditoria | Mesma transação da mudança | Uma auditoria que pode se perder enquanto a mudança comita é pior que auditoria nenhuma |
 | Transferência de titularidade | Não implementada | O plano pede proteção do dono único, não transferência. Promover outro membro a `owner` ou rebaixar o atual são ambos recusados com `sole_owner_protected` |
 
-## Pontos que ainda precisam de revisão
+## Decisões posteriores registradas
 
-1. **Identificadores provisórios de resolver.** `majority_vote`,
-   `two_stage_box_fusion` e `two_stage_mask_fusion`. Os três nomes que o App
-   tinha fixos foram descartados: `staple` como resolver de topo contraria o
-   próprio plano, que o descreve como opção de refinamento de segmentação
-   depois do alinhamento de instância e classe, não como resolver universal.
-   Os nomes definitivos pertencem à Fase 6.
-2. **Camada `repositories/`.** Ver a tabela de decisões acima.
-3. **Ordem de validação da política.** O grupo é validado antes do resolver, de
-   modo que um grupo inválido mascara um resolver incompatível. É defensável nos
-   dois sentidos e não está escrito em lugar nenhum.
+1. **Catálogo provisório de resolver.** `majority_vote`,
+   `two_stage_box_fusion` e `two_stage_mask_fusion` são valores provisórios
+   persistidos por política e descobertos por capacidades; não são nomes que o
+   App possa fixar. A Fase 6 os migrará para os IDs de pipeline
+   `cleanlab_multiannotator`, `two_stage_detection_consensus` e
+   `two_stage_segmentation_consensus`, respectivamente. `staple` continua uma
+   opção de refinamento de segmentação, nunca um resolver de topo.
+2. **Contrato transitório de parâmetros.** É fechado e mínimo: o App envia
+   `parameters: {}` e pode expor apenas `review_thresholds.agreement`. Schemas,
+   defaults e controles avançados por resolver pertencem à Fase 6.
+3. **Camada `repositories/`.** Continua pendente de confirmação; ver a tabela
+   de decisões acima. Não bloqueia o contrato nem o trabalho da Fase 2 do App.
+4. **Ordem de validação da política.** O grupo é validado antes do resolver, de
+   modo que um grupo inválido mascara um resolver incompatível. É defensável
+   nos dois sentidos e não bloqueia o contrato do App.
 
 ## Débito da Fase 1 absorvido
 
@@ -118,7 +123,7 @@ mutável, e o registro de idempotência viver fora da transação de negócio.
 | --- | --- |
 | Ativação de verdade: congelar split e criar lotes | Fase 4 |
 | `policy_locked` | Depende de lotes com política fotografada, que são da Fase 4 |
-| Limites de object storage em `/capabilities` | Bloqueado pela decisão de armazenamento, que também bloqueia a Fase 3 |
+| Limites de armazenamento em `/capabilities` | A escolha posterior é armazenamento local em volume persistente configurado; a implementação pertence à Fase 3 |
 | Telas de revisão de consenso no App | Fase 6. As rotas existiam apontando para arquivos inexistentes e quebravam o build; foram substituídas por páginas mínimas e honestas |
 
 ## Verificação

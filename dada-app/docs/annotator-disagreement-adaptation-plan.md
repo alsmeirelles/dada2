@@ -36,9 +36,11 @@ per selected media item:
 - `src/features/annotation/ImageStage.tsx` and the geometry/viewport utilities
   already provide most of the rendering foundation needed for a review overlay.
 
-The API currently has only Phases 0 and 1 implemented. App contract changes
-should therefore follow the stable OpenAPI surface produced by each new API
-phase rather than inventing temporary browser-only behavior.
+The API has completed Phases 0, 1, and 2. The Phase 2 project, membership, and
+versioned annotation-policy contract is stable, so the corresponding App work
+can proceed against its generated OpenAPI surface. Later App phases must still
+wait for their matching API contract rather than inventing temporary
+browser-only behavior.
 
 ## Target user journeys
 
@@ -397,7 +399,7 @@ versions must leave canvas work recoverable without pretending it was accepted.
 These phases align with the same-numbered API phases. App code depending on a
 new route begins only after that route and its generated types are stable.
 
-### Phase 2: project policy setup
+### Phase 2: project policy setup — implemented 2026-08-30
 
 - Correct the Phase 1 current-user type.
 - Add policy types, wizard controls, member-ID resolution, validation, work
@@ -407,14 +409,35 @@ new route begins only after that route and its generated types are stable.
 Exit gate: a user can create and resume single or consensus project setup
 against the Phase 2 API, including a `409` policy-version conflict.
 
-### Phase 3: ingestion contract alignment
+### Phase 3: ingestion contract alignment — next step for App and API
 
 - Preserve the current uploader and adapt generated request/response types.
+- Target the API's self-hosted persistent-volume store. The browser continues
+  to use API upload routes and never receives or depends on a host filesystem
+  path; a later cloud-storage migration must remain invisible to this contract.
 - Ensure a failed policy/setup step resumes before upload and an interrupted
   upload resumes without repeating project or member creation.
+- Add a **draft project setup editor**. A draft shown in `/projects` must offer
+  an owner/manager a route back to an editable setup form populated from the
+  persisted project, classes, members, and policy. The user must be able to
+  correct project fields, classes, team, policy, and dataset selection, then
+  continue from the first incomplete setup step. Do not route a failed setup
+  back to the blank “new project” wizard or reuse a stale browser-only draft.
+  Version conflicts must retain the user's unsaved values, refetch the server
+  representation, and require an explicit reconciliation.
+- Add **member management** to the project settings flow, using the completed
+  Phase 2 API contract: list members; add an existing user by username; change
+  a member role among `manager`, `annotator`, and `viewer`; and remove a
+  member. Show the API's sole-owner protection rather than attempting client
+  ownership transfer. Member changes must refresh the policy editor so only
+  annotation-authorized members can be selected for consensus.
 
 Exit gate: both project modes complete the existing interrupted/resumed upload
-browser scenario.
+browser scenario; a failed draft can be reopened, corrected, and resumed
+without creating a second project; and an owner/manager can manage members and
+save a valid consensus policy using the updated membership. Cancelled uploads
+and deleted projects are immediately unavailable and report the API's terminal
+purge result rather than offering a restore action.
 
 ### Phase 4: batch visibility
 
@@ -511,6 +534,7 @@ request mocking and record its OpenAPI version.
 | `src/features/projects/types.ts` | Add local policy draft and policy/batch view models |
 | `src/features/projects/NewProjectPage.tsx` | Add mode, group, resolver, thresholds, cost, and resumable setup UX |
 | `src/features/projects/project-api.ts` | Resolve member IDs, save versioned policy, and resume ordered setup operations |
+| `src/features/projects/ProjectSettingsPage.tsx` | Manage members and default policy; link draft projects to editable setup/recovery flow |
 | `src/features/projects/ProjectsPage.tsx` | Show resolved counts and manager review badges/actions |
 | `src/features/annotation/types.ts` | Add assignments, separate submission/resolution state, batches, and events |
 | `src/features/annotation/annotation-api.ts` | Replace media queue calls with caller-assignment calls and add batch progress |
@@ -540,4 +564,3 @@ rather than duplicating their coverage.
 - No partial-quorum or adaptive reliability UI in the first release.
 - No replacement of the existing annotation canvas or project wizard solely
   to deliver this feature.
-

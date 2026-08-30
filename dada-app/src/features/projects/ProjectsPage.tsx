@@ -1,4 +1,4 @@
-import { AlertCircle, FolderOpen, Plus } from 'lucide-react'
+import { AlertCircle, FolderOpen, Plus, Settings } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { ApiError } from '../../api/client'
@@ -67,6 +67,9 @@ export function ProjectsPage() {
                   Open annotation workspace
                 </Link>
               )}
+              <Link className="project-card__action" to={`/projects/${project.id}/settings`}>
+                <Settings size={16} aria-hidden="true" /> Annotation settings
+              </Link>
               {(project.status === 'training' || project.status === 'completed' || project.status === 'failed') && (
                 <Link className="project-card__action" to={`/projects/${project.id}/activity`}>
                   View iteration activity

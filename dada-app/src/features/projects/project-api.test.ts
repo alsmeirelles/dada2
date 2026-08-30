@@ -41,10 +41,13 @@ describe('resolveAnnotatorIds', () => {
 })
 
 describe('buildPolicyBody', () => {
-  it('sends an empty group and no resolver in single mode', () => {
+  it('uses the closed interim policy contract in single mode', () => {
     expect(buildPolicyBody(baseDraft, members, 1)).toEqual({
       mode: 'single',
       annotator_ids: [],
+      resolver: null,
+      parameters: {},
+      review_thresholds: {},
       version: 1,
     })
   })
