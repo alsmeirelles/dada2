@@ -10,6 +10,8 @@ TaskType = Literal["classification", "detection", "segmentation"]
 ProjectStatus = Literal[
     "draft", "ingesting", "ready", "active", "training", "completed", "failed"
 ]
+ProjectRoleName = Literal["owner", "manager", "annotator", "viewer"]
+HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
 
 
 class ProjectCreate(BaseModel):
@@ -54,4 +56,69 @@ class ProjectPage(BaseModel):
     """Cursor-paginated project collection."""
 
     items: list[ProjectResponse]
+    next_cursor: str | None = None
+
+
+class ProjectClassCreate(BaseModel):
+    """Create-class request contract."""
+
+    name: str = Field(min_length=1, max_length=100)
+    color: str = Field(pattern=HEX_COLOR)
+    display_order: int = Field(ge=0)
+
+
+class ProjectClassUpdate(BaseModel):
+    """Optimistically versioned editable class fields."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    color: str | None = Field(default=None, pattern=HEX_COLOR)
+    display_order: int | None = Field(default=None, ge=0)
+    version: int = Field(ge=1)
+
+
+class ProjectClassResponse(BaseModel):
+    """Object class representation expected by the App."""
+
+    id: UUID
+    name: str
+    color: str
+    display_order: int
+    version: int
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectClassPage(BaseModel):
+    """Cursor-paginated class collection."""
+
+    items: list[ProjectClassResponse]
+    next_cursor: str | None = None
+
+
+class ProjectMemberCreate(BaseModel):
+    """Add-member request naming an existing user."""
+
+    username: str = Field(min_length=3, max_length=64)
+    role: ProjectRoleName
+
+
+class ProjectMemberUpdate(BaseModel):
+    """Role change for an existing member."""
+
+    role: ProjectRoleName
+
+
+class ProjectMemberResponse(BaseModel):
+    """Membership representation expected by the App."""
+
+    user_id: UUID
+    username: str
+    display_name: str
+    role: ProjectRoleName
+
+
+class ProjectMemberPage(BaseModel):
+    """Cursor-paginated membership collection."""
+
+    items: list[ProjectMemberResponse]
     next_cursor: str | None = None

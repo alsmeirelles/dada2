@@ -48,6 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.settings = resolved_settings
     application.include_router(api_router)
+    application.add_middleware(IdempotencyMiddleware)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=resolved_settings.allowed_cors_origins,
@@ -64,7 +65,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ],
         expose_headers=["Location", "Retry-After", "Upload-Offset", "X-Trace-ID"],
     )
-    application.add_middleware(IdempotencyMiddleware)
     application.add_middleware(TraceMiddleware)
     install_exception_handlers(application)
 

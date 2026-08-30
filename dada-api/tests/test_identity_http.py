@@ -394,15 +394,30 @@ async def test_replace_bootstrap_administrator_repoints_the_record(
 ) -> None:
     async with async_session_factory() as session:
         first, _ = await bootstrap_administrator(session, "root", "Root", PASSWORD)
-        replacement = await replace_bootstrap_administrator(
+        replacement, demoted = await replace_bootstrap_administrator(
             session, "root2", "Root Two", PASSWORD
         )
         record = await session.get(BootstrapRecord, 1)
 
         assert replacement.id != first.id
         assert replacement.is_administrator is True
+        assert demoted is None
+        assert first.is_administrator is True
         assert record is not None
         assert record.user_id == replacement.id
+
+
+async def test_replace_can_demote_the_previous_administrator(database: None) -> None:
+    async with async_session_factory() as session:
+        first, _ = await bootstrap_administrator(session, "root", "Root", PASSWORD)
+        replacement, demoted = await replace_bootstrap_administrator(
+            session, "root2", "Root Two", PASSWORD, demote_previous=True
+        )
+        await session.refresh(first)
+
+        assert demoted == "root"
+        assert first.is_administrator is False
+        assert replacement.is_administrator is True
 
 
 async def test_replace_requires_an_existing_bootstrap(database: None) -> None:

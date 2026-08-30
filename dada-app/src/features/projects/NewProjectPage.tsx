@@ -7,13 +7,17 @@ import {
   Trash2,
   Users,
 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
+import { getCapabilities } from '../../api/capabilities'
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
 import { createProjectWithDataset } from './project-api'
+import { resolverLabel } from './resolver-label'
+import { loadSetup } from './setup-recovery'
 import {
   findDuplicateGroups,
   hashImages,
@@ -57,6 +61,12 @@ export function NewProjectPage() {
   const duplicateGroups = useMemo(() => findDuplicateGroups(images), [images])
   const totalBytes = images.reduce((sum, image) => sum + image.sizeBytes, 0)
   const consensusPolicy = draft.annotationPolicy.mode === 'consensus' ? draft.annotationPolicy : null
+  const capabilities = useQuery({
+    queryKey: ['capabilities'],
+    queryFn: getCapabilities,
+    staleTime: Infinity,
+  })
+  const resolverOptions = capabilities.data?.consensus_resolvers[draft.taskType] ?? []
 
   const validationError = validateStep(step, draft, images)
 
@@ -101,10 +111,13 @@ export function NewProjectPage() {
       })
       navigate('/projects', { replace: true })
     } catch (reason) {
+      const detail = reason instanceof ApiError
+        ? `${reason.message}${reason.traceId ? ` (trace ${reason.traceId})` : ''}`
+        : reason instanceof Error ? reason.message : 'Project creation failed.'
       setError(
-        reason instanceof ApiError
-          ? `${reason.message}${reason.traceId ? ` (trace ${reason.traceId})` : ''}`
-          : reason instanceof Error ? reason.message : 'Project creation failed.',
+        loadSetup()
+          ? `${detail} The project was saved as a draft — try again to resume where it stopped.`
+          : detail,
       )
     } finally {
       setIsSubmitting(false)
@@ -193,7 +206,7 @@ export function NewProjectPage() {
                 <span><strong>Single annotation</strong><small>One submission resolves each selected image.</small></span>
               </label>
               <label aria-label="Consensus annotation" htmlFor="annotation-mode-consensus" className={draft.annotationPolicy.mode === 'consensus' ? 'task-option selected' : 'task-option'}>
-                <input id="annotation-mode-consensus" type="radio" name="annotation-mode" checked={draft.annotationPolicy.mode === 'consensus'} onChange={() => updateDraft({ annotationPolicy: { mode: 'consensus', annotatorUsernames: draft.collaborators, resolver: defaultResolver(draft.taskType), reviewThreshold: 0.75 } })} />
+                <input id="annotation-mode-consensus" type="radio" name="annotation-mode" checked={draft.annotationPolicy.mode === 'consensus'} onChange={() => updateDraft({ annotationPolicy: { mode: 'consensus', annotatorUsernames: draft.collaborators, resolver: resolverOptions[0] ?? '', reviewThreshold: 0.75 } })} />
                 <span><strong>Consensus annotation</strong><small>Each group member labels every selected image independently.</small></span>
               </label>
             </fieldset>
@@ -206,11 +219,12 @@ export function NewProjectPage() {
                   <small>Select at least two invited annotators. The API validates final membership and authority.</small>
                 </label>
                 <label className="field" htmlFor="consensus-resolver">Resolution method
-                  <select id="consensus-resolver" value={consensusPolicy.resolver} onChange={(event) => updateDraft({ annotationPolicy: { ...consensusPolicy, resolver: event.target.value as typeof consensusPolicy.resolver } })}>
-                    <option value="majority_vote" disabled={draft.taskType !== 'classification'}>Majority vote</option>
-                    <option value="weighted_box_fusion" disabled={draft.taskType !== 'detection'}>IoU matching and box fusion</option>
-                    <option value="staple" disabled={draft.taskType !== 'segmentation'}>STAPLE mask consensus</option>
+                  <select id="consensus-resolver" value={consensusPolicy.resolver} onChange={(event) => updateDraft({ annotationPolicy: { ...consensusPolicy, resolver: event.target.value } })}>
+                    {resolverOptions.map((identifier) => (
+                      <option key={identifier} value={identifier}>{resolverLabel(identifier)}</option>
+                    ))}
                   </select>
+                  <small>Methods offered by the API for {draft.taskType} projects.</small>
                 </label>
                 <NumberField label="Review threshold" help="Items below this agreement level require review." value={Math.round(consensusPolicy.reviewThreshold * 100)} onChange={(value) => updateDraft({ annotationPolicy: { ...consensusPolicy, reviewThreshold: Math.min(1, Math.max(0, value / 100)) } })} />
               </div>
@@ -319,11 +333,6 @@ function validateAll(draft: ProjectDraft, images: LocalImage[]) {
   return ''
 }
 
-function defaultResolver(taskType: TaskType): 'majority_vote' | 'weighted_box_fusion' | 'staple' {
-  if (taskType === 'classification') return 'majority_vote'
-  if (taskType === 'detection') return 'weighted_box_fusion'
-  return 'staple'
-}
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`

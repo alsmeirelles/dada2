@@ -1,8 +1,9 @@
 # DADA API Development
 
-This guide covers the Phase 0 service foundation and the Phase 1 identity,
-session, and authorization layer. Concrete active-learning and GPU workers are
-intentionally not part of these phases.
+This guide covers the Phase 0 service foundation, the Phase 1 identity, session,
+and authorization layer, and the Phase 2 project setup, membership, and
+annotation policy. Concrete active-learning and GPU workers are intentionally
+not part of these phases.
 
 ## Prerequisites
 
@@ -97,8 +98,11 @@ uv run dada-api replace-bootstrap-admin
 ```
 
 Replacement creates the new administrator and repoints the bootstrap record at
-it. The previous administrator keeps its account and its administrator flag;
-withdrawing someone's access is a separate, deliberate act.
+it, then asks whether the previous administrator should lose its global
+authority. The previous account always survives; only the flag is at stake. A
+run with no answer available — non-interactive, or standard input at EOF —
+keeps that authority, because withdrawing someone's access is never the safe
+default to assume.
 
 API startup neither creates nor resets credentials.
 
@@ -129,12 +133,48 @@ Every project-scoped decision goes through one function in
 global administrator passes every project check with owner-equivalent
 authority, while `owner_id` keeps recording the truthful creator.
 
+## Project setup
+
+Projects, ordered classes, membership, and the default annotation policy are
+live. Creating a project writes the project, its owner's membership row, and a
+`single`-mode policy in one transaction, because project authority is resolved
+from membership rather than from `owner_id`.
+
+Membership is granted to an existing username. Email invitation is deferred, so
+an unknown username is `404 user_not_found` rather than a pending invitation. A
+project keeps exactly one owner, enforced by a partial unique index; removing,
+demoting, or duplicating that owner returns `409 sole_owner_protected`.
+
+The default policy is `single` or `consensus`. A consensus policy needs at least
+two distinct project members whose role carries annotation authority (`owner`,
+`manager`, or `annotator`) and a resolver advertised for the project's task.
+Policy edits are optimistically versioned; a stale `version` returns `409`.
+Later phases snapshot this default into each annotation batch, so editing it
+never changes work already in flight.
+
+Membership and policy changes write an audit entry in the same transaction as
+the change, carrying the request's trace ID.
+
+`POST /api/v1/projects/{id}/activate` validates prerequisites and reports what
+is missing. Freezing the dataset split and opening the first annotation batch
+belong to Phase 4, and media does not exist before Phase 3, so every activation
+attempt currently reports missing media.
+
+## Consensus resolvers
+
+`dada_api/services/resolvers.py` is the single registry of resolver identifiers
+advertised per task through `GET /api/v1/capabilities`. Clients may only choose
+an advertised identifier; anything else is `422 unsupported_resolver`.
+
+The current identifiers are **provisional**. The plan assigns the final
+vocabulary, parameter schemas, and package versions to Phase 6, so the registry
+lives in one place to keep renaming it a single edit plus a data migration.
+Resolver parameters are stored opaquely for the same reason.
+
 ## Current placeholders
 
 Existing prototype queue and inference routes remain so later phases can evolve
-them without losing behavior. Project list and create return `501` until Phase
-2; the project read route exists because authorization is enforced from Phase 1
-and must be verifiable over real HTTP requests.
+them without losing behavior.
 
 `GET /api/v1/capabilities` is served from validated settings. It cannot yet
 advertise object-store limits because the storage product is an open decision

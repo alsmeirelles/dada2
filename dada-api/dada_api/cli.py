@@ -58,6 +58,22 @@ def resolve_bootstrap_identity() -> tuple[str, str, str]:
     return username, display_name, password
 
 
+def confirm_previous_demotion() -> bool:
+    """Ask whether the previous administrator should lose its global authority.
+
+    A run with no answer available keeps that authority, because withdrawing
+    someone's access is never the safe default to assume.
+
+    Returns:
+        True when the operator confirmed the demotion.
+    """
+    try:
+        answer = input("Remove the previous administrator's global authority? [y/N]: ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in {"y", "yes"}
+
+
 async def run_bootstrap(replace: bool) -> str:
     """Create or replace the bootstrap administrator.
 
@@ -68,13 +84,21 @@ async def run_bootstrap(replace: bool) -> str:
         A message describing what happened, never containing the password.
     """
     username, display_name, password = resolve_bootstrap_identity()
+    demote_previous = confirm_previous_demotion() if replace else False
     try:
         async with async_session_factory() as session:
             if replace:
-                user = await replace_bootstrap_administrator(
-                    session, username, display_name, password
+                user, demoted = await replace_bootstrap_administrator(
+                    session,
+                    username,
+                    display_name,
+                    password,
+                    demote_previous=demote_previous,
                 )
-                return f"Bootstrap administrator replaced with {user.username!r}."
+                message = f"Bootstrap administrator replaced with {user.username!r}."
+                if demoted is not None:
+                    message += f" {demoted!r} is no longer an administrator."
+                return message
 
             user, created = await bootstrap_administrator(
                 session, username, display_name, password
