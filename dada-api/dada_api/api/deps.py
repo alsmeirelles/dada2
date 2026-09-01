@@ -7,9 +7,11 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dada_api.core.errors import ApiError
 from dada_api.core.security import decode_access_token
 from dada_api.db.session import get_session
 from dada_api.models.project import Project
+from dada_api.models.upload import UploadSession
 from dada_api.models.user import User
 from dada_api.services.authorization import ProjectAction, authorize_project_action
 from dada_api.services.users import get_user_by_username
@@ -94,5 +96,36 @@ def require_project_action(
     ) -> Project:
         """Return the project when the caller may perform the action."""
         return await authorize_project_action(session, user, project_id, action)
+
+    return dependency
+
+
+def require_upload_action(
+    action: ProjectAction,
+) -> Callable[..., Coroutine[Any, Any, UploadSession]]:
+    """Build a dependency authorizing an action through an upload's project.
+
+    Upload routes are addressed by session rather than by project, so the
+    project is resolved from the session before the same central matrix decides
+    the caller's authority.
+
+    Args:
+        action: Operation the route performs.
+
+    Returns:
+        A dependency returning the authorized upload session.
+    """
+
+    async def dependency(
+        upload_id: str,
+        user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session),
+    ) -> UploadSession:
+        """Return the upload session when the caller may perform the action."""
+        upload = await session.get(UploadSession, upload_id)
+        if upload is None:
+            raise ApiError(404, "not_found", "The upload session does not exist.")
+        await authorize_project_action(session, user, upload.project_id, action)
+        return upload
 
     return dependency

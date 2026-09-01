@@ -8,6 +8,8 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
+PACKAGE_ROOT = Path(__file__).resolve().parents[2]
+
 
 def resolve_env_file() -> Path | None:
     """Return the dotenv file path to use when one is available."""
@@ -17,7 +19,7 @@ def resolve_env_file() -> Path | None:
 
     candidate_paths = (
         Path.cwd() / ".env",
-        Path(__file__).resolve().parents[2] / ".env",
+        PACKAGE_ROOT / ".env",
     )
     for candidate_path in candidate_paths:
         if candidate_path.exists():
@@ -47,6 +49,9 @@ class Settings(BaseSettings):
     max_file_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
     max_project_files: int = Field(default=100_000, gt=0)
     upload_chunk_bytes: int = Field(default=8 * 1024 * 1024, gt=0)
+    upload_session_ttl_hours: int = Field(default=24, gt=0)
+    media_root: Path = Path("var/media")
+    upload_parts_root: Path = Path("var/upload-parts")
     realtime_transport: str = "websocket"
     jwt_secret_key: SecretStr = Field(
         default=SecretStr("change-this-development-secret"),
@@ -112,6 +117,16 @@ class Settings(BaseSettings):
             return self.cursor_secret_key.get_secret_value()
         return self.jwt_secret_key.get_secret_value()
 
+    @field_validator("media_root", "upload_parts_root")
+    @classmethod
+    def resolve_storage_root(cls, value: Path) -> Path:
+        """Resolve a storage root, treating a relative path as package-relative.
+
+        Resolving is unconditional so that the containment check guarding every
+        storage path compares two paths in the same canonical form.
+        """
+        return (value if value.is_absolute() else PACKAGE_ROOT / value).resolve()
+
     @field_validator("refresh_cookie_samesite")
     @classmethod
     def normalize_cookie_samesite(cls, value: str) -> str:
@@ -136,6 +151,12 @@ class Settings(BaseSettings):
         """Validate settings that depend on multiple values."""
         if self.seed_service_username is None:
             self.seed_service_username = self.postgres_user
+
+        if self.media_root == self.upload_parts_root:
+            raise RuntimeError(
+                "DADA_MEDIA_ROOT and DADA_UPLOAD_PARTS_ROOT must differ so that "
+                "purging unpromoted upload parts can never reach promoted media."
+            )
 
         if (
             self.environment == "production"

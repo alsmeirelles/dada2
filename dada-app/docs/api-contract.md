@@ -110,23 +110,33 @@ The App first builds a local manifest and then creates an upload session:
 ```
 
 The response reports each item as `upload_required`, `already_present`, or
-`rejected`, and supplies resumable API URLs. The initial self-hosted deployment
-stores bytes on persistent server volumes; a future cloud deployment may
-replace applicable URLs with signed object-storage URLs without exposing a
-client-local path.
+`rejected`, with a stable `reason` when rejected, and the per-file progress a
+client needs to resume. The upload routes are the fixed paths in the table
+below. The initial self-hosted deployment stores bytes on persistent server
+volumes; a future cloud deployment may introduce signed object-storage URLs
+without exposing a client-local path.
 
 ```json
 {
   "id": "uuid",
   "status": "pending",
+  "expires_at": "2026-09-02T14:00:00Z",
+  "error": null,
   "items": [
     {
       "client_file_id": "local-opaque-id",
-      "disposition": "upload_required"
+      "disposition": "upload_required",
+      "reason": null,
+      "size_bytes": 481239,
+      "received_bytes": 0
     }
   ]
 }
 ```
+
+Rejection reasons are `invalid_relative_path`, `unsupported_media_type`, and
+`file_too_large`. Deduplication is scoped to one project: identical content is
+stored once and may be referenced by more than one relative path.
 
 Upload status is `pending`, `uploading`, `processing`, `completed`, or `failed`.
 The App must wait for `completed` before activating the project. A failed
@@ -141,9 +151,15 @@ session includes a structured `error` and remains queryable for recovery.
 | `DELETE` | `/api/v1/uploads/{upload_id}` | Cancel an incomplete session |
 | `GET` | `/api/v1/projects/{project_id}/media` | Paginated media inventory |
 
-Chunk requests include an upload offset and checksum. The API acknowledges the
-next offset. Session expiry, chunk limits, and rejected-file reasons are
-explicit. Completing a session is idempotent.
+Chunk requests carry `Upload-Offset` and `X-Chunk-SHA256`. The API acknowledges
+the next expected offset in both the `Upload-Offset` response header and the
+response body, so an interrupted upload resumes mid-file rather than restarting
+it. Session expiry is advertised as `upload_session_ttl_hours` in
+`/api/v1/capabilities`. Completing a session is idempotent.
+
+Cancelling a session and deleting a project both purge immediately and
+permanently; no restore window exists. `DELETE /api/v1/projects/{project_id}` is
+owner-only and returns `204`.
 
 ## Iterations and splits
 

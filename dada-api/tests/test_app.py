@@ -22,6 +22,7 @@ def test_capabilities_match_frontend_contract() -> None:
         "max_file_bytes": 104857600,
         "max_project_files": 100000,
         "upload_chunk_bytes": 8388608,
+        "upload_session_ttl_hours": 24,
         "supported_task_types": ["classification", "detection", "segmentation"],
         "supported_annotation_modes": ["single", "consensus"],
         "consensus_resolvers": {

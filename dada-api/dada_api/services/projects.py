@@ -1,5 +1,6 @@
-"""Project creation, listing, versioned update, and activation checks."""
+"""Project creation, listing, versioned update, activation checks, and deletion."""
 
+import logging
 from datetime import datetime
 
 from sqlalchemy import func, or_, select
@@ -8,9 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dada_api.core.cursors import decode_cursor, encode_cursor
 from dada_api.core.errors import ApiError
 from dada_api.models.annotation_policy import AnnotationMode, AnnotationPolicyDefault
+from dada_api.models.media import Media
 from dada_api.models.project import Project, ProjectClass, ProjectMember, ProjectRole
 from dada_api.models.user import User
 from dada_api.schemas.project import ProjectCreate, ProjectUpdate
+from dada_api.services import storage
+
+logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 50
 
@@ -148,9 +153,6 @@ async def missing_activation_prerequisites(
 ) -> list[str]:
     """Return the prerequisites a project still fails before activation.
 
-    Media is owned by a later phase, so an installation without ingestion
-    always reports missing media rather than pretending a project is ready.
-
     Args:
         session: Active database session.
         project: Project being checked.
@@ -168,7 +170,13 @@ async def missing_activation_prerequisites(
     if not class_count:
         missing.append("classes")
 
-    missing.append("media")
+    media_count = await session.scalar(
+        select(func.count()).select_from(Media).where(Media.project_id == project.id)
+    )
+    if not media_count:
+        missing.append("media")
+    elif media_count < project.initial_training_size + project.test_set_size:
+        missing.append("insufficient_media")
 
     if project.initial_training_size < 1 or project.test_set_size < 1:
         missing.append("split_sizes")
@@ -209,3 +217,27 @@ async def activate_project(session: AsyncSession, project: Project) -> Project:
             details={"missing": missing},
         )
     return project
+
+
+async def delete_project(session: AsyncSession, project: Project) -> None:
+    """Permanently remove a project, its records, and its stored media.
+
+    The database rows are committed first so a storage failure cannot leave
+    rows describing media the API can no longer serve. The reverse order would
+    turn a partial failure into a project that lists unreadable images, which
+    is worse than the orphaned bytes this order can leave behind.
+
+    There is no restore window: the deletion is terminal by design.
+
+    Args:
+        session: Active database session.
+        project: Authorized project.
+    """
+    project_id = project.id
+    await session.delete(project)
+    await session.commit()
+
+    try:
+        storage.delete_project_media(project_id)
+    except OSError:
+        logger.error("Failed to purge stored media for project %s", project_id)

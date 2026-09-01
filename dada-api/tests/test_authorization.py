@@ -5,7 +5,7 @@ import pytest
 from dada_api.models.project import ProjectRole
 from dada_api.services.authorization import ProjectAction, role_allows
 
-MANAGER_DENIED = {ProjectAction.activate_project}
+MANAGER_DENIED = {ProjectAction.activate_project, ProjectAction.delete_project}
 ANNOTATOR_ALLOWED = {ProjectAction.read_project, ProjectAction.annotate}
 VIEWER_ALLOWED = {ProjectAction.read_project}
 
@@ -36,6 +36,14 @@ def test_every_role_action_pair(
 
 def test_matrix_covers_every_pair() -> None:
     assert len(EXPECTED_MATRIX) == len(ProjectRole) * len(ProjectAction)
+
+
+def test_delete_project_is_owner_only() -> None:
+    action = ProjectAction.delete_project
+    assert role_allows(ProjectRole.owner, action) is True
+    assert role_allows(ProjectRole.manager, action) is False
+    assert role_allows(ProjectRole.annotator, action) is False
+    assert role_allows(ProjectRole.viewer, action) is False
 
 
 def test_manager_actions_added_in_phase_two() -> None:
