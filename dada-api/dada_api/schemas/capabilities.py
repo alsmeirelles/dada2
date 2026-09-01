@@ -12,6 +12,7 @@ class CapabilitiesResponse(BaseModel):
     max_file_bytes: int = Field(gt=0)
     max_project_files: int = Field(gt=0)
     upload_chunk_bytes: int = Field(gt=0)
+    upload_session_ttl_hours: int = Field(gt=0)
     supported_task_types: list[Literal["classification", "detection", "segmentation"]]
     supported_annotation_modes: list[Literal["single", "consensus"]]
     consensus_resolvers: dict[str, list[str]]

@@ -21,6 +21,7 @@ class ProjectAction(StrEnum):
     read_project = "read_project"
     update_project = "update_project"
     activate_project = "activate_project"
+    delete_project = "delete_project"
     manage_classes = "manage_classes"
     manage_members = "manage_members"
     annotate = "annotate"

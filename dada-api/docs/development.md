@@ -66,12 +66,34 @@ artifact and CI fails when generated output differs.
 
 Settings use the `DADA_` prefix and are documented in `.env.example`: database
 and Redis URLs, CORS origins, trace/log settings, capability limits, upload
-chunk size, JWT/cursor signing secrets, refresh credential lifetime and cookie
-policy, and the bootstrap administrator identity. `VITE_*` settings belong to
-the App and must not be copied into the API environment.
+chunk size, storage roots, JWT/cursor signing secrets, refresh credential
+lifetime and cookie policy, and the bootstrap administrator identity. `VITE_*`
+settings belong to the App and must not be copied into the API environment.
 
 The official `postgres:17-alpine` and `redis:7.4-alpine` images are used for
 local infrastructure. Redis is disposable; PostgreSQL is authoritative.
+
+### Storage roots
+
+Ingested bytes live on the filesystem, under two separately configured roots:
+
+| Setting | Holds | Default |
+| --- | --- | --- |
+| `DADA_MEDIA_ROOT` | Promoted, verified media | `var/media` |
+| `DADA_UPLOAD_PARTS_ROOT` | In-flight upload parts | `var/upload-parts` |
+
+Relative values resolve against the `dada-api` directory; both are resolved to
+absolute paths at startup. Startup refuses a configuration where they are equal:
+cancelling an upload purges the parts root outright, so promoted media must
+never sit inside that blast radius.
+
+On the shared server these are host paths bind-mounted into the API container.
+Neither path is ever exposed to a client. `services/storage.py` is the only
+module that touches the filesystem, so migrating to an object store later
+replaces that module without changing any route or the App.
+
+Both roots are created on first use, never at import time, so the application
+factory keeps its no-startup-side-effects guarantee.
 
 ## Administrator bootstrap
 
@@ -176,11 +198,53 @@ may expose only `review_thresholds.agreement`. Resolver-specific schemas,
 defaults, package versions, and advanced controls belong to Phase 6; the API
 stores the fields opaquely until then.
 
+## Dataset ingestion
+
+A client builds a local manifest, creates a session, sends chunks, and completes
+the session:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/projects/{project_id}/uploads` | Create a session from a manifest |
+| `PUT` | `/api/v1/uploads/{upload_id}/files/{client_file_id}` | Send one verified chunk |
+| `POST` | `/api/v1/uploads/{upload_id}/complete` | Verify, inspect, and promote |
+| `GET` | `/api/v1/uploads/{upload_id}` | Status and per-file progress |
+| `DELETE` | `/api/v1/uploads/{upload_id}` | Cancel and purge parts |
+| `GET` | `/api/v1/projects/{project_id}/media` | Paginated media inventory |
+
+Each manifest entry is classified as `upload_required`, `already_present`, or
+`rejected` with a stable reason. Chunk requests carry `Upload-Offset` and
+`X-Chunk-SHA256`; the response acknowledges the next expected offset in both the
+`Upload-Offset` header and its body, so an interrupted upload resumes mid-file.
+
+Accepted offsets live in PostgreSQL rather than process memory, so an upload
+survives an API restart. Completion verifies each file's declared digest against
+the assembled bytes, reads the original pixel dimensions with Pillow, and
+promotes the file. Completion is idempotent.
+
+Deduplication is scoped to the project: identical content uploaded twice is
+stored once and referenced by two `media` rows, while two projects holding the
+same image keep independent copies. This makes deleting a project a single
+directory removal with no cross-project reference counting.
+
+## Deletion and retention
+
+Cancelling an upload and deleting a project both purge immediately and
+permanently. There is no restore window in this release.
+
+Database records are committed first and the filesystem tree is removed
+afterwards. A storage failure is logged at error level rather than raised: the
+domain change already succeeded, and orphaned bytes that nothing references are
+preferable to rows describing media the API can no longer serve.
+
+`DELETE /api/v1/projects/{project_id}` is owner-only. Managers may not delete a
+project, matching the existing treatment of `activate_project`.
+
 ## Current placeholders
 
 Existing prototype queue and inference routes remain so later phases can evolve
 them without losing behavior.
 
-`GET /api/v1/capabilities` is served from validated settings. Phase 3 will add
-limits for the configured self-hosted persistent-volume store; the storage
-choice is settled, but the ingestion implementation has not yet been added.
+`GET /api/v1/capabilities` is served from validated settings and now advertises
+`upload_session_ttl_hours` alongside the existing upload limits, which this
+phase began enforcing.

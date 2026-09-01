@@ -1,6 +1,6 @@
-"""Project listing, creation, versioned update, and activation routes."""
+"""Project listing, creation, versioned update, activation, and deletion routes."""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dada_api.api.deps import get_current_user, require_project_action
@@ -115,3 +115,23 @@ async def activate_project(
         The project when every prerequisite is met.
     """
     return await project_service.activate_project(session, project)
+
+
+@router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project(
+    project: Project = Depends(require_project_action(ProjectAction.delete_project)),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Permanently delete a project and purge its media.
+
+    The deletion is terminal: no restore window exists in this release.
+
+    Args:
+        project: Project resolved and authorized by the dependency.
+        session: Active database session.
+
+    Returns:
+        An empty response.
+    """
+    await project_service.delete_project(session, project)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
