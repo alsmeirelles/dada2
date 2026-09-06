@@ -49,6 +49,67 @@ The capability response must include `supported_image_media_types`,
 `max_file_bytes`, `max_project_files`, `upload_chunk_bytes`,
 `supported_task_types`, and `realtime_transport`.
 
+## User administration and credentials — Phase 4
+
+Global user administration is distinct from project membership. All `/users`
+routes require `is_administrator=true`; project owner and manager roles do not
+grant access. The authenticated self-service password route is available to
+every active user.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/users` | Cursor-paginated administrator user list; supports optional active-state filtering |
+| `POST` | `/api/v1/users` | Create an account |
+| `GET` | `/api/v1/users/{user_id}` | Read one account for editing |
+| `PATCH` | `/api/v1/users/{user_id}` | Versioned administrator update of profile/access fields |
+| `POST` | `/api/v1/users/{user_id}/reset-password` | Administrator password reset |
+| `DELETE` | `/api/v1/users/{user_id}` | Terminal administrator account removal |
+| `POST` | `/api/v1/auth/me/password` | Authenticated user's password change |
+
+```ts
+type UserRead = {
+  id: string
+  username: string // immutable after creation
+  display_name: string
+  is_active: boolean
+  is_administrator: boolean
+  version: number
+  created_at: string
+}
+
+type UserCreate = {
+  username: string
+  display_name: string
+  password: string
+  is_active?: boolean // defaults to true
+  is_administrator?: boolean // defaults to false
+}
+
+type UserUpdate = {
+  version: number
+  display_name?: string
+  is_active?: boolean
+  is_administrator?: boolean
+}
+
+type AdministratorPasswordReset = { new_password: string }
+type PasswordChange = { current_password: string; new_password: string }
+```
+
+Passwords must contain 8–128 characters. They are write-only: neither API nor
+App responses, logs, trace data, local storage, query cache, recovery data, or
+error messages may contain them. Password reset/change, account deactivation,
+and removal revoke the target's refresh sessions.
+
+`DELETE` is permanent and returns `204`. It returns `409 user_in_use` while the
+user owns a project or has retained domain/audit references; set
+`is_active=false` to revoke access without deleting those records. The API also
+returns `409 last_active_administrator` when an action would remove the final
+active administrator, `409 self_administration_change` when an administrator
+tries to remove their own access, `409 version_conflict` for stale updates,
+`409 username_taken` for duplicate creation, and `400 current_password_incorrect`
+when self-service verification fails.
+
 ## Project resources
 
 `Project` contains:

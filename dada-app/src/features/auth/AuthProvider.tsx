@@ -46,7 +46,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const value: AuthContextValue = {
     user: me.data ?? null,
     token,
-    isLoading: token !== null && me.isLoading,
+    // Do not expose protected routes during the render that starts `/auth/me`.
+    // `isPending` also becomes true when the token changes and a new query key
+    // is created, without treating a recoverable request error as a permanent
+    // loading state.
+    isLoading: token !== null && me.isPending,
     login,
     logout,
   }

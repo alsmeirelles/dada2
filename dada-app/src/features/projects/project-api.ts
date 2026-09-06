@@ -3,8 +3,11 @@ import { config } from '../../config/env'
 import type { LocalImage } from './ingest'
 import {
   clearSetup,
+  confirmProjectCreated,
   loadSetup,
+  pendingProjectCreateKey,
   saveSetup,
+  setupKey,
   stageIndex,
   type SetupStage,
 } from './setup-recovery'
@@ -12,6 +15,7 @@ import type {
   AnnotationPolicy,
   Page,
   Project,
+  ProjectClass,
   ProjectClassInput,
   ProjectDraft,
 } from './types'
@@ -20,14 +24,19 @@ type UploadDisposition = 'upload_required' | 'already_present' | 'rejected'
 type UploadItem = {
   client_file_id: string
   disposition: UploadDisposition
-  reason?: string
+  reason: string | null
+  received_bytes: number
+  size_bytes: number
 }
 type UploadSession = {
   id: string
   status: 'pending' | 'uploading' | 'processing' | 'completed' | 'failed'
   items: UploadItem[]
-  error?: { message: string }
+  expires_at: string
+  error: { message?: string } | null
 }
+
+type UploadChunk = Pick<UploadItem, 'client_file_id' | 'received_bytes' | 'size_bytes'>
 
 export type ProjectMember = {
   user_id: string
@@ -44,10 +53,56 @@ export function getProject(projectId: string, token: string) {
   return apiRequest<Project>(`/api/v1/projects/${projectId}`, { token })
 }
 
+export function updateProject(projectId: string, body: { name?: string; description?: string | null; version: number }, token: string) {
+  return apiRequest<Project>(`/api/v1/projects/${projectId}`, { method: 'PATCH', token, headers: idempotencyHeaders(), body })
+}
+
 export function listMembers(projectId: string, token: string) {
   return apiRequest<Page<ProjectMember>>(`/api/v1/projects/${projectId}/members`, {
     token,
   })
+}
+
+export function addMember(projectId: string, username: string, role: 'manager' | 'annotator' | 'viewer', token: string) {
+  return apiRequest<ProjectMember>(`/api/v1/projects/${projectId}/members`, {
+    method: 'POST', token, headers: idempotencyHeaders(), body: { username, role },
+  })
+}
+
+export function changeMemberRole(projectId: string, userId: string, role: 'manager' | 'annotator' | 'viewer', token: string) {
+  return apiRequest<ProjectMember>(`/api/v1/projects/${projectId}/members/${userId}`, {
+    method: 'PATCH', token, headers: idempotencyHeaders(), body: { role },
+  })
+}
+
+export function removeMember(projectId: string, userId: string, token: string) {
+  return apiRequest<void>(`/api/v1/projects/${projectId}/members/${userId}`, {
+    method: 'DELETE', token, headers: idempotencyHeaders(),
+  })
+}
+
+export function listClasses(projectId: string, token: string) {
+  return apiRequest<Page<ProjectClass>>(`/api/v1/projects/${projectId}/classes`, { token })
+}
+
+export function createClass(projectId: string, body: { name: string; color: string; display_order: number }, token: string) {
+  return apiRequest<ProjectClass>(`/api/v1/projects/${projectId}/classes`, { method: 'POST', token, headers: idempotencyHeaders(), body })
+}
+
+export function updateClass(projectId: string, classId: string, body: { name: string; color: string; display_order: number; version: number }, token: string) {
+  return apiRequest<ProjectClass>(`/api/v1/projects/${projectId}/classes/${classId}`, { method: 'PATCH', token, headers: idempotencyHeaders(), body })
+}
+
+export function removeClass(projectId: string, classId: string, token: string) {
+  return apiRequest<void>(`/api/v1/projects/${projectId}/classes/${classId}`, { method: 'DELETE', token, headers: idempotencyHeaders() })
+}
+
+export function deleteProject(projectId: string, token: string) {
+  return apiRequest<void>(`/api/v1/projects/${projectId}`, { method: 'DELETE', token, headers: idempotencyHeaders() })
+}
+
+export function cancelUpload(uploadId: string, token: string) {
+  return apiRequest<void>(`/api/v1/uploads/${uploadId}`, { method: 'DELETE', token, headers: idempotencyHeaders() })
 }
 
 export function getAnnotationPolicy(projectId: string, token: string) {
@@ -113,8 +168,11 @@ export async function createProjectWithDataset(
   images: LocalImage[],
   token: string,
   onProgress: (progress: number, message: string) => void,
+  resumeProjectId?: string,
 ): Promise<Project> {
-  const snapshot = loadSetup()
+  const recovered = loadSetup()
+  // A blank wizard must never silently attach itself to another saved draft.
+  const snapshot = resumeProjectId && recovered?.projectId === resumeProjectId ? recovered : null
   let project: Project
   let stage: SetupStage
 
@@ -129,7 +187,7 @@ export async function createProjectWithDataset(
     project = await apiRequest<Project>('/api/v1/projects', {
       method: 'POST',
       token,
-      headers: idempotencyHeaders(),
+      headers: { 'Idempotency-Key': pendingProjectCreateKey() },
       body: {
         name: draft.name.trim(),
         description: draft.description.trim() || null,
@@ -139,6 +197,7 @@ export async function createProjectWithDataset(
         iteration_batch_size: draft.iterationBatchSize,
       },
     })
+    confirmProjectCreated()
     stage = 'created'
     saveSetup({ projectId: project.id, stage })
   }
@@ -196,11 +255,12 @@ export async function createProjectWithDataset(
   }
 
   onProgress(15, 'Preparing upload…')
-  const upload = await apiRequest<UploadSession>(
-    `/api/v1/projects/${project.id}/uploads`,
-    {
+  let currentSnapshot = loadSetup()
+  const upload = currentSnapshot?.uploadId
+    ? await apiRequest<UploadSession>(`/api/v1/uploads/${currentSnapshot.uploadId}`, { token })
+    : await apiRequest<UploadSession>(`/api/v1/projects/${project.id}/uploads`, {
       method: 'POST', token,
-      headers: idempotencyHeaders(),
+      headers: { 'Idempotency-Key': setupKey(currentSnapshot, 'upload') },
       body: {
         files: images.map((image) => ({
           client_file_id: image.clientFileId,
@@ -211,8 +271,9 @@ export async function createProjectWithDataset(
           sha256: image.sha256,
         })),
       },
-    },
-  )
+    })
+  currentSnapshot = loadSetup()
+  saveSetup({ projectId: project.id, stage, uploadId: upload.id, keys: currentSnapshot?.keys })
 
   const required = upload.items.filter((item) => item.disposition === 'upload_required')
   const rejected = upload.items.filter((item) => item.disposition === 'rejected')
@@ -221,7 +282,7 @@ export async function createProjectWithDataset(
   for (const [fileIndex, item] of required.entries()) {
     const image = images.find((candidate) => candidate.clientFileId === item.client_file_id)
     if (!image) throw new Error('The API requested an unknown local image.')
-    await uploadFile(upload.id, image, token, (fraction) => {
+    await uploadFile(upload.id, image, item.received_bytes, token, (fraction) => {
       const overall = (fileIndex + fraction) / Math.max(required.length, 1)
       onProgress(15 + Math.round(overall * 78), `Uploading ${image.relativePath}…`)
     })
@@ -229,14 +290,14 @@ export async function createProjectWithDataset(
 
   onProgress(94, 'Verifying dataset…')
   await apiRequest(`/api/v1/uploads/${upload.id}/complete`, {
-    method: 'POST', token, headers: idempotencyHeaders(), body: {},
+    method: 'POST', token, headers: { 'Idempotency-Key': setupKey(loadSetup(), 'complete') }, body: {},
   })
   await waitForUploadProcessing(upload.id, token, (message) => onProgress(96, message))
   complete('uploaded')
 
   onProgress(98, 'Activating project…')
   const activated = await apiRequest<Project>(`/api/v1/projects/${project.id}/activate`, {
-    method: 'POST', token, headers: idempotencyHeaders(), body: {},
+    method: 'POST', token, headers: { 'Idempotency-Key': setupKey(loadSetup(), 'activate') }, body: {},
   })
   complete('activated')
   clearSetup()
@@ -265,16 +326,17 @@ async function waitForUploadProcessing(
 async function uploadFile(
   uploadId: string,
   image: LocalImage,
+  acceptedBytes: number,
   token: string,
   onProgress: (fraction: number) => void,
 ) {
   const chunkSize = config.uploadChunkBytes
-  let offset = 0
+  let offset = acceptedBytes
   while (offset < image.file.size) {
     const chunk = image.file.slice(offset, Math.min(offset + chunkSize, image.file.size))
     const end = offset + chunk.size
     const checksum = await sha256(chunk)
-    await apiRequest(
+    const acknowledgement = await apiRequest<UploadChunk>(
       `/api/v1/uploads/${uploadId}/files/${encodeURIComponent(image.clientFileId)}`,
       {
         method: 'PUT', token, rawBody: chunk,
@@ -286,7 +348,7 @@ async function uploadFile(
         },
       },
     )
-    offset = end
+    offset = acknowledgement.received_bytes
     onProgress(offset / image.file.size)
   }
 }

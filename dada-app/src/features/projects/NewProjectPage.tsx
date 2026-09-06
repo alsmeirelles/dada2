@@ -26,7 +26,6 @@ import {
   type RejectedLocalFile,
 } from './ingest'
 import type { ProjectClassInput, ProjectDraft, TaskType } from './types'
-import './projects.css'
 
 const steps = ['Basics', 'Classes', 'Learning', 'Team', 'Dataset', 'Review']
 const taskOptions: Array<{ value: TaskType; title: string; description: string }> = [

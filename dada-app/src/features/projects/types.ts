@@ -54,6 +54,11 @@ export type ProjectClassInput = {
   color: string
 }
 
+export type ProjectClass = ProjectClassInput & {
+  version: number
+  display_order: number
+}
+
 export type ProjectDraft = {
   name: string
   description: string

@@ -1,3 +1,7 @@
+/* Project routes are the authenticated landing experience. Load their layout
+   before React navigates there after login, rather than through a lazy chunk. */
+@import '../features/projects/projects.css';
+
 :root {
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   color: #18212f;

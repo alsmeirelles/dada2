@@ -409,7 +409,7 @@ new route begins only after that route and its generated types are stable.
 Exit gate: a user can create and resume single or consensus project setup
 against the Phase 2 API, including a `409` policy-version conflict.
 
-### Phase 3: ingestion contract alignment — next step for App and API
+### Phase 3: ingestion contract alignment — completed 2026-09-06
 
 - Preserve the current uploader and adapt generated request/response types.
 - Target the API's self-hosted persistent-volume store. The browser continues
@@ -439,13 +439,42 @@ save a valid consensus policy using the updated membership. Cancelled uploads
 and deleted projects are immediately unavailable and report the API's terminal
 purge result rather than offering a restore action.
 
-### Phase 4: batch visibility
+### Phase 4: batch visibility and user administration
 
 - Add batch/policy snapshot types and manager activity presentation.
 - Display selected image and generated assignment counts before annotation.
+- Add an administrator-only **Users** navigation entry and `/admin/users`
+  route. The page lists users with username, display name, active state,
+  administrator state, and creation date. It must use cursor pagination and
+  preserve filters while navigating pages.
+- Provide a create-user form for username, display name, initial password and
+  confirmation, active state, and administrator state. Never retain the
+  password after a successful submission or display it in a list, toast, URL,
+  local storage, recovery snapshot, telemetry, or error text.
+- Provide an administrator edit surface for display name, active state, and
+  global administrator state. Send the displayed user `version`; on `409`,
+  retain local edits, refetch the user, show the conflicting server values, and
+  require the administrator to reconcile before saving again.
+- Provide separate, explicit confirmation flows for administrator password
+  reset, reversible account disablement, and terminal user removal. Explain
+  that resetting a password revokes refresh sessions, disabling blocks access,
+  and deletion has no restore option. Render server protections for the last
+  active administrator, self-administration changes, and users with retained
+  project/audit references.
+- Add a self-service **Change password** surface available to every signed-in
+  user. It requires current password, replacement password, and confirmation;
+  it must route a `current_password_incorrect` response to the current-password
+  field without revealing any other credential information.
+- Keep global user administration separate from project membership. Project
+  owners/managers can manage only the members of their projects; client-side
+  visibility is convenience, and the API remains authoritative.
 
 Exit gate: the UI reflects the server snapshot and never suggests that editing
-the project default changes an active batch.
+the project default changes an active batch. An administrator can create,
+update, reset, disable, and safely remove an eligible user; a non-admin never
+sees or can use global user controls; and every signed-in user can change their
+own password without exposing credentials in browser storage or UI state after
+submission.
 
 ### Phase 5: assignment workspace
 

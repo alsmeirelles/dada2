@@ -67,6 +67,11 @@ export function ProjectsPage() {
                   Open annotation workspace
                 </Link>
               )}
+              {project.status === 'draft' && (
+                <Link className="project-card__action" to={`/projects/${project.id}/setup`}>
+                  Resume project setup
+                </Link>
+              )}
               <Link className="project-card__action" to={`/projects/${project.id}/settings`}>
                 <Settings size={16} aria-hidden="true" /> Annotation settings
               </Link>

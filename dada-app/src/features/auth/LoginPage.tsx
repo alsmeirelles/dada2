@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
@@ -8,13 +8,11 @@ import { useAuth } from './auth-context'
 type LocationState = { from?: { pathname?: string } }
 
 export function LoginPage() {
-  const { login, token } = useAuth()
+  const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  if (token) return <Navigate to="/projects" replace />
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()

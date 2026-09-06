@@ -5,6 +5,7 @@ export type Capabilities = {
   max_file_bytes: number
   max_project_files: number
   upload_chunk_bytes: number
+  upload_session_ttl_hours: number
   supported_task_types: Array<'classification' | 'detection' | 'segmentation'>
   supported_annotation_modes: Array<'single' | 'consensus'>
   consensus_resolvers: Record<string, string[]>

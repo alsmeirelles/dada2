@@ -4,6 +4,7 @@ import {
   clearSetup,
   loadSetup,
   saveSetup,
+  setupKey,
   stageIndex,
 } from './setup-recovery'
 
@@ -49,5 +50,11 @@ describe('project setup recovery', () => {
     expect(stageIndex('created')).toBeLessThan(stageIndex('classes'))
     expect(stageIndex('policy')).toBeLessThan(stageIndex('uploaded'))
     expect(stageIndex('activated')).toBeGreaterThan(stageIndex('uploaded'))
+  })
+
+  it('keeps an operation key stable across retries', () => {
+    const snapshot = { projectId: 'project-1', stage: 'policy' as const }
+    const key = setupKey(snapshot, 'upload')
+    expect(setupKey(loadSetup(), 'upload')).toBe(key)
   })
 })

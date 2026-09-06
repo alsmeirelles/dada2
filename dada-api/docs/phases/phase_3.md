@@ -1,6 +1,6 @@
 # Fase 3: Ingestão Resumível e Mídia
 
-Status: implementada em 2026-09-01 (API). O trabalho do App permanece pendente.
+Status: concluída em 2026-09-06 (API e App).
 
 Plano de referência: [api-implementation-plan.md](../api-implementation-plan.md).
 Plano do App: [annotator-disagreement-adaptation-plan.md](../../../dada-app/docs/annotator-disagreement-adaptation-plan.md).
@@ -151,7 +151,7 @@ alcançáveis em produção.
 
 | Item | Motivo |
 | --- | --- |
-| Trabalho do App da Fase 3 | Uploader resumível mid-file, chave de idempotência estável, editor de rascunho e gestão de membros. Não faz parte da entrega da API |
+| Administração global de usuários | Criação, alteração, remoção, redefinição de senha por administradores e alteração de senha própria pertencem à Fase 4 |
 | Rota que serve os bytes de uma imagem | O plano lista apenas o inventário de mídia nesta fase. O workspace de anotação é da Fase 5 |
 | Congelar split e criar lotes | Fase 4 |
 | Volume dedicado no `compose.yaml` | O Compose local sobe apenas `postgres` e `redis`; não há container da API. Localmente as raízes são diretórios do host, e o bind mount pertence ao servidor compartilhado |
