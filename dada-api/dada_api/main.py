@@ -59,6 +59,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "Content-Type",
             "Content-Range",
             "Idempotency-Key",
+            "If-Match",
             "Upload-Offset",
             "X-Chunk-SHA256",
             "X-Trace-ID",

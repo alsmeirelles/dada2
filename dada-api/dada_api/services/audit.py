@@ -1,4 +1,4 @@
-"""Recording of audited project changes."""
+"""Recording of audited project and user-administration changes."""
 
 from typing import Any
 
@@ -12,7 +12,7 @@ from dada_api.models.user import User
 def record(
     session: AsyncSession,
     actor: User,
-    project_id: str,
+    project_id: str | None,
     action: str,
     target_type: str,
     target_id: str | None,
@@ -28,7 +28,7 @@ def record(
     Args:
         session: Active database session, committed by the caller.
         actor: User performing the change.
-        project_id: Project the change belongs to.
+        project_id: Project the change belongs to, or None for a global change.
         action: Stable name of the operation.
         target_type: Kind of resource that changed.
         target_id: Identifier of the changed resource, when it has one.

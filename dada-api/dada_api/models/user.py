@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dada_api.db.base import Base
@@ -14,6 +14,9 @@ class User(Base):
 
     Global authority is expressed by ``is_administrator``. Authority inside a
     single project is expressed separately by project membership roles.
+
+    ``username`` is immutable after creation, so the access token subject and
+    anything derived from it stay stable for the life of the account.
     """
 
     __tablename__ = "users"
@@ -28,6 +31,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     is_administrator: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

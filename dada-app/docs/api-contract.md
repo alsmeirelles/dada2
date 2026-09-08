@@ -101,7 +101,9 @@ App responses, logs, trace data, local storage, query cache, recovery data, or
 error messages may contain them. Password reset/change, account deactivation,
 and removal revoke the target's refresh sessions.
 
-`DELETE` is permanent and returns `204`. It returns `409 user_in_use` while the
+`DELETE` is permanent and returns `204`. Its `If-Match` header carries the bare
+expected version, with surrounding quotes tolerated; a missing or unreadable
+header returns `400 invalid_if_match`. It returns `409 user_in_use` while the
 user owns a project or has retained domain/audit references; set
 `is_active=false` to revoke access without deleting those records. The API also
 returns `409 last_active_administrator` when an action would remove the final
@@ -109,6 +111,10 @@ active administrator, `409 self_administration_change` when an administrator
 tries to remove their own access, `409 version_conflict` for stale updates,
 `409 username_taken` for duplicate creation, and `400 current_password_incorrect`
 when self-service verification fails.
+
+`last_active_administrator` is reported in preference to
+`self_administration_change` when both apply, so the sole administrator of an
+installation is told what actually blocks the change.
 
 ## Project resources
 
@@ -221,6 +227,65 @@ it. Session expiry is advertised as `upload_session_ttl_hours` in
 Cancelling a session and deleting a project both purge immediately and
 permanently; no restore window exists. `DELETE /api/v1/projects/{project_id}` is
 owner-only and returns `204`.
+
+## Annotation batches — Phase 4
+
+Activating a project freezes its train/test split and opens two batches: `test`
+over the whole held-out half, and `initial_training` over a random selection
+from the rest. The project moves from `draft` to `active` in the same
+transaction, so an active project always has its batches.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/batches` | Cursor-paginated batch inventory |
+| `GET` | `/api/v1/projects/{project_id}/batches/{batch_id}` | Policy snapshot and progress |
+| `PATCH` | `/api/v1/projects/{project_id}/batches/{batch_id}` | Replace the policy while `preparing` |
+| `POST` | `/api/v1/projects/{project_id}/batches/{batch_id}/start` | Freeze it and generate assignments |
+
+```ts
+type BatchPurpose = 'initial_training' | 'test' | 'acquisition'
+type BatchStatus =
+  | 'preparing' | 'annotating' | 'resolving'
+  | 'review_required' | 'resolved' | 'closed' | 'failed'
+
+type Batch = {
+  id: string
+  project_id: string
+  purpose: BatchPurpose
+  status: BatchStatus
+  mode: 'single' | 'consensus'
+  annotator_ids: string[]
+  resolver: string | null
+  resolver_version: string | null
+  parameters: Record<string, number | string | boolean>
+  review_thresholds: Record<string, number>
+  source_policy_version: number
+  selection_strategy: string
+  selection_seed: number
+  selection_input_fingerprint: string
+  requested_size: number
+  total_items: number         // images in the batch
+  total_assignments: number   // items x annotators, 0 before start
+  submitted_assignments: number
+  started_at: string | null
+  created_at: string
+  updated_at: string
+}
+```
+
+A batch holds a **copy** of the project's default policy, not a reference. The
+UI must not suggest that editing the project default changes an active batch.
+The copy is editable only while the batch is `preparing`; afterwards `PATCH`
+returns `409 policy_locked` and a repeated start returns
+`409 batch_already_started`. The `PATCH` body has no `version`: batch status,
+not an optimistic version, is what decides whether the policy may change.
+
+Show `total_items` and `total_assignments` as distinct numbers. In consensus
+mode one image carries one assignment per configured annotator, so they never
+coincide.
+
+Acquisition batches, iteration records, and the routes below arrive with later
+phases; `GET /iterations` and `GET /statistics` are not implemented yet.
 
 ## Iterations and splits
 

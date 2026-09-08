@@ -10,13 +10,17 @@ from dada_api.core.security import create_access_token
 from dada_api.db.session import get_session
 from dada_api.models.user import User
 from dada_api.schemas.auth import LoginRequest, TokenResponse
-from dada_api.schemas.user import UserRead
+from dada_api.schemas.user import PasswordChange, UserRead
 from dada_api.services.auth_sessions import (
     issue_refresh_session,
     revoke_presented_session,
     rotate_refresh_session,
 )
-from dada_api.services.users import access_token_roles, authenticate_user
+from dada_api.services.users import (
+    access_token_roles,
+    authenticate_user,
+    change_own_password,
+)
 
 router = APIRouter()
 
@@ -144,3 +148,24 @@ async def read_current_user(user: User = Depends(get_current_user)) -> User:
         The authenticated user.
     """
     return user
+
+
+@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_current_user_password(
+    request: PasswordChange,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Replace the caller's own password and revoke their refresh sessions.
+
+    Args:
+        request: Current and replacement passwords.
+        user: Authenticated user.
+        session: Active database session.
+    """
+    await change_own_password(
+        session,
+        user,
+        request.current_password,
+        request.new_password,
+    )

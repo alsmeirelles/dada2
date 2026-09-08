@@ -1,9 +1,10 @@
 # DADA API Development
 
 This guide covers the Phase 0 service foundation, the Phase 1 identity, session,
-and authorization layer, and the Phase 2 project setup, membership, and
-annotation policy. Concrete active-learning and GPU workers are intentionally
-not part of these phases.
+and authorization layer, the Phase 2 project setup, membership, and annotation
+policy, the Phase 3 ingestion and media store, and the Phase 4 user
+administration, activation, and annotation batches. Concrete active-learning and
+GPU workers are intentionally not part of these phases.
 
 ## Prerequisites
 
@@ -128,6 +129,44 @@ default to assume.
 
 API startup neither creates nor resets credentials.
 
+## User administration
+
+Once the first administrator exists, further accounts are created over HTTP.
+These routes are global authority: they require `is_administrator` and are not
+reachable through any project role, however senior.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/users` | Cursor-paginated list, optional `active` filter |
+| `POST` | `/api/v1/users` | Create an account |
+| `GET` | `/api/v1/users/{user_id}` | Read one account |
+| `PATCH` | `/api/v1/users/{user_id}` | Versioned update of profile and access |
+| `POST` | `/api/v1/users/{user_id}/reset-password` | Administrator password reset |
+| `DELETE` | `/api/v1/users/{user_id}` | Terminal removal, version in `If-Match` |
+| `POST` | `/api/v1/auth/me/password` | Any active user changes their own password |
+
+`username` is immutable after creation and is simply absent from the update
+contract. `display_name`, `is_active`, and `is_administrator` are editable with
+an optimistic `version`; a stale one returns `409 version_conflict`.
+
+Deletion is terminal and carries the expected version in `If-Match` — the bare
+number, quotes tolerated. A missing or unreadable header is
+`400 invalid_if_match`. Deletion is refused with `409 user_in_use` while
+anything still references the account: an owned project, an audit entry the
+user authored, the bootstrap record, a snapshotted consensus group, or an
+assignment. Those references exist so history stays truthful, so
+`is_active=false` is the reversible way to withdraw access instead.
+
+Two protections guard the installation. Withdrawing administration or access
+from the only active administrator returns `409 last_active_administrator`,
+which is checked first because it is the more specific fact. With another
+administrator still active, an administrator withdrawing their *own* access
+returns `409 self_administration_change`. Demoting a peer stays allowed.
+
+Password reset, self-service change, and deactivation revoke every refresh
+session the target holds. Deletion removes them outright. Passwords are 8–128
+characters and never appear in a response, a log line, or an audit payload.
+
 ## Sessions and refresh credentials
 
 `POST /api/v1/auth/token` returns a short-lived bearer access token and sets a
@@ -178,9 +217,7 @@ Membership and policy changes write an audit entry in the same transaction as
 the change, carrying the request's trace ID.
 
 `POST /api/v1/projects/{id}/activate` validates prerequisites and reports what
-is missing. Freezing the dataset split and opening the first annotation batch
-belong to Phase 4, and media does not exist before Phase 3, so every activation
-attempt currently reports missing media.
+is missing before doing anything. See [Activation and batches](#activation-and-batches).
 
 ## Consensus resolvers
 
@@ -226,6 +263,54 @@ Deduplication is scoped to the project: identical content uploaded twice is
 stored once and referenced by two `media` rows, while two projects holding the
 same image keep independent copies. This makes deleting a project a single
 directory removal with no cross-project reference counting.
+
+## Activation and batches
+
+Activation is the moment a configured project becomes work. In one transaction
+it freezes `dataset_splits` for every image, creates the `test` and
+`initial_training` batches, copies the project's default policy onto each of
+them, and moves the project from `draft` to `active`.
+
+The test half is drawn from the whole dataset first and the training set from
+what remains, so no image can reach both. That ordering is what makes the
+evaluation set genuinely held out rather than filtered out later.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/batches` | Paginated batch inventory |
+| `GET` | `/api/v1/projects/{project_id}/batches/{batch_id}` | Policy snapshot and progress |
+| `PATCH` | `/api/v1/projects/{project_id}/batches/{batch_id}` | Edit the policy while `preparing` |
+| `POST` | `/api/v1/projects/{project_id}/batches/{batch_id}/start` | Freeze it and generate assignments |
+
+A batch carries a **copy** of the policy, not a reference to it. Editing the
+project default afterwards cannot reach work already in flight. The copy is
+editable while the batch is `preparing`; after `start` it is frozen and a
+further `PATCH` returns `409 policy_locked`, while a second start returns
+`409 batch_already_started`.
+
+Starting generates assignments atomically: one per snapshotted annotator per
+image in `consensus` mode, and one unclaimed assignment per image in `single`
+mode, where the policy names no owner. Validation runs before anything is
+created, so a refused start leaves no partial work behind.
+
+Image counts and assignment counts are reported separately, because one image
+carries one assignment per configured annotator and the two never coincide in
+consensus mode.
+
+### Reproducible selection
+
+Each batch records `selection_strategy`, `selection_seed`, and
+`selection_input_fingerprint` — the SHA-256 of the ordered candidate list.
+`services/selection.py` touches neither the database nor HTTP, so a stored
+selection can be recomputed from those recorded fields and compared.
+
+The seed is generated by the server, never supplied by a client: it is
+provenance, not a request parameter. The candidate order is
+`(relative_path, id)`, the same order the media inventory route returns, so the
+selection input is something a client can already read.
+
+Acquisition batches need an iteration, which needs a trained model, so they
+arrive with the learning port. The `purpose` column already carries the value.
 
 ## Deletion and retention
 

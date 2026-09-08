@@ -115,6 +115,30 @@ async def revoke_refresh_family(session: AsyncSession, family_id: str) -> None:
     await session.commit()
 
 
+async def revoke_user_sessions(session: AsyncSession, user_id: str) -> None:
+    """Revoke every live refresh credential a user holds.
+
+    Rotation families are per login, so a user signed in from two devices holds
+    two of them. Password and access changes must reach all of them at once,
+    which revoking by family cannot express.
+
+    The revocation is staged, not committed, so it lands in the same
+    transaction as the change that required it.
+
+    Args:
+        session: Active database session, committed by the caller.
+        user_id: User whose credentials are being revoked.
+    """
+    await session.execute(
+        update(RefreshSession)
+        .where(
+            RefreshSession.user_id == user_id,
+            RefreshSession.revoked_at.is_(None),
+        )
+        .values(revoked_at=datetime.now(UTC))
+    )
+
+
 async def revoke_presented_session(
     session: AsyncSession,
     presented_token: str,

@@ -13,7 +13,7 @@ from dada_api.models.media import Media
 from dada_api.models.project import Project, ProjectClass, ProjectMember, ProjectRole
 from dada_api.models.user import User
 from dada_api.schemas.project import ProjectCreate, ProjectUpdate
-from dada_api.services import storage
+from dada_api.services import batches, storage
 
 logger = logging.getLogger(__name__)
 
@@ -185,17 +185,17 @@ async def missing_activation_prerequisites(
 
 
 async def activate_project(session: AsyncSession, project: Project) -> Project:
-    """Refuse activation while any prerequisite is unmet.
+    """Freeze the dataset split, open the first batches, and activate.
 
-    Freezing the split and creating the first annotation batch belong to a
-    later phase; this operation currently only validates.
+    Everything happens in one transaction: a project that reports itself active
+    always has its split and its batches.
 
     Args:
         session: Active database session.
         project: Authorized project.
 
     Returns:
-        The project, when activation prerequisites are met.
+        The activated project.
 
     Raises:
         ApiError: 409 when the project is not a draft or a prerequisite fails.
@@ -216,6 +216,11 @@ async def activate_project(session: AsyncSession, project: Project) -> Project:
             "The project is not ready to be activated.",
             details={"missing": missing},
         )
+
+    await batches.freeze_and_create(session, project)
+    project.status = "active"
+    await session.commit()
+    await session.refresh(project)
     return project
 
 

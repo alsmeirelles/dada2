@@ -1,4 +1,4 @@
-"""Audit trail for membership and policy changes."""
+"""Audit trail for project changes and global user administration."""
 
 from datetime import UTC, datetime
 from typing import Any
@@ -12,11 +12,15 @@ from dada_api.db.base import Base
 
 
 class AuditEntry(Base):
-    """One audited change to a project resource.
+    """One audited change to a project resource or to a user account.
 
     Entries are written in the same transaction as the change they describe, so
     a committed change can never lack its audit record. They never carry
     credentials or annotation payloads.
+
+    ``project_id`` is null for global user administration, which belongs to no
+    project. Those entries therefore survive a project deletion, which is what
+    an installation-wide audit trail requires.
     """
 
     __tablename__ = "audit_entries"
@@ -26,9 +30,10 @@ class AuditEntry(Base):
         primary_key=True,
         default=lambda: str(uuid4()),
     )
-    project_id: Mapped[str] = mapped_column(
+    project_id: Mapped[str | None] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"),
         index=True,
+        nullable=True,
     )
     actor_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"),

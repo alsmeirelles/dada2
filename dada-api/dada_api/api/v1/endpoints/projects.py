@@ -102,17 +102,14 @@ async def activate_project(
     project: Project = Depends(require_project_action(ProjectAction.activate_project)),
     session: AsyncSession = Depends(get_session),
 ) -> Project:
-    """Validate that a project is ready to be activated.
-
-    Freezing the dataset split and opening the first annotation batch belong to
-    a later phase, so this route currently only reports unmet prerequisites.
+    """Activate a project, freezing its dataset split and opening its batches.
 
     Args:
         project: Project resolved and authorized by the dependency.
         session: Active database session.
 
     Returns:
-        The project when every prerequisite is met.
+        The activated project, or an error naming the unmet prerequisites.
     """
     return await project_service.activate_project(session, project)
 

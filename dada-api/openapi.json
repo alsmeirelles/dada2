@@ -1,6 +1,22 @@
 {
   "components": {
     "schemas": {
+      "AdministratorPasswordReset": {
+        "description": "Administrator request to replace another user's password.",
+        "properties": {
+          "new_password": {
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_password"
+        ],
+        "title": "AdministratorPasswordReset",
+        "type": "object"
+      },
       "AnnotationPolicyResponse": {
         "description": "Policy representation expected by the App.",
         "properties": {
@@ -198,6 +214,280 @@
           "accepted_annotations"
         ],
         "title": "AnnotationSubmitResponse",
+        "type": "object"
+      },
+      "BatchPage": {
+        "description": "Cursor-paginated batch collection.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BatchResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "BatchPage",
+        "type": "object"
+      },
+      "BatchPolicyUpdate": {
+        "description": "Replacement policy for a batch that has not started.\n\nThere is no ``version`` here: a batch's policy is a snapshot rather than a\nshared resource, and the batch status is what decides whether it may still\nchange.",
+        "properties": {
+          "annotator_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Annotator Ids",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "single",
+              "consensus"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Parameters",
+            "type": "object"
+          },
+          "resolver": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver"
+          },
+          "review_thresholds": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Review Thresholds",
+            "type": "object"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "BatchPolicyUpdate",
+        "type": "object"
+      },
+      "BatchResponse": {
+        "description": "Batch representation carrying its policy snapshot and progress.\n\nImage counts and assignment counts are reported separately because one\nimage carries one assignment per configured annotator, so the two never\ncoincide in consensus mode.",
+        "properties": {
+          "annotator_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Annotator Ids",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "single",
+              "consensus"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Parameters",
+            "type": "object"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "purpose": {
+            "enum": [
+              "initial_training",
+              "test",
+              "acquisition"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          },
+          "requested_size": {
+            "title": "Requested Size",
+            "type": "integer"
+          },
+          "resolver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver"
+          },
+          "resolver_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver Version"
+          },
+          "review_thresholds": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Review Thresholds",
+            "type": "object"
+          },
+          "selection_input_fingerprint": {
+            "title": "Selection Input Fingerprint",
+            "type": "string"
+          },
+          "selection_seed": {
+            "title": "Selection Seed",
+            "type": "integer"
+          },
+          "selection_strategy": {
+            "title": "Selection Strategy",
+            "type": "string"
+          },
+          "source_policy_version": {
+            "title": "Source Policy Version",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "preparing",
+              "annotating",
+              "resolving",
+              "review_required",
+              "resolved",
+              "closed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_assignments": {
+            "title": "Submitted Assignments",
+            "type": "integer"
+          },
+          "total_assignments": {
+            "title": "Total Assignments",
+            "type": "integer"
+          },
+          "total_items": {
+            "title": "Total Items",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "purpose",
+          "status",
+          "mode",
+          "annotator_ids",
+          "resolver",
+          "resolver_version",
+          "parameters",
+          "review_thresholds",
+          "source_policy_version",
+          "selection_strategy",
+          "selection_seed",
+          "selection_input_fingerprint",
+          "requested_size",
+          "total_items",
+          "total_assignments",
+          "submitted_assignments",
+          "started_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BatchResponse",
         "type": "object"
       },
       "CapabilitiesResponse": {
@@ -473,6 +763,29 @@
           "created_at"
         ],
         "title": "MediaResponse",
+        "type": "object"
+      },
+      "PasswordChange": {
+        "description": "Authenticated user's request to replace their own password.",
+        "properties": {
+          "current_password": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Current Password",
+            "type": "string"
+          },
+          "new_password": {
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "PasswordChange",
         "type": "object"
       },
       "ProjectClassCreate": {
@@ -1347,6 +1660,34 @@
         "title": "UserCreate",
         "type": "object"
       },
+      "UserPage": {
+        "description": "Cursor-paginated user collection.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "UserPage",
+        "type": "object"
+      },
       "UserRead": {
         "description": "Public user representation.",
         "properties": {
@@ -1374,6 +1715,10 @@
           "username": {
             "title": "Username",
             "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
           }
         },
         "required": [
@@ -1382,9 +1727,60 @@
           "display_name",
           "is_administrator",
           "is_active",
+          "version",
           "created_at"
         ],
         "title": "UserRead",
+        "type": "object"
+      },
+      "UserUpdate": {
+        "description": "Optimistically versioned editable user fields.\n\n``username`` is absent on purpose: it is immutable after creation, so\nimmutability is a property of the contract rather than a runtime check.",
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "is_administrator": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Administrator"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "UserUpdate",
         "type": "object"
       }
     },
@@ -1589,6 +1985,76 @@
           }
         ],
         "summary": "Read Current User",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me/password": {
+      "post": {
+        "description": "Replace the caller's own password and revoke their refresh sessions.\n\nArgs:\n    request: Current and replacement passwords.\n    user: Authenticated user.\n    session: Active database session.",
+        "operationId": "change_current_user_password_api_v1_auth_me_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change Current User Password",
         "tags": [
           "auth"
         ]
@@ -2262,7 +2728,7 @@
     },
     "/api/v1/projects/{project_id}/activate": {
       "post": {
-        "description": "Validate that a project is ready to be activated.\n\nFreezing the dataset split and opening the first annotation batch belong to\na later phase, so this route currently only reports unmet prerequisites.\n\nArgs:\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The project when every prerequisite is met.",
+        "description": "Activate a project, freezing its dataset split and opening its batches.\n\nArgs:\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The activated project, or an error naming the unmet prerequisites.",
         "operationId": "activate_project_api_v1_projects__project_id__activate_post",
         "parameters": [
           {
@@ -2499,6 +2965,369 @@
         "summary": "Update Annotation Policy",
         "tags": [
           "annotation-policy"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/batches": {
+      "get": {
+        "description": "List a project's annotation batches.\n\nArgs:\n    cursor: Opaque cursor from a previous page.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    One page of batches with the cursor for the next one.",
+        "operationId": "list_batches_api_v1_projects__project_id__batches_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Batches",
+        "tags": [
+          "batches"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/batches/{batch_id}": {
+      "get": {
+        "description": "Return one batch with its policy snapshot and progress.\n\nArgs:\n    batch_id: Batch being read.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The batch representation.",
+        "operationId": "read_batch_api_v1_projects__project_id__batches__batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Batch",
+        "tags": [
+          "batches"
+        ]
+      },
+      "patch": {
+        "description": "Replace a batch's policy snapshot while it is still preparing.\n\nArgs:\n    batch_id: Batch being changed.\n    request: Validated replacement policy.\n    project: Project resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor.\n    session: Active database session.\n\nReturns:\n    The updated batch representation.",
+        "operationId": "update_batch_policy_api_v1_projects__project_id__batches__batch_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchPolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Batch Policy",
+        "tags": [
+          "batches"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/batches/{batch_id}/start": {
+      "post": {
+        "description": "Freeze a batch's policy and generate its assignments.\n\nArgs:\n    batch_id: Batch being started.\n    project: Project resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor.\n    session: Active database session.\n\nReturns:\n    The started batch representation.",
+        "operationId": "start_batch_api_v1_projects__project_id__batches__batch_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Batch",
+        "tags": [
+          "batches"
         ]
       }
     },
@@ -3870,20 +4699,50 @@
         ]
       }
     },
-    "/api/v1/users/": {
+    "/api/v1/users": {
       "get": {
-        "description": "List users. Administrators only.\n\nArgs:\n    _: Authenticated administrator.\n    session: Active database session.\n\nReturns:\n    Every user ordered by username.",
-        "operationId": "list_users_api_v1_users__get",
+        "description": "List users. Administrators only.\n\nArgs:\n    cursor: Opaque cursor from a previous page.\n    active: Restrict to active or inactive users when supplied.\n    _: Authenticated administrator.\n    session: Active database session.\n\nReturns:\n    One page of users with the cursor for the next one.",
+        "operationId": "list_users_api_v1_users_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/UserRead"
-                  },
-                  "title": "Response List Users Api V1 Users  Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/UserPage"
                 }
               }
             },
@@ -3941,8 +4800,8 @@
         ]
       },
       "post": {
-        "description": "Create a user. Administrators only.\n\nArgs:\n    user_create: Validated creation request.\n    _: Authenticated administrator.\n    session: Active database session.\n\nReturns:\n    The created user.\n\nRaises:\n    HTTPException: 409 when the username is already taken.",
-        "operationId": "create_api_user_api_v1_users__post",
+        "description": "Create a user. Administrators only.\n\nArgs:\n    request: Validated creation request.\n    actor: Authenticated administrator.\n    session: Active database session.\n\nReturns:\n    The created user.",
+        "operationId": "create_user_api_v1_users_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4010,7 +4869,337 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Create Api User",
+        "summary": "Create User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}": {
+      "delete": {
+        "description": "Permanently delete a user. Administrators only.\n\nThe deletion is terminal: no restore window exists in this release.\n\nArgs:\n    user_id: User being removed.\n    if_match: Expected user version.\n    actor: Authenticated administrator.\n    session: Active database session.\n\nRaises:\n    ApiError: 409 when the supplied version is not the current one.",
+        "operationId": "delete_user_api_v1_users__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete User",
+        "tags": [
+          "users"
+        ]
+      },
+      "get": {
+        "description": "Return one user. Administrators only.\n\nArgs:\n    user_id: User being read.\n    _: Authenticated administrator.\n    session: Active database session.\n\nReturns:\n    The requested user.",
+        "operationId": "read_user_api_v1_users__user_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read User",
+        "tags": [
+          "users"
+        ]
+      },
+      "patch": {
+        "description": "Apply a versioned update to a user. Administrators only.\n\nArgs:\n    user_id: User being changed.\n    request: Validated update carrying the expected version.\n    actor: Authenticated administrator.\n    session: Active database session.\n\nReturns:\n    The updated user.",
+        "operationId": "update_user_api_v1_users__user_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}/reset-password": {
+      "post": {
+        "description": "Replace a user's password and revoke their sessions. Administrators only.\n\nArgs:\n    user_id: User whose password is replaced.\n    request: Validated replacement password.\n    actor: Authenticated administrator.\n    session: Active database session.",
+        "operationId": "reset_user_password_api_v1_users__user_id__reset_password_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdministratorPasswordReset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reset User Password",
         "tags": [
           "users"
         ]

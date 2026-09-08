@@ -139,6 +139,43 @@ def _validate_resolver(
         )
 
 
+async def validate_policy(
+    session: AsyncSession,
+    project: Project,
+    mode: AnnotationMode,
+    annotator_ids: list[str],
+    resolver: str | None,
+) -> None:
+    """Reject a policy a project cannot run.
+
+    Shared by the project default and by an annotation batch's snapshot, so a
+    batch can never start under a group the default would have refused.
+
+    Args:
+        session: Active database session.
+        project: Project the policy belongs to.
+        mode: Requested annotation mode.
+        annotator_ids: Requested group, in order.
+        resolver: Requested resolver identifier.
+
+    Raises:
+        ApiError: 422 when the group or the resolver is invalid.
+    """
+    if (
+        mode is AnnotationMode.consensus
+        and len(annotator_ids) < MINIMUM_CONSENSUS_GROUP
+    ):
+        raise ApiError(
+            422,
+            "invalid_consensus_group",
+            "Consensus annotation needs at least two distinct annotators.",
+            details={"minimum": MINIMUM_CONSENSUS_GROUP},
+        )
+    if annotator_ids:
+        await _validate_group(session, project, annotator_ids)
+    _validate_resolver(project, mode, resolver)
+
+
 async def update_policy(
     session: AsyncSession,
     actor: User,
@@ -170,19 +207,7 @@ async def update_policy(
 
     mode = AnnotationMode(request.mode)
     annotator_ids = [str(user_id) for user_id in request.annotator_ids]
-    if (
-        mode is AnnotationMode.consensus
-        and len(annotator_ids) < MINIMUM_CONSENSUS_GROUP
-    ):
-        raise ApiError(
-            422,
-            "invalid_consensus_group",
-            "Consensus annotation needs at least two distinct annotators.",
-            details={"minimum": MINIMUM_CONSENSUS_GROUP},
-        )
-    if annotator_ids:
-        await _validate_group(session, project, annotator_ids)
-    _validate_resolver(project, mode, request.resolver)
+    await validate_policy(session, project, mode, annotator_ids, request.resolver)
 
     before = {
         "mode": policy.mode.value,
