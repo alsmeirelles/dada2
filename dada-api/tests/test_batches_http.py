@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from dada_api.core.security import hash_password
 from dada_api.db.session import async_session_factory
@@ -28,6 +28,7 @@ from dada_api.models.media import ContentObject, Media
 from dada_api.models.project import Project, ProjectClass, ProjectMember
 from dada_api.models.refresh_session import RefreshSession
 from dada_api.models.user import User
+from dada_api.services import batches as batch_service
 
 pytestmark = pytest.mark.skipif(
     os.getenv("DADA_RUN_INTEGRATION") != "1",
@@ -37,7 +38,9 @@ pytestmark = pytest.mark.skipif(
 PASSWORD = "phase4-batch-password"
 MEDIA_COUNT = 12
 TEST_SET_SIZE = 4
+VALIDATION_SET_SIZE = 2
 TRAINING_SIZE = 5
+TRAIN_SPLIT_SIZE = MEDIA_COUNT - TEST_SET_SIZE - VALIDATION_SET_SIZE
 
 DRAFT = {
     "name": "Road defects",
@@ -45,6 +48,7 @@ DRAFT = {
     "task_type": "detection",
     "initial_training_size": TRAINING_SIZE,
     "test_set_size": TEST_SET_SIZE,
+    "validation_set_size": VALIDATION_SET_SIZE,
     "iteration_batch_size": 3,
 }
 
@@ -193,7 +197,7 @@ async def _batches(
     return {item["purpose"]: item for item in response.json()["items"]}
 
 
-async def test_activation_freezes_the_split_and_opens_two_batches(
+async def test_activation_freezes_three_splits_and_opens_full_coverage_batches(
     database: None,
 ) -> None:
     await _create_user("owner")
@@ -206,9 +210,10 @@ async def test_activation_freezes_the_split_and_opens_two_batches(
 
         by_purpose = await _batches(client, token, project["id"])
 
-    assert set(by_purpose) == {"test", "initial_training"}
+    assert set(by_purpose) == {"test", "validation", "initial_training"}
     assert by_purpose["test"]["total_items"] == TEST_SET_SIZE
-    assert by_purpose["initial_training"]["total_items"] == TRAINING_SIZE
+    assert by_purpose["validation"]["total_items"] == VALIDATION_SET_SIZE
+    assert by_purpose["initial_training"]["total_items"] == TRAIN_SPLIT_SIZE
     for batch in by_purpose.values():
         assert batch["status"] == "preparing"
         assert batch["total_assignments"] == 0
@@ -221,9 +226,14 @@ async def test_activation_freezes_the_split_and_opens_two_batches(
 
     assert len(splits) == MEDIA_COUNT
     assert sum(1 for row in splits if row.split == SplitName.test) == TEST_SET_SIZE
+    assert (
+        sum(1 for row in splits if row.split == SplitName.validation)
+        == VALIDATION_SET_SIZE
+    )
+    assert sum(1 for row in splits if row.split == SplitName.train) == TRAIN_SPLIT_SIZE
 
 
-async def test_test_media_never_reaches_the_training_batch(database: None) -> None:
+async def test_held_out_media_never_reaches_the_training_batch(database: None) -> None:
     await _create_user("owner")
     token = await _token("owner")
 
@@ -236,7 +246,7 @@ async def test_test_media_never_reaches_the_training_batch(database: None) -> No
         held_out = set(
             await session.scalars(
                 select(DatasetSplit.media_id).where(
-                    DatasetSplit.split == SplitName.test
+                    DatasetSplit.split.in_((SplitName.validation, SplitName.test))
                 )
             )
         )
@@ -254,9 +264,69 @@ async def test_test_media_never_reaches_the_training_batch(database: None) -> No
                 )
             )
         )
+        validation_media = set(
+            await session.scalars(
+                select(BatchItem.media_id).where(
+                    BatchItem.batch_id == by_purpose["validation"]["id"]
+                )
+            )
+        )
 
-    assert test_media == held_out
+    assert test_media | validation_media == held_out
+    assert not test_media & validation_media
     assert not training_media & held_out
+
+
+async def test_percentage_sizes_are_resolved_and_fixed_at_activation(
+    database: None,
+) -> None:
+    await _create_user("owner")
+    token = await _token("owner")
+
+    async with _client() as client:
+        project = await _ready_project(
+            client,
+            token,
+            test_set_size=None,
+            test_set_percentage=25,
+            validation_set_size=None,
+            validation_set_percentage=20,
+        )
+        activated = await _activate(client, token, project["id"])
+        by_purpose = await _batches(client, token, project["id"])
+
+    assert activated["test_set_size"] == 3
+    assert activated["validation_set_size"] == 3
+    assert by_purpose["test"]["total_items"] == 3
+    assert by_purpose["validation"]["total_items"] == 3
+    assert by_purpose["initial_training"]["total_items"] == 6
+
+
+async def test_first_acquisition_waits_for_every_initial_assignment(
+    database: None,
+) -> None:
+    await _create_user("owner")
+    token = await _token("owner")
+
+    async with _client() as client:
+        project_body = await _ready_project(client, token)
+        await _activate(client, token, project_body["id"])
+        by_purpose = await _batches(client, token, project_body["id"])
+        for batch in by_purpose.values():
+            started = await client.post(
+                f"/api/v1/projects/{project_body['id']}/batches/{batch['id']}/start",
+                headers=_auth(token),
+            )
+            assert started.status_code == 200, started.text
+
+    async with async_session_factory() as session:
+        project = await session.get(Project, project_body["id"])
+        assert project is not None
+        assert not await batch_service.first_acquisition_ready(session, project)
+
+        await session.execute(update(AnnotationAssignment).values(status="submitted"))
+        await session.commit()
+        assert await batch_service.first_acquisition_ready(session, project)
 
 
 async def test_activation_is_refused_twice_and_before_prerequisites(
@@ -318,14 +388,14 @@ async def test_single_mode_start_creates_one_unclaimed_assignment_per_item(
     body = started.json()
     assert body["status"] == "annotating"
     assert body["started_at"] is not None
-    assert body["total_items"] == TRAINING_SIZE
-    assert body["total_assignments"] == TRAINING_SIZE
+    assert body["total_items"] == TRAIN_SPLIT_SIZE
+    assert body["total_assignments"] == TRAIN_SPLIT_SIZE
     assert body["submitted_assignments"] == 0
 
     async with async_session_factory() as session:
         owners = list(await session.scalars(select(AnnotationAssignment.annotator_id)))
 
-    assert owners == [None] * TRAINING_SIZE
+    assert owners == [None] * TRAIN_SPLIT_SIZE
 
 
 async def _consensus_project(
@@ -384,8 +454,8 @@ async def test_consensus_start_creates_one_assignment_per_group_member(
         )
 
     assert started.status_code == 200, started.text
-    assert started.json()["total_items"] == TRAINING_SIZE
-    assert started.json()["total_assignments"] == TRAINING_SIZE * 2
+    assert started.json()["total_items"] == TRAIN_SPLIT_SIZE
+    assert started.json()["total_assignments"] == TRAIN_SPLIT_SIZE * 2
 
     async with async_session_factory() as session:
         pairs = [
@@ -397,7 +467,7 @@ async def test_consensus_start_creates_one_assignment_per_group_member(
             )
         ]
 
-    assert len(pairs) == len(set(pairs)) == TRAINING_SIZE * 2
+    assert len(pairs) == len(set(pairs)) == TRAIN_SPLIT_SIZE * 2
     assert {annotator for _, annotator in pairs} == set(project["annotator_ids"])
 
 

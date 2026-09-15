@@ -1,11 +1,13 @@
 # Fase 4: Ativação, Seleções Reprodutíveis, Lotes e Administração de Usuários
 
-Status: API concluída em 2026-09-08. O trabalho do App **não** faz parte desta
-entrega.
+Status: API concluída em 2026-09-08 e fluxo de splits ajustado em 2026-09-15.
+O trabalho do App **não** faz parte desta entrega.
 
 Plano de referência: [api-implementation-plan.md](../api-implementation-plan.md).
 Plano do App: [annotator-disagreement-adaptation-plan.md](../../../dada-app/docs/annotator-disagreement-adaptation-plan.md).
 Guia de operação: [development.md](../development.md).
+Revisão do fluxo de dados e aderência para aprendizado ativo:
+[dataset-split-workflow-review.md](../dataset-split-workflow-review.md).
 
 ## Objetivo
 
@@ -26,13 +28,14 @@ São duas frentes independentes que o plano entrega juntas:
 
 ### Persistência
 
-Migração `20260908_0005`.
+Migrações `20260908_0005` e `20260915_0006`.
 
 | Mudança | Descrição |
 | --- | --- |
 | `users.version` | Coluna nova. O contrato exige versão otimista em `UserRead` e `UserUpdate` |
 | `audit_entries.project_id` | Passou a aceitar `NULL` (ver **D1**) |
-| `dataset_splits` | A metade `train` ou `test` de cada imagem, escrita uma vez na ativação e nunca atualizada |
+| `projects` | Configuração de validação e alternativas percentuais para validação e teste; percentuais são resolvidos na ativação |
+| `dataset_splits` | A partição `train`, `validation` ou `test` de cada imagem, escrita uma vez na ativação e nunca atualizada |
 | `annotation_batches` | Conjunto selecionado + snapshot da política + proveniência da seleção |
 | `annotation_batch_annotators` | O grupo de consenso congelado, ordenado |
 | `batch_items` | Uma imagem selecionada dentro de um lote |
@@ -67,19 +70,35 @@ pode esquecer de rodar.
 
 | Rota | Função |
 | --- | --- |
-| `POST /api/v1/projects/{id}/activate` | Congela o split, cria os dois lotes iniciais, ativa o projeto |
+| `POST /api/v1/projects/{id}/activate` | Congela três splits, cria três lotes de cobertura completa e ativa o projeto |
 | `GET /api/v1/projects/{id}/batches` | Inventário paginado dos lotes (ver **D7**) |
 | `GET /api/v1/projects/{id}/batches/{batch_id}` | Snapshot da política e contagens |
 | `PATCH /api/v1/projects/{id}/batches/{batch_id}` | Edita a política enquanto `preparing` |
 | `POST /api/v1/projects/{id}/batches/{batch_id}/start` | Congela e gera os assignments |
 
-A ativação executa numa transação só: congela `dataset_splits` para todas as
-imagens, cria o lote `test` e o lote `initial_training`, copia a política padrão
-para dentro de cada um e move o projeto de `draft` para `active`.
+A ativação executa numa transação só: resolve tamanhos percentuais, congela
+`dataset_splits` para todas as imagens, cria os lotes `test`, `validation` e
+`initial_training`, copia a política padrão para dentro de cada um e move o
+projeto de `draft` para `active`.
 
-A metade de teste é sorteada **primeiro, do dataset inteiro**; o treino inicial
-sai do que sobrou. É essa ordem que torna o conjunto de avaliação genuinamente
-reservado, em vez de filtrado depois.
+Teste é sorteado **primeiro, do dataset inteiro**; validação sai do restante e
+treino recebe o que sobrou. Cada lote cobre integralmente o próprio split. A
+função `first_acquisition_ready` exige assignments criados e nenhum assignment
+`pending` nos três lotes antes da primeira aquisição futura.
+
+### Tamanhos dos splits
+
+Teste e validação aceitam exatamente uma forma de tamanho: contagem absoluta
+(`test_set_size`/`validation_set_size`) ou percentual maior que 0 e menor que 100
+(`test_set_percentage`/`validation_set_percentage`). O percentual é convertido
+com arredondamento para cima sobre o total existente na ativação; a contagem
+resultante fica gravada e não é recalculada.
+
+`initial_training_size` continua sendo a capacidade mínima exigida para o
+treino. O lote `initial_training` cobre todo o restante do split `train`, pois
+as três partições precisam terminar a anotação antes da primeira aquisição.
+Clientes anteriores recebem validação padrão de uma imagem; clientes novos
+devem informar a escolha explicitamente.
 
 ### Seleção reprodutível
 
@@ -174,7 +193,7 @@ chamado, e o docstring de `delete_user` diz por quê.
 
 | Item | Motivo |
 | --- | --- |
-| Lotes de `acquisition` | Precisam de uma iteração, que precisa de um modelo treinado. Fase 7. A coluna `purpose` já carrega os três valores, então acrescentar é uma linha, não uma migração |
+| Lotes de `acquisition` | Precisam de uma iteração e de um modelo treinado. Fase 7. O guard de conclusão das anotações iniciais já existe para o produtor futuro |
 | `GET /projects/{id}/iterations` e `/statistics` | Ver **D7**. O App já as chama e recebe `404`; é dívida anterior a esta fase |
 | Fila, leases, rascunhos e submissões | Fase 5 |
 | Trabalho do App: `/admin/users`, troca de senha e visibilidade de lotes | Fora desta entrega, como na Fase 3 |
@@ -182,8 +201,14 @@ chamado, e o docstring de `delete_user` diz por quê.
 
 ## Verificação
 
-Executado contra PostgreSQL e Redis reais dos containers do Compose, com o
-ambiente conda `dada2` (uv não está instalado nesta máquina).
+O ajuste de 2026-09-15 acrescentou testes para os três splits, resolução de
+percentuais e bloqueio da primeira aquisição. Nesta revisão local, os **229
+testes** passaram com integração habilitada, lint e formatação ficaram limpos,
+a revisão `20260915_0006` foi aplicada, `alembic check` não encontrou
+divergência e `openapi.json` foi regenerado.
+
+A entrega original foi executada contra PostgreSQL e Redis reais dos containers
+do Compose, com o ambiente conda `dada2` (uv não está instalado nesta máquina).
 
 - `ruff check` e `ruff format --check`: limpos.
 - `alembic check`: sem divergência entre o modelo e a migração.
@@ -195,9 +220,10 @@ ambiente conda `dada2` (uv não está instalado nesta máquina).
 
 ### Cobertura do critério de saída
 
-> A mesma entrada e seed reproduzem a seleção; mídia de teste nunca entra em
-> aquisição; todo item de lote de consenso tem exatamente um assignment por
-> anotador snapshotado; starts que falham revertem completamente.
+> A mesma entrada e seed reproduzem a seleção; validação e teste permanecem
+> reservados; toda mídia dos três splits entra em um lote inicial; todo item de
+> lote de consenso tem exatamente um assignment por anotador snapshotado;
+> starts que falham revertem completamente.
 > Administradores conseguem criar, atualizar, redefinir, desabilitar e remover
 > com segurança usuários elegíveis; todos os usuários trocam a própria senha;
 > nenhum não-administrador acessa ações globais de usuário.
@@ -205,9 +231,12 @@ ambiente conda `dada2` (uv não está instalado nesta máquina).
 | Cláusula | Como foi provado |
 | --- | --- |
 | Mesma entrada e seed reproduzem a seleção | Teste unitário da função pura: duas chamadas com a mesma entrada ordenada e o mesmo seed devolvem lista idêntica; seed diferente devolve outra; entrada reordenada tem outro fingerprint |
+| Três splits fixos | A ativação materializa exatamente uma linha `train`, `validation` ou `test` por mídia e cria um lote de cobertura completa para cada partição |
+| Tamanhos percentuais | Percentuais são arredondados para cima, persistidos como contagens na ativação e exercitados junto às alternativas absolutas |
+| Barreira da primeira aquisição | O guard permanece falso com assignments pendentes e só libera depois da conclusão de todos os assignments dos três lotes |
 | Mídia de teste nunca entra em aquisição | Nenhum `media_id` do split `test` aparece nos itens do lote `initial_training`, e os itens do lote `test` são exatamente o split `test` |
-| Um assignment por anotador snapshotado | Grupo de dois sobre cinco itens gera dez assignments, todos os pares `(item, anotador)` distintos e cobrindo exatamente o grupo |
-| Assignments em modo `single` | Cinco itens geram cinco assignments, todos com `annotator_id` nulo |
+| Um assignment por anotador snapshotado | Um lote em consenso gera um assignment por par `(item, anotador)`, sem duplicatas e cobrindo exatamente o grupo |
+| Assignments em modo `single` | Cada item gera um assignment com `annotator_id` nulo |
 | Starts que falham revertem completamente | Um membro do grupo removido do projeto depois do snapshot faz o `start` devolver `invalid_consensus_group`, com zero assignments no banco e o lote ainda em `preparing` sem `started_at` |
 | Política congela depois do start | `PATCH` num lote `annotating` devolve `policy_locked`; enquanto `preparing`, funciona. Um segundo `start` devolve `batch_already_started` |
 | Snapshot é imune à política padrão | Editar o padrão do projeto depois da ativação não muda o modo, o grupo nem o resolver do lote |

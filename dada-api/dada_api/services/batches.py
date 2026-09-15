@@ -99,11 +99,11 @@ async def freeze_and_create(
     session: AsyncSession,
     project: Project,
 ) -> list[AnnotationBatch]:
-    """Freeze the train/test split and open the project's first two batches.
+    """Freeze the three-way split and open its annotation batches.
 
-    The test half is drawn from the whole dataset first and the training set
-    from what remains, so no image can reach both. That ordering is what makes
-    the evaluation set genuinely held out rather than filtered out later.
+    Test is drawn first and validation from the remainder. Train receives
+    everything left. Each split gets a full-coverage annotation batch, so the
+    first acquisition can later require completion of all three.
 
     The caller commits, so a failure anywhere leaves the project untouched.
 
@@ -112,33 +112,115 @@ async def freeze_and_create(
         project: Project being activated.
 
     Returns:
-        The test and initial-training batches, in that order.
+        The test, validation, and initial-training batches, in that order.
     """
     media_ids = await _ordered_media_ids(session, project)
+    if project.test_set_size is None or project.validation_set_size is None:
+        raise ValueError("held-out sizes must be resolved before freezing")
+
     test_ids = selection.choose(media_ids, project.test_set_size, selection.new_seed())
-    held_out = set(test_ids)
-    train_pool = [media_id for media_id in media_ids if media_id not in held_out]
+    test_set = set(test_ids)
+    after_test = [media_id for media_id in media_ids if media_id not in test_set]
+    validation_ids = selection.choose(
+        after_test, project.validation_set_size, selection.new_seed()
+    )
+    validation_set = set(validation_ids)
+    train_ids = [
+        media_id
+        for media_id in media_ids
+        if media_id not in test_set and media_id not in validation_set
+    ]
 
     for media_id in media_ids:
+        split = SplitName.train
+        if media_id in test_set:
+            split = SplitName.test
+        elif media_id in validation_set:
+            split = SplitName.validation
         session.add(
             DatasetSplit(
                 project_id=project.id,
                 media_id=media_id,
-                split=SplitName.test if media_id in held_out else SplitName.train,
+                split=split,
             )
         )
 
     test_batch = await _create_batch(
         session, project, BatchPurpose.test, test_ids, project.test_set_size
     )
+    validation_batch = await _create_batch(
+        session,
+        project,
+        BatchPurpose.validation,
+        validation_ids,
+        project.validation_set_size,
+    )
     training_batch = await _create_batch(
         session,
         project,
         BatchPurpose.initial_training,
-        train_pool,
-        project.initial_training_size,
+        train_ids,
+        len(train_ids),
     )
-    return [test_batch, training_batch]
+    return [test_batch, validation_batch, training_batch]
+
+
+async def first_acquisition_ready(
+    session: AsyncSession,
+    project: Project,
+) -> bool:
+    """Return whether every frozen image has completed its first annotation.
+
+    Acquisition is deferred to a later phase. That phase must call this guard
+    before creating its first acquisition batch.
+    """
+    purposes = (
+        BatchPurpose.initial_training,
+        BatchPurpose.validation,
+        BatchPurpose.test,
+    )
+    split_items = await session.scalar(
+        select(func.count())
+        .select_from(DatasetSplit)
+        .where(DatasetSplit.project_id == project.id)
+    )
+    batch_items = await session.scalar(
+        select(func.count())
+        .select_from(BatchItem)
+        .join(AnnotationBatch, AnnotationBatch.id == BatchItem.batch_id)
+        .where(
+            AnnotationBatch.project_id == project.id,
+            AnnotationBatch.purpose.in_(purposes),
+        )
+    )
+    total_assignments = await session.scalar(
+        select(func.count())
+        .select_from(AnnotationAssignment)
+        .join(BatchItem, BatchItem.id == AnnotationAssignment.batch_item_id)
+        .join(AnnotationBatch, AnnotationBatch.id == BatchItem.batch_id)
+        .where(
+            AnnotationBatch.project_id == project.id,
+            AnnotationBatch.purpose.in_(purposes),
+        )
+    )
+    pending_assignments = await session.scalar(
+        select(func.count())
+        .select_from(AnnotationAssignment)
+        .join(BatchItem, BatchItem.id == AnnotationAssignment.batch_item_id)
+        .join(AnnotationBatch, AnnotationBatch.id == BatchItem.batch_id)
+        .where(
+            AnnotationBatch.project_id == project.id,
+            AnnotationBatch.purpose.in_(purposes),
+            AnnotationAssignment.status == ASSIGNMENT_PENDING,
+        )
+    )
+    expected = split_items or 0
+    return (
+        expected > 0
+        and batch_items == expected
+        and (total_assignments or 0) >= expected
+        and pending_assignments == 0
+    )
 
 
 async def annotator_ids(session: AsyncSession, batch: AnnotationBatch) -> list[str]:

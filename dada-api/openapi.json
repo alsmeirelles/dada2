@@ -366,6 +366,7 @@
           "purpose": {
             "enum": [
               "initial_training",
+              "validation",
               "test",
               "acquisition"
             ],
@@ -971,17 +972,61 @@
             "title": "Task Type",
             "type": "string"
           },
+          "test_set_percentage": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 100.0,
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Set Percentage"
+          },
           "test_set_size": {
-            "minimum": 1.0,
-            "title": "Test Set Size",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Set Size"
+          },
+          "validation_set_percentage": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 100.0,
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Set Percentage"
+          },
+          "validation_set_size": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Set Size"
           }
         },
         "required": [
           "name",
           "task_type",
           "initial_training_size",
-          "test_set_size",
           "iteration_batch_size"
         ],
         "title": "ProjectCreate",
@@ -1189,14 +1234,54 @@
             "title": "Task Type",
             "type": "string"
           },
+          "test_set_percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Set Percentage"
+          },
           "test_set_size": {
-            "title": "Test Set Size",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Set Size"
           },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "validation_set_percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Set Percentage"
+          },
+          "validation_set_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Set Size"
           },
           "version": {
             "title": "Version",
@@ -1212,6 +1297,9 @@
           "owner_id",
           "initial_training_size",
           "test_set_size",
+          "test_set_percentage",
+          "validation_set_size",
+          "validation_set_percentage",
           "iteration_batch_size",
           "version",
           "created_at",

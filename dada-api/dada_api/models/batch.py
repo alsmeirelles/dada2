@@ -26,6 +26,7 @@ class BatchPurpose(StrEnum):
     """Why a set of media was selected for annotation."""
 
     initial_training = "initial_training"
+    validation = "validation"
     test = "test"
     acquisition = "acquisition"
 

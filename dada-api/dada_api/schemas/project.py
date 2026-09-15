@@ -1,10 +1,10 @@
 """Project contract schemas used by the v1 OpenAPI surface."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 TaskType = Literal["classification", "detection", "segmentation"]
 ProjectStatus = Literal[
@@ -21,8 +21,33 @@ class ProjectCreate(BaseModel):
     description: str | None = Field(default=None, max_length=4000)
     task_type: TaskType
     initial_training_size: int = Field(ge=1)
-    test_set_size: int = Field(ge=1)
+    test_set_size: int | None = Field(default=None, ge=1)
+    test_set_percentage: float | None = Field(default=None, gt=0, lt=100)
+    validation_set_size: int | None = Field(default=None, ge=1)
+    validation_set_percentage: float | None = Field(default=None, gt=0, lt=100)
     iteration_batch_size: int = Field(ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_split_size_definitions(cls, value: Any) -> Any:
+        """Require one count or percentage for each held-out split."""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if (
+            "validation_set_size" not in data
+            and "validation_set_percentage" not in data
+        ):
+            data["validation_set_size"] = 1
+        for prefix in ("test", "validation"):
+            count = data.get(f"{prefix}_set_size")
+            percentage = data.get(f"{prefix}_set_percentage")
+            if (count is None) == (percentage is None):
+                raise ValueError(
+                    f"define exactly one of {prefix}_set_size or "
+                    f"{prefix}_set_percentage"
+                )
+        return data
 
 
 class ProjectUpdate(BaseModel):
@@ -43,7 +68,10 @@ class ProjectResponse(BaseModel):
     status: ProjectStatus
     owner_id: UUID
     initial_training_size: int
-    test_set_size: int
+    test_set_size: int | None
+    test_set_percentage: float | None
+    validation_set_size: int | None
+    validation_set_percentage: float | None
     iteration_batch_size: int
     version: int
     created_at: datetime

@@ -7,6 +7,7 @@ from uuid import uuid4
 from sqlalchemy import (
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -52,7 +53,12 @@ class Project(Base):
         index=True,
     )
     initial_training_size: Mapped[int] = mapped_column(Integer)
-    test_set_size: Mapped[int] = mapped_column(Integer)
+    test_set_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    test_set_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    validation_set_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    validation_set_percentage: Mapped[float | None] = mapped_column(
+        Float, nullable=True
+    )
     iteration_batch_size: Mapped[int] = mapped_column(Integer)
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(

@@ -130,6 +130,9 @@ installation is told what actually blocks the change.
   "owner_id": "uuid",
   "initial_training_size": 100,
   "test_set_size": 50,
+  "test_set_percentage": null,
+  "validation_set_size": 20,
+  "validation_set_percentage": null,
   "iteration_batch_size": 25,
   "version": 1,
   "created_at": "2026-07-18T12:00:00Z",
@@ -230,10 +233,12 @@ owner-only and returns `204`.
 
 ## Annotation batches — Phase 4
 
-Activating a project freezes its train/test split and opens two batches: `test`
-over the whole held-out half, and `initial_training` over a random selection
-from the rest. The project moves from `draft` to `active` in the same
-transaction, so an active project always has its batches.
+Activating a project freezes its train/validation/test split and opens three
+full-coverage batches: `test`, `validation`, and `initial_training` for the
+train remainder. Test and validation may be configured as absolute counts or
+percentages; percentages resolve to fixed counts at activation. The project
+moves from `draft` to `active` in the same transaction, so an active project
+always has its splits and batches.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -243,7 +248,7 @@ transaction, so an active project always has its batches.
 | `POST` | `/api/v1/projects/{project_id}/batches/{batch_id}/start` | Freeze it and generate assignments |
 
 ```ts
-type BatchPurpose = 'initial_training' | 'test' | 'acquisition'
+type BatchPurpose = 'initial_training' | 'validation' | 'test' | 'acquisition'
 type BatchStatus =
   | 'preparing' | 'annotating' | 'resolving'
   | 'review_required' | 'resolved' | 'closed' | 'failed'
@@ -289,9 +294,9 @@ phases; `GET /iterations` and `GET /statistics` are not implemented yet.
 
 ## Iterations and splits
 
-The API creates immutable train/test split membership when a project is
-activated. The test set is annotated randomly as specified by the product
-requirements but excluded from active-learning acquisition. Every iteration
+The API creates immutable train/validation/test membership when a project is
+activated. All three sets are annotated before the first acquisition may
+start; validation and test remain excluded from acquisition. Every iteration
 records its selection strategy and model/run identifiers for reproducibility.
 
 Iteration states are:

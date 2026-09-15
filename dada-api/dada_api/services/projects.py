@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime
+from math import ceil
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,19 @@ from dada_api.services import batches, storage
 logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 50
+
+
+def resolve_split_size(
+    total_media: int,
+    absolute_size: int | None,
+    percentage: float | None,
+) -> int:
+    """Resolve a held-out split definition to an absolute activation count."""
+    if percentage is not None:
+        return ceil(total_media * percentage / 100)
+    if absolute_size is None:
+        raise ValueError("a split count or percentage is required")
+    return absolute_size
 
 
 async def create_project(
@@ -47,6 +61,9 @@ async def create_project(
         owner_id=creator.id,
         initial_training_size=request.initial_training_size,
         test_set_size=request.test_set_size,
+        test_set_percentage=request.test_set_percentage,
+        validation_set_size=request.validation_set_size,
+        validation_set_percentage=request.validation_set_percentage,
         iteration_batch_size=request.iteration_batch_size,
         version=1,
     )
@@ -175,10 +192,31 @@ async def missing_activation_prerequisites(
     )
     if not media_count:
         missing.append("media")
-    elif media_count < project.initial_training_size + project.test_set_size:
-        missing.append("insufficient_media")
+    elif (
+        project.test_set_size is not None or project.test_set_percentage is not None
+    ) and (
+        project.validation_set_size is not None
+        or project.validation_set_percentage is not None
+    ):
+        test_size = resolve_split_size(
+            media_count, project.test_set_size, project.test_set_percentage
+        )
+        validation_size = resolve_split_size(
+            media_count,
+            project.validation_set_size,
+            project.validation_set_percentage,
+        )
+        if media_count < project.initial_training_size + test_size + validation_size:
+            missing.append("insufficient_media")
 
-    if project.initial_training_size < 1 or project.test_set_size < 1:
+    if (
+        project.initial_training_size < 1
+        or ((project.test_set_size is None) == (project.test_set_percentage is None))
+        or (
+            (project.validation_set_size is None)
+            == (project.validation_set_percentage is None)
+        )
+    ):
         missing.append("split_sizes")
 
     return missing
@@ -217,6 +255,17 @@ async def activate_project(session: AsyncSession, project: Project) -> Project:
             details={"missing": missing},
         )
 
+    media_count = await session.scalar(
+        select(func.count()).select_from(Media).where(Media.project_id == project.id)
+    )
+    project.test_set_size = resolve_split_size(
+        media_count or 0, project.test_set_size, project.test_set_percentage
+    )
+    project.validation_set_size = resolve_split_size(
+        media_count or 0,
+        project.validation_set_size,
+        project.validation_set_percentage,
+    )
     await batches.freeze_and_create(session, project)
     project.status = "active"
     await session.commit()

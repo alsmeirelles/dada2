@@ -40,6 +40,7 @@ DRAFT = {
     "task_type": "detection",
     "initial_training_size": 1,
     "test_set_size": 1,
+    "validation_set_size": 1,
     "iteration_batch_size": 1,
 }
 
@@ -767,11 +768,13 @@ async def test_activation_requires_classes_and_ingested_media(database: None) ->
             [
                 _entry("f1", "one.png", image),
                 _entry("f2", "two.png", _png(color=(0, 255, 0))),
+                _entry("f3", "three.png", _png(color=(0, 0, 255))),
             ],
         )
         upload_id = created.json()["id"]
         await _put_chunk(client, token, upload_id, "f1", image)
         await _put_chunk(client, token, upload_id, "f2", _png(color=(0, 255, 0)))
+        await _put_chunk(client, token, upload_id, "f3", _png(color=(0, 0, 255)))
         await client.post(
             f"/api/v1/uploads/{upload_id}/complete",
             headers={**_auth(token), "Idempotency-Key": "activate-complete"},

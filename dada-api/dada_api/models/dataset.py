@@ -1,4 +1,4 @@
-"""Frozen train and test membership created when a project is activated."""
+"""Frozen train, validation, and test membership created at activation."""
 
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -11,18 +11,19 @@ from dada_api.db.base import Base
 
 
 class SplitName(StrEnum):
-    """Which half of the frozen dataset a media item belongs to."""
+    """Which part of the frozen dataset a media item belongs to."""
 
     train = "train"
+    validation = "validation"
     test = "test"
 
 
 class DatasetSplit(Base):
-    """One media item's permanent assignment to the train or test half.
+    """One media item's permanent train, validation, or test assignment.
 
     Rows are written once, in the activation transaction, and never updated.
-    The test half is annotated but is excluded from active-learning
-    acquisition, so this membership is what keeps the evaluation set honest.
+    Validation and test are annotated but excluded from active-learning
+    acquisition, so this membership keeps both evaluation sets honest.
     """
 
     __tablename__ = "dataset_splits"
