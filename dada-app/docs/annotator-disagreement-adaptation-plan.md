@@ -149,6 +149,11 @@ type AnnotationPolicyDraft =
     }
 ```
 
+Phase 5 also adds a browser-only acquisition choice matching the server's
+closed enum (active learning or random). It is submitted as part of project
+creation and reconstructed from the persisted project for draft recovery; the
+browser must not infer it from whether a model run happens to exist.
+
 Usernames are acceptable only in the unsaved form. The persisted API policy
 uses user IDs returned after member creation/resolution.
 
@@ -173,6 +178,9 @@ project wizard:
   items rather than images.
 - Add policy mode, group size, resolver, and estimated work to the final review
   screen.
+- In Phase 5, add the active-learning choice and state plainly that disabling
+  it makes future acquisition batches reproducible random selections from the
+  eligible unlabeled pool.
 
 The wizard must not imply that automated consensus is guaranteed to succeed.
 Its text should state that ambiguous items require owner/manager review.
@@ -399,6 +407,22 @@ versions must leave canvas work recoverable without pretending it was accepted.
 These phases align with the same-numbered API phases. App code depending on a
 new route begins only after that route and its generated types are stable.
 
+For Phases 5–9, the matching phase **must not start implementation** while any
+shared API decision or App decision assigned to it in the
+[pending decision register](#pending-decision-register-for-phases-5-9) remains
+unresolved. Before code begins, create or update the canonical cross-project
+decision record at `../../dada-api/docs/phases/phase_N.md`; document rationale,
+rejected alternatives, API/UI/data effects, approver, and date; then update the
+decision status in both plans. Phase 6 additionally requires the API's
+[Consensus Engine Requirements](../../dada-api/docs/consensus-engine-requirements.md)
+to contain the complete approved functionality, have no unresolved blocking
+decision, and be marked **Approved**.
+
+Phase 5 additionally requires implementation and verification of the API's
+[Phase 4.1 annotation-sequence revision plan](../../dada-api/docs/phase-4-annotation-sequence-revision-plan.md),
+including its development-project reset/rebuild. The App must not begin Phase 5
+work until that prerequisite and the Phase 5 decision gate are both satisfied.
+
 ### Phase 2: project policy setup — implemented 2026-08-30
 
 - Correct the Phase 1 current-user type.
@@ -488,14 +512,39 @@ submission.
 
 ### Phase 5: assignment workspace
 
+**Start gate:** first complete the [Phase 4.1 annotation-sequence revision
+plan](../../dada-api/docs/phase-4-annotation-sequence-revision-plan.md),
+including verification and the development-project reset/rebuild. Then resolve
+shared decisions `P5-01`–`P5-06` and App decisions `A5-01`–`A5-04` in
+`dada-api/docs/phases/phase_5.md`. Phase 5 implementation must not start before
+both prerequisites are satisfied.
+
+- Adjust project creation so the owner explicitly chooses whether the project
+  uses active learning. Persist and display the server value in setup, review,
+  resumable drafts, and project settings according to the decided mutability
+  rule.
+- When active learning is not selected, explain that acquisition batches are
+  reproducible random selections from the remaining eligible unlabeled pool.
+  Do not show model-ranking language, scores, or training prerequisites for
+  that acquisition path.
+- When active learning is selected, explain that acquisition uses the
+  configured learning adapter after the Phase 7 learning boundary is
+  available.
 - Convert queue, lease, draft, completion, navigation, and recovery behavior to
   assignment scope.
 - Revise progress language and add blindness tests.
 
-Exit gate: two browser sessions can independently annotate the same image,
-neither sees peer evidence, and their local recovery records do not collide.
+Exit gate: project creation and recovery preserve the acquisition strategy and
+the random path is described accurately. Two browser sessions can
+independently annotate the same image, neither sees peer evidence, and their
+local recovery records do not collide.
 
 ### Phase 6: resolution and adjudication
+
+**Start gate:** resolve shared decisions `P6-01`–`P6-07` and App decisions
+`A6-01`–`A6-04` in `dada-api/docs/phases/phase_6.md`; approve the complete
+[Consensus Engine Requirements](../../dada-api/docs/consensus-engine-requirements.md)
+before implementing API or App consensus behavior.
 
 - Add resolution progress and review-required states.
 - Build the review queue, evidence comparison, retry, acceptance, editing, and
@@ -507,6 +556,9 @@ manager's local work.
 
 ### Phase 7: learning and quality metrics
 
+**Start gate:** resolve shared decisions `P7-01`–`P7-05` and App decisions
+`A7-01`–`A7-03` in `dada-api/docs/phases/phase_7.md`.
+
 - Display training/export progress only after all required resolutions exist.
 - Add agreement/review statistics and assisted-segmentation contract changes.
 
@@ -514,6 +566,9 @@ Exit gate: unresolved submissions are never represented as training data in
 the UI, and assisted segmentation remains scoped to the active assignment.
 
 ### Phase 8: real-time and production hardening
+
+**Start gate:** resolve shared decisions `P8-01`–`P8-04` and App decisions
+`A8-01`–`A8-03` in `dada-api/docs/phases/phase_8.md`.
 
 - Add the new event vocabulary, targeted invalidation, sequence-gap recovery,
   permission-safe caching, and load-friendly pagination/lazy evidence loading.
@@ -523,12 +578,40 @@ state without evidence leakage.
 
 ### Phase 9: coordinated release acceptance
 
+**Start gate:** resolve shared decisions `P9-01`–`P9-03` and App decisions
+`A9-01`–`A9-02` in `dada-api/docs/phases/phase_9.md`.
+
 - Update `DESCRIPTION.md`, `docs/api-contract.md`, `docs/architecture.md`,
   `docs/testing.md`, and `README.md` to reflect the implemented behavior.
 - Record the compatible API/OpenAPI and resolver versions.
 
 Exit gate: the complete single-mode, automatic-consensus, and manual-review
 journeys pass in the two latest Chrome and Firefox releases.
+
+## Pending decision register for Phases 5–9
+
+All entries below are **PENDING**. Shared API decisions `P5-01`–`P9-03` are
+defined in the [API implementation plan](../../dada-api/docs/api-implementation-plan.md#pending-decision-register-for-phases-5-9)
+and also block the App phase that references them.
+
+| ID | Pending App decision | Required documented outcome |
+| --- | --- | --- |
+| `A5-01` | Acquisition-strategy setup UX | Control placement and wording, default shown to users, validation, review summary, draft recovery, settings visibility, and treatment when the API says the setting is locked |
+| `A5-02` | Random-acquisition presentation | Explanation of unlabeled-pool eligibility and reproducibility, manager visibility of seed/strategy provenance, empty/exhausted-pool messaging, and removal of model-guided language |
+| `A5-03` | Assignment queue and lease UX | Queue ordering/filtering, “next” behavior, lease timer/warnings, renewal and offline behavior, manager revocation/reassignment messaging, and accessibility behavior |
+| `A5-04` | Submission and recovery UX | Reopen rules, success terminology, stale-draft reconciliation choices, recovery expiry/display, empty-annotation confirmation, and visibility after own submission |
+| `A6-01` | Review queue information design | Default filters/sort, row diagnostics, pagination, lazy image/evidence loading, reason vocabulary, and aggregate vs. named evidence visibility |
+| `A6-02` | Evidence comparison interaction | Overlay colors/patterns, side-by-side breakpoint, keyboard controls, task-specific metrics, large-object handling, and nonvisual equivalents |
+| `A6-03` | Adjudication editing and confirmation | Starting source, draft/recovery key, accept/edit/replace/retry confirmations, unsaved-navigation behavior, and stale-version reconciliation |
+| `A6-04` | Resolver configuration UX | Editable approved parameters, advanced-control disclosure, defaults/help text, threshold warnings, and provenance/history presentation |
+| `A7-01` | Learning and random-mode activity UX | Status vocabulary and progress for model-guided versus random acquisition, unavailable-adapter behavior, cancellation/retry actions, and ETA presentation |
+| `A7-02` | Quality and performance presentation | Charts/tables, filters, role visibility, minimum-sample suppression, export affordances, accessibility equivalents, and prohibition on annotator-facing rankings |
+| `A7-03` | Assisted-segmentation UX | Trigger/preview/accept/reject flow, latency/offline behavior, provenance display, keyboard behavior, and recovery interaction |
+| `A8-01` | Connection and recovery UX | Offline/reconnecting indicators, polling cadence visibility, sequence-gap refresh behavior, duplicate-notification suppression, and actions during degraded service |
+| `A8-02` | Real-time cache and privacy boundaries | Query-key ownership, evidence eviction on role/project changes, event-to-query invalidation, cross-tab behavior, and logout cleanup |
+| `A8-03` | Load and accessibility budgets | Page-size defaults, lazy-loading thresholds, canvas/evidence limits, 200% zoom layouts, reduced-motion behavior, and measurable performance budgets |
+| `A9-01` | Browser and end-to-end acceptance matrix | Exact browser/OS versions, roles, task types, single/consensus and active/random acquisition paths, accessibility tooling, and evidence capture |
+| `A9-02` | App release compatibility and rollout | API/OpenAPI compatibility check, feature-availability behavior, cache/storage migration, rollback behavior, telemetry acceptance, and release approvers |
 
 ## Test plan
 
@@ -560,6 +643,9 @@ journeys pass in the two latest Chrome and Firefox releases.
    and reconcile a sequence gap.
 10. Verify keyboard-only use, reduced motion, and 200% zoom in setup,
     annotation, activity, and review screens.
+11. Create projects with active learning enabled and disabled; verify the
+    persisted review/settings value and random-acquisition wording and pool
+    exhaustion behavior.
 
 Run the existing `npm run lint`, `npm test`, and `npm run build` gates for each
 App phase. The coordinated release suite must use the candidate API with no
@@ -571,8 +657,8 @@ request mocking and record its OpenAPI version.
 | --- | --- |
 | `src/api/types.ts` | Align current user with `is_administrator`; consume generated contract types |
 | `src/features/projects/types.ts` | Add local policy draft and policy/batch view models |
-| `src/features/projects/NewProjectPage.tsx` | Add mode, group, resolver, thresholds, cost, and resumable setup UX |
-| `src/features/projects/project-api.ts` | Resolve member IDs, save versioned policy, and resume ordered setup operations |
+| `src/features/projects/NewProjectPage.tsx` | Add mode, group, resolver, thresholds, acquisition strategy, cost, and resumable setup UX |
+| `src/features/projects/project-api.ts` | Persist acquisition strategy, resolve member IDs, save versioned policy, and resume ordered setup operations |
 | `src/features/projects/ProjectSettingsPage.tsx` | Manage members and default policy; link draft projects to editable setup/recovery flow |
 | `src/features/projects/ProjectsPage.tsx` | Show resolved counts and manager review badges/actions |
 | `src/features/annotation/types.ts` | Add assignments, separate submission/resolution state, batches, and events |

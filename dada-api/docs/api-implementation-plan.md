@@ -23,10 +23,13 @@ The baseline for this revision is:
   ordered classes, project membership, activation-prerequisite validation,
   versioned annotation-policy defaults, consensus-group validation, policy and
   membership auditing, and the related authorization actions.
-- API ingestion, iteration, annotation, worker, and real-time behavior remain
-  unimplemented placeholders. No queue or annotation migration has to be
-  preserved, so the new assignment and resolution model should be introduced
-  directly rather than retrofitted onto a single-annotation schema.
+- API Phases 3 and 4 were completed in September 2026. They provide resumable
+  ingestion, fixed train/validation/test splits, reproducible initial batches,
+  assignment generation, user administration, and password management.
+- Assignment queues, annotation documents, consensus workers, learning,
+  iteration execution, and real-time delivery remain for Phases 5–9. No legacy
+  annotation rows need migration, so assignment-scoped annotation should be
+  introduced directly.
 
 The generated API OpenAPI document remains the executable interface. App types
 should ultimately be generated from it; handwritten types may remain only for
@@ -34,9 +37,10 @@ view state that is not part of the wire contract.
 
 ## Product behavior
 
-Every selected image set (initial training, random test, or active-learning
+Every selected image set (initial training, validation, test, or an acquisition
 iteration) receives an immutable annotation-policy snapshot before annotation
-starts. The policy supports two modes:
+starts. Acquisition uses either active-learning ranking or reproducible random
+selection, according to project configuration. The policy supports two modes:
 
 1. `single`: one eligible annotator submits one document for each selected
    image. That submission is promoted to the resolved annotation without a
@@ -66,8 +70,8 @@ concrete need.
 - **Selection**: the reproducible set of media chosen randomly or by active
   learning.
 - **Annotation batch**: a selected set plus its policy snapshot and progress.
-  It has purpose `initial_training`, `test`, or `acquisition` and may belong to
-  an iteration.
+  It has purpose `initial_training`, `validation`, `test`, or `acquisition` and
+  may belong to an iteration.
 - **Assignment**: one annotator's obligation to annotate one batch item.
 - **Lease**: a temporary exclusive edit lock on one assignment, not on the
   underlying image.
@@ -107,7 +111,10 @@ Consensus is a versioned API-worker operation, not a browser calculation. The
 overall workflow is the same for every task: normalize immutable submissions,
 run a task-compatible resolver chosen from server capabilities, preserve full
 provenance, and require manual review when configured quality gates fail.
-Task-specific algorithms, inputs, metrics, and test fixtures are defined in:
+The blocking cross-task specification is
+[Consensus Engine Requirements](consensus-engine-requirements.md); it must be
+approved before Phase 6 implementation. Task-specific algorithms, inputs,
+metrics, and test fixtures are defined in:
 
 | Task | Detailed strategy |
 | --- | --- |
@@ -172,7 +179,7 @@ The remaining migrations should introduce these records:
 | --- | --- | --- |
 | Project setup | projects, project_members, classes, annotation_policy_defaults | one owner; policy versions are optimistic and group members are annotators in the project |
 | Ingestion | upload_sessions, upload_items, chunks, content_objects, media | checksums and dimensions verified before media is usable; no client absolute paths |
-| Learning | dataset_splits, iterations, iteration_selections, model_runs | immutable test split; reproducible selection seed, strategy, input, and model/run IDs |
+| Learning | dataset_splits, iterations, iteration_selections, model_runs | immutable validation/test splits; project-selected active-learning or random acquisition; reproducible seed, strategy, input, and model/run IDs where applicable |
 | Annotation work | annotation_batches, batch_items, annotation_assignments, leases | unique `(batch_item_id, annotator_id)`; at most one active lease per assignment; policy is immutable after annotation starts |
 | Annotation evidence | annotation_documents, annotation_objects, submissions | drafts belong to one assignment; a submitted revision is immutable; at most one accepted submission per assignment |
 | Resolution | resolution_runs, resolution_inputs, resolved_annotations, adjudications | accepted canonical version is explicit; raw inputs are never overwritten; one active resolution job per item/config fingerprint |
@@ -368,7 +375,9 @@ The required changes are summarized here to make API dependencies explicit:
   `project-api.ts` with an annotation-strategy step. The owner selects `single`
   or `consensus`; consensus requires at least two validated project annotators,
   shows the task-appropriate resolver and thresholds, and summarizes the
-  assignment cost (`images × annotators`) before creation/activation.
+  assignment cost (`images × annotators`) before creation/activation. Phase 5
+  also adds the persisted active-learning/random acquisition choice and an
+  accurate review summary for both paths.
 - Because members are currently created after the project, keep the creation
   workflow transactional at the UX level: create the draft, add/resolve member
   usernames, save the policy using returned user IDs, upload, then activate.
@@ -497,7 +506,7 @@ offset, checksum, path, size, retry, and cancellation cases pass against the
 configured shared-server volume store. Cancellation and project deletion leave
 no readable media or temporary upload parts behind.
 
-### Phase 4: activation, reproducible selections, annotation batches, and user administration
+### Phase 4: activation, reproducible selections, annotation batches, and user administration — completed 2026-09-15
 
 User administration is a separate global-administration workstream delivered
 alongside batch activation. A project owner or manager never receives these
@@ -545,8 +554,8 @@ Stable errors include `username_taken`, `user_in_use`,
 `last_active_administrator`, `self_administration_change`, `version_conflict`,
 and `current_password_incorrect`.
 
-- Freeze train/test membership, create initial/test/acquisition selections, and
-  record strategy, seed, model/run identity, and selection inputs.
+- Freeze train/validation/test membership, create full-coverage batches for all
+  three splits, and record strategy, seed, and selection inputs.
 - Create an annotation batch for each selected set, snapshot its policy, and
   generate assignments atomically when it starts.
 - Add batch/iteration state services and prevent policy edits after start.
@@ -566,7 +575,49 @@ snapshotted annotator; failed starts roll back completely. Administrators can
 create, update, reset, disable, and safely remove eligible users; all users can
 change their own password; no non-administrator can access global user actions.
 
+### Mandatory decision gate for Phases 5–9
+
+Phases 5–9 **must not start implementation** while any API decision in the
+[API register](#pending-decision-register-for-phases-5-9) or App decision in
+the [App register](../../dada-app/docs/annotator-disagreement-adaptation-plan.md#pending-decision-register-for-phases-5-9)
+assigned to that phase is unresolved. Before code, migrations, schemas, or UI
+work begins:
+
+1. create or update `docs/phases/phase_N.md`;
+2. add a **Decisions** section that resolves every decision ID assigned to the
+   phase, including rationale, rejected alternatives, contract and migration
+   effects, and the approving owner/date;
+3. update the decision's status in this plan and link to the decision record;
+4. regenerate or approve affected API schemas/examples before dependent App
+   work begins; and
+5. for Phase 6, also complete and approve
+   [Consensus Engine Requirements](consensus-engine-requirements.md).
+6. for Phase 5, also implement and verify every required correction in the
+   [Phase 4.1 annotation-sequence revision plan](phase-4-annotation-sequence-revision-plan.md),
+   then reset and rebuild development projects as that plan requires.
+
+Discovery and experiments may inform a decision, but no production
+implementation may be merged under the phase until this gate is satisfied.
+
 ### Phase 5: assignment queues, leases, drafts, and submissions
+
+**Start gate:** first complete the [Phase 4.1 annotation-sequence revision
+plan](phase-4-annotation-sequence-revision-plan.md), including its required
+verification and development-project reset/rebuild. Then resolve API decisions
+`P5-01`–`P5-06` and App decisions `A5-01`–`A5-04` in
+`docs/phases/phase_5.md`, then change their status in both plans. Phase 5
+implementation must not start before both prerequisites are satisfied.
+
+- Extend project creation with an explicit acquisition strategy: use active
+  learning or do not use active learning. Persist the choice as a versioned,
+  API-visible project setting and return it in project reads.
+- When active learning is not selected, acquisition batches are reproducible
+  random selections from the current eligible unlabeled pool. They still
+  record strategy, server-generated seed, ordered input fingerprint, requested
+  size, and selected media IDs. Validation and test media are never eligible.
+- When active learning is selected, acquisition is delegated to the versioned
+  learning boundary delivered in Phase 7. Phase 5 defines the contract and
+  state transition without inventing model scores or a temporary algorithm.
 
 - Implement caller-scoped queues and atomic assignment leasing, renewal,
   release, expiry, and manager revocation/reassignment.
@@ -578,18 +629,28 @@ change their own password; no non-administrator can access global user actions.
 
 App work:
 
+- Add the active-learning choice to project creation and review. Explain that
+  disabling it makes each acquisition batch a random sample of the remaining
+  unlabeled pool; do not describe that path as model-guided.
 - Convert the existing workspace, recovery, queue, and annotation API code from
   media-exclusive leases to assignment-exclusive leases while keeping peer
   work blind.
 - Follow the App plan's
   [Phase 5 assignment-workspace work](../../dada-app/docs/annotator-disagreement-adaptation-plan.md#phase-5-assignment-workspace).
 
-Exit gate: concurrent database tests prove that two group members can lease
-different assignments for the same media, but no assignment can be leased
-twice; stale drafts, expired leases, duplicate completions, and cross-user
-access fail correctly.
+Exit gate: project creation persists the acquisition strategy and the
+non-active-learning path produces a reproducible random acquisition that
+excludes validation/test and already selected media. Concurrent database tests
+prove that two group members can lease different assignments for the same
+media, but no assignment can be leased twice; stale drafts, expired leases,
+duplicate completions, and cross-user access fail correctly.
 
 ### Phase 6: consensus engine, diagnostics, and adjudication
+
+**Start gate:** resolve API decisions `P6-01`–`P6-07` and App decisions
+`A6-01`–`A6-04` in `docs/phases/phase_6.md`, complete every blocking item in
+[Consensus Engine Requirements](consensus-engine-requirements.md), and mark
+that document **Approved** before implementing the consensus engine.
 
 - Define the versioned resolver command/result protocol and durable resolution
   jobs. First provide a deterministic fake covering success, ambiguity,
@@ -621,6 +682,10 @@ duplicating them on worker retry.
 
 ### Phase 7: learning boundary, exports, metrics, and assisted segmentation
 
+**Start gate:** resolve API decisions `P7-01`–`P7-05` and App decisions
+`A7-01`–`A7-03` in `docs/phases/phase_7.md`, then change their status in both
+plans.
+
 - Implement the versioned learning port, worker jobs, transactional outbox,
   deterministic training/acquisition adapter, progress, ETA, retries, and
   failure recovery.
@@ -642,6 +707,10 @@ state correctly.
 
 ### Phase 8: real-time delivery and production hardening
 
+**Start gate:** resolve API decisions `P8-01`–`P8-04` and App decisions
+`A8-01`–`A8-03` in `docs/phases/phase_8.md`, then change their status in both
+plans.
+
 - Add short-lived single-use WebSocket tickets, committed outbox events, and
   monotonic per-project sequences for assignments, resolutions, iterations,
   and training.
@@ -657,6 +726,10 @@ evidence cannot leak through events; load tests cover upload, assignment
 contention, consensus bursts, and event fan-out.
 
 ### Phase 9: coordinated release acceptance and documentation
+
+**Start gate:** resolve API decisions `P9-01`–`P9-03` and App decisions
+`A9-01`–`A9-02` in `docs/phases/phase_9.md`, then change their status in both
+plans.
 
 - Update App requirements, architecture, API contract, testing guide, API
   development guide, README files, and generated OpenAPI to use assignment and
@@ -695,6 +768,9 @@ browser tests, the minimum regression matrix includes:
 7. Browser journeys for single mode, two-person consensus, simultaneous same
    image work, lease loss, offline recovery per assignment, automatic
    resolution, manual adjudication, polling fallback, and sequence gaps.
+8. Project creation and iteration journeys for active-learning acquisition and
+   reproducible random acquisition, including exclusion of validation/test and
+   previously selected media.
 
 Repository/service integration tests must use PostgreSQL rather than an
 in-memory substitute. Consensus algorithm tests use small committed golden
@@ -703,6 +779,43 @@ schemas, examples, error envelopes, idempotency, cursors, and required headers
 are contract-tested, not just status codes.
 
 ## Decisions made and required before dependent phases
+
+### Pending decision register for Phases 5–9
+
+Every entry below is **PENDING**. “Document before start” means the decision
+must be resolved in the matching `docs/phases/phase_N.md` under the mandatory
+gate above. A phase cannot be declared started while one of its entries remains
+pending. App-specific decisions are listed separately in the
+[App decision register](../../dada-app/docs/annotator-disagreement-adaptation-plan.md#pending-decision-register-for-phases-5-9)
+and share the same gate and decision record.
+
+| ID | Pending decision | Required documented outcome |
+| --- | --- | --- |
+| `P5-01` | Acquisition-strategy project contract | Field name and enum, default for new projects, mutability before/after activation, version/audit behavior, development-reset treatment, and OpenAPI examples |
+| `P5-02` | Random acquisition semantics | Sampling algorithm/order, seed lifecycle, fingerprint, and provenance. The eligible pool, completed/cancelled/incomplete-item handling, final undersized-batch rule, and `iteration_batch_size` requested-size rule are fixed by the [Phase 4.1 revision plan](phase-4-annotation-sequence-revision-plan.md). |
+| `P5-03` | Lease lifecycle | Duration, renewal window, grace/expiry behavior, fairness and queue ordering, disconnect handling, manager revocation, and concurrent-claim semantics |
+| `P5-04` | Assignment reassignment and submission lifecycle | Reassignment/waiver authority and audit, consensus minimum after changes, whether submitted work may reopen, revision policy, and duplicate-completion response |
+| `P5-05` | Annotation document contract | Versioned classification/detection/segmentation schemas, explicit single-label vs. multi-label project configuration, coordinate precision, empty-annotation semantics, geometry limits, validation errors, and payload/complexity limits |
+| `P5-06` | Blindness release boundary | Exactly what aggregate state an annotator may read before submission, after own submission, after item resolution, and after batch closure; event redaction rules |
+| `P6-01` | Resolver/package catalog | Supported Cleanlab and crowd-kit versions, adapter versions, pipeline IDs, dependency isolation, compatibility policy, and capability fallback behavior |
+| `P6-02` | Resolver configuration and quality gates | Typed parameters, defaults/bounds, task-specific thresholds, calibration dataset and approval evidence, tie/ambiguity rules, and migration from provisional policy IDs |
+| `P6-03` | Segmentation refinement implementation | Maintained STAPLE dependency or approved internal implementation, supported crowd-kit strategies, rasterization/polygonization libraries, and reference fixtures |
+| `P6-04` | Adjudicator independence | Whether a contributor may adjudicate the same item, conflict disclosure, role restrictions, optional independent-adjudicator mode, and audit fields |
+| `P6-05` | Resolution job execution | Worker/queue topology, command/result envelopes, timeouts, retry/backoff limits, cancellation, stale/duplicate result handling, CPU/memory limits, and permanent-failure recovery |
+| `P6-06` | Resolution acceptance/versioning | Automatic acceptance criteria, proposal vs. accepted states, retry configuration/version conflicts, supersession, one-active-result invariant, and adjudication precedence |
+| `P6-07` | Evidence and performance policy | Raw evidence retention/access, raw-to-canonical mapping rules, observation eligibility, privacy/minimum-sample rules, and behavior when a resolution is superseded |
+| `P7-01` | Learning and export protocol | Versioned command/result envelopes, manifest format, artifact storage, accepted-resolution lineage, transport-independent errors, and compatibility policy |
+| `P7-02` | Active-learning implementation | Initial model/training adapter, acquisition score and tie-breaking, cold-start behavior, reproducibility inputs, model/run retention, and behavior when the adapter is unavailable |
+| `P7-03` | Iteration and evaluation policy | Available user-selectable validation metrics and thresholds, comparison direction, training/evaluation cadence, interaction between the user-defined maximum acquisition-iteration count and metric threshold, retry/resume semantics, ETA/progress contract, and failure rollback. The initial training batch is excluded from the acquisition-iteration count and test evaluation is final-only, as fixed by the [Phase 4.1 revision plan](phase-4-annotation-sequence-revision-plan.md). |
+| `P7-04` | Assisted-segmentation provider | Model/provider, request/result schema, artifact/version provenance, limits/timeouts, failure UX contract, and confirmation that suggestions never count as votes |
+| `P7-05` | Quality-statistics publication | Metrics/formulas, authorized roles, minimum sample sizes, suppression/privacy rules, refresh cadence, and whether exports include aggregates |
+| `P8-01` | Event delivery contract | WebSocket topology, ticket TTL/single-use rules, sequence scope and retention, event schemas/redaction, reconnect/gap algorithm, and polling fallback cadence |
+| `P8-02` | Public and worker resource limits | Per-route/user/project rate limits, upload and signed-URL expiry, consensus/training concurrency, queue backpressure, and overload errors |
+| `P8-03` | Reliability and data operations | Service objectives, metrics/alerts, trace sampling, backup schedule, restore drill, RPO/RTO, retention/purge schedule, and runbook owners |
+| `P8-04` | Production deployment topology | API/worker/Redis/PostgreSQL placement, worker sizing/isolation, secret management, rolling restart behavior, and failure-domain assumptions |
+| `P9-01` | Release compatibility freeze | Supported App/API/OpenAPI, migration head, resolver/package versions, browser matrix, and upgrade/downgrade compatibility window |
+| `P9-02` | Release and migration procedure | Deployment order, database migration/rollback rules, worker drain, feature flags if any, rollback limits, and backup checkpoint |
+| `P9-03` | Acceptance ownership | Canonical acceptance dataset, performance/accessibility/security thresholds, responsible approvers, evidence location, and release sign-off procedure |
 
 ### Phase 3 storage and retention — settled
 
@@ -719,18 +832,6 @@ reference cleanup. There is no restore window in the initial release. A future
 phase may add the alternative policy of immediate temporary-part cleanup plus
 soft deletion of projects for a fixed grace period, with a restore flow and a
 scheduled permanent purge.
-
-- Phase 6: pin compatible Cleanlab and crowd-kit versions; define the initial
-  capability-exposed parameter schemas; select the
-  maintained STAPLE implementation or approve an internal implementation
-  validated against reference fixtures; set initial per-task thresholds using
-  representative labeled data rather than arbitrary defaults.
-- Phase 6: decide whether manager adjudication may be performed by the same
-  person who contributed a raw submission. The conservative default is to
-  allow it but record the conflict in provenance; regulated deployments may
-  require an independent adjudicator.
-- Phase 7: define the learning command/result protocol and dataset export
-  format. Celery/Redis is transport, not the domain contract.
 
 The Phase 1 deployment decision remains unchanged: a reverse proxy presents
 App and API as one origin so refresh cookies remain first-party and
@@ -777,8 +878,9 @@ generic review-policy value, not as an algorithm tuning control.
 - Partial quorums drawn from a larger annotator pool.
 - Cross-image or temporal consensus for video.
 - Automated annotator scoring, ranking, or punitive performance workflows.
-- A concrete production active-learning/model-training implementation; it must
-  plug into the learning port without taking ownership of HTTP or persistence.
+- Additional production active-learning/model-training adapters beyond the
+  initial Phase 7 decision. Every adapter must plug into the learning port
+  without taking ownership of HTTP or persistence.
 
 These deferrals do not defer the durable policy, assignments, independent raw
 submissions, task-specific resolver boundary, disagreement metrics, manual

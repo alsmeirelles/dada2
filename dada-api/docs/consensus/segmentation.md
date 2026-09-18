@@ -1,5 +1,10 @@
 # Segmentation Consensus Strategy
 
+> **Phase 6 gate:** This document is a normative task annex to the
+> [Consensus Engine Requirements](../consensus-engine-requirements.md). Do not
+> implement it until that specification is **Approved** and decisions
+> `P6-01`–`P6-07` are documented in `docs/phases/phase_6.md`.
+
 ## Scope
 
 Segmentation consensus also has two stages: object identification/class
