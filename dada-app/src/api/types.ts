@@ -4,6 +4,7 @@ export type User = {
   display_name: string
   is_administrator: boolean
   is_active: boolean
+  version: number
   created_at: string
 }
 

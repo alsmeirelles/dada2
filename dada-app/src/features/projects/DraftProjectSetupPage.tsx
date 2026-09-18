@@ -59,7 +59,11 @@ export function DraftProjectSetupPage() {
     return {
       name: current.name, description: current.description ?? '', taskType: current.task_type,
       classes: (classes.data?.items ?? []).map(({ id, name, color }) => ({ id, name, color })),
-      initialTrainingSize: current.initial_training_size, testSetSize: current.test_set_size,
+      initialTrainingSize: current.initial_training_size,
+      testSetSize: current.test_set_percentage ?? current.test_set_size ?? 1,
+      testSetUnit: current.test_set_percentage !== null ? 'percentage' : 'count',
+      validationSetSize: current.validation_set_percentage ?? current.validation_set_size ?? 1,
+      validationSetUnit: current.validation_set_percentage !== null ? 'percentage' : 'count',
       iterationBatchSize: current.iteration_batch_size,
       collaborators: (members.data?.items ?? []).filter((member) => member.role !== 'owner').map((member) => member.username),
       annotationPolicy: policy.data?.mode === 'consensus' ? { mode: 'consensus', annotatorUsernames: policy.data.annotator_ids.map((id) => policyMembers.get(id)).filter((name): name is string => Boolean(name)), resolver: policy.data.resolver ?? '', reviewThreshold: policy.data.review_thresholds?.agreement ?? .75 } : { mode: 'single' },

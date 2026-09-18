@@ -36,10 +36,10 @@ per selected media item:
 - `src/features/annotation/ImageStage.tsx` and the geometry/viewport utilities
   already provide most of the rendering foundation needed for a review overlay.
 
-The API has completed Phases 0, 1, and 2. The Phase 2 project, membership, and
-versioned annotation-policy contract is stable, so the corresponding App work
-can proceed against its generated OpenAPI surface. Later App phases must still
-wait for their matching API contract rather than inventing temporary
+The API has completed Phases 0 through 4. The project, membership, policy,
+three-way split, annotation-batch, and global user contracts are stable, so the
+corresponding App work uses their generated OpenAPI surface. Later App phases
+must still wait for their matching API contract rather than inventing temporary
 browser-only behavior.
 
 ## Target user journeys
@@ -80,7 +80,7 @@ Add these contract concepts:
 - `AnnotationMode = 'single' | 'consensus'`.
 - A discriminated `AnnotationPolicy` with mode, version, selected annotator
   IDs, resolver identity/version, parameters, and review thresholds.
-- `AnnotationBatch` and `BatchPurpose` for initial training, test, and
+- `AnnotationBatch` and `BatchPurpose` for initial training, validation, test, and
   acquisition selections.
 - `AnnotationAssignment` with `assignment_id`, `media_id`, caller-specific
   status, and lease information.
@@ -168,9 +168,9 @@ project wizard:
 - Select a task-compatible resolver. Do not offer STAPLE for classification or
   detection. Present advanced parameters and thresholds in a collapsible
   section with server-provided/default values.
-- Show an assignment estimate separately for initial training, test, and one
-  acquisition iteration, plus their total. Label this as work items rather
-  than images.
+- Show an assignment estimate separately for initial training, validation,
+  test, and one acquisition iteration, plus their total. Label this as work
+  items rather than images.
 - Add policy mode, group size, resolver, and estimated work to the final review
   screen.
 
@@ -439,7 +439,7 @@ save a valid consensus policy using the updated membership. Cancelled uploads
 and deleted projects are immediately unavailable and report the API's terminal
 purge result rather than offering a restore action.
 
-### Phase 4: batch visibility and user administration
+### Phase 4: batch visibility and user administration — implemented 2026-09-15
 
 - Add batch/policy snapshot types and manager activity presentation.
 - Display selected image and generated assignment counts before annotation.
@@ -468,6 +468,16 @@ purge result rather than offering a restore action.
 - Keep global user administration separate from project membership. Project
   owners/managers can manage only the members of their projects; client-side
   visibility is convenience, and the API remains authoritative.
+
+The implemented project setup also follows the revised Phase 4 split contract:
+train, validation, and test are fixed at activation; validation and test accept
+either absolute counts or percentages of uploaded media; and the batch surface
+states that all three initial batches must be annotated before acquisition can
+begin. A manager may replace a preparing batch snapshot with the current
+project default, while a started batch remains visibly immutable.
+
+Verification on 2026-09-15: `npm run check` passed with 38 tests, ESLint, the
+TypeScript project build, and the Vite production build.
 
 Exit gate: the UI reflects the server snapshot and never suggests that editing
 the project default changes an active batch. An administrator can create,

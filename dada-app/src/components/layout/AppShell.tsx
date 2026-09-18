@@ -1,4 +1,4 @@
-import { LogOut } from 'lucide-react'
+import { KeyRound, LogOut, Users } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 
 import { useAuth } from '../../features/auth/auth-context'
@@ -17,9 +17,10 @@ export function AppShell() {
         </NavLink>
         <nav aria-label="Primary navigation">
           <NavLink to="/projects">Projects</NavLink>
+          {user?.is_administrator && <NavLink to="/admin/users"><Users size={16} aria-hidden="true" /> Users</NavLink>}
         </nav>
         <div className="account">
-          <span>{user?.display_name ?? user?.username ?? 'Account'}</span>
+          <NavLink to="/account/password"><KeyRound size={15} aria-hidden="true" />{user?.display_name ?? user?.username ?? 'Account'}</NavLink>
           <Button variant="ghost" onClick={logout} aria-label="Sign out">
             <LogOut size={18} aria-hidden="true" />
           </Button>

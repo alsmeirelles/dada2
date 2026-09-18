@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppShell } from '../components/layout/AppShell'
 import { LoginPage } from '../features/auth/LoginPage'
 import { RequireAuth } from '../features/auth/RequireAuth'
+import { RequireAdministrator } from '../features/auth/RequireAdministrator'
 import { NotFoundPage } from '../pages/NotFoundPage'
 
 export const router = createBrowserRouter([
@@ -49,6 +50,27 @@ export const router = createBrowserRouter([
             lazy: async () => ({
               Component: (await import('../features/annotation/ProjectActivityPage')).ProjectActivityPage,
             }),
+          },
+          {
+            path: '/projects/:projectId/batches',
+            lazy: async () => ({
+              Component: (await import('../features/projects/ProjectBatchesPage')).ProjectBatchesPage,
+            }),
+          },
+          {
+            path: '/account/password',
+            lazy: async () => ({
+              Component: (await import('../features/account/ChangePasswordPage')).ChangePasswordPage,
+            }),
+          },
+          {
+            element: <RequireAdministrator />,
+            children: [{
+              path: '/admin/users',
+              lazy: async () => ({
+                Component: (await import('../features/admin/UsersPage')).UsersPage,
+              }),
+            }],
           },
           {
             path: '/projects/:projectId/consensus',

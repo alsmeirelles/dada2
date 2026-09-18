@@ -15,7 +15,7 @@ import { getCapabilities } from '../../api/capabilities'
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
-import { createProjectWithDataset } from './project-api'
+import { createProjectWithDataset, resolveDraftSplitSize } from './project-api'
 import { resolverLabel } from './resolver-label'
 import { loadSetup } from './setup-recovery'
 import {
@@ -38,7 +38,12 @@ const defaultColors = ['#6558D3', '#E5484D', '#16A085', '#E67E22', '#2980B9']
 const initialDraft: ProjectDraft = {
   name: '', description: '', taskType: 'detection',
   classes: [{ id: crypto.randomUUID(), name: '', color: defaultColors[0]! }],
-  initialTrainingSize: 20, testSetSize: 10, iterationBatchSize: 20,
+  initialTrainingSize: 20,
+  testSetSize: 10,
+  testSetUnit: 'count',
+  validationSetSize: 10,
+  validationSetUnit: 'percentage',
+  iterationBatchSize: 20,
   collaborators: [],
   annotationPolicy: { mode: 'single' },
 }
@@ -188,10 +193,12 @@ export function NewProjectPage() {
           <div className="wizard-section">
             <div><p className="eyebrow">Step 3</p><h2 id="step-2-title">Active-learning sizes</h2><p className="muted">Choose how images are allocated when the project starts.</p></div>
             <div className="number-grid">
-              <NumberField label="Initial training set" help="Images used to establish the first model." value={draft.initialTrainingSize} onChange={(value) => updateDraft({ initialTrainingSize: value })} />
-              <NumberField label="Random test set" help="Held out from active-learning acquisition." value={draft.testSetSize} onChange={(value) => updateDraft({ testSetSize: value })} />
+              <NumberField label="Minimum training set" help="Minimum images that must remain after held-out sets are fixed." value={draft.initialTrainingSize} onChange={(value) => updateDraft({ initialTrainingSize: value })} />
+              <SplitSizeField label="Validation set" help="Fixed at activation and annotated before acquisition." value={draft.validationSetSize} unit={draft.validationSetUnit} onValueChange={(value) => updateDraft({ validationSetSize: value })} onUnitChange={(unit) => updateDraft({ validationSetUnit: unit })} />
+              <SplitSizeField label="Test set" help="Fixed at activation and held out from acquisition." value={draft.testSetSize} unit={draft.testSetUnit} onValueChange={(value) => updateDraft({ testSetSize: value })} onUnitChange={(unit) => updateDraft({ testSetUnit: unit })} />
               <NumberField label="Images per iteration" help="New annotations requested in each cycle." value={draft.iterationBatchSize} onChange={(value) => updateDraft({ iterationBatchSize: value })} />
             </div>
+            <p className="notice">Activation creates full train, validation, and test annotation batches. The first acquisition waits for every assignment in all three batches.</p>
           </div>
         )}
 
@@ -265,9 +272,9 @@ export function NewProjectPage() {
               <ReviewItem label="Dataset" value={`${images.length} images`} detail={formatBytes(totalBytes)} />
               <ReviewItem label="Classes" value={`${draft.classes.length}`} detail={draft.classes.map((item) => item.name).join(', ')} />
               <ReviewItem label="Team" value={`${draft.collaborators.length} collaborator${draft.collaborators.length === 1 ? '' : 's'}`} detail={draft.collaborators.join(', ') || 'Owner only'} />
-              <ReviewItem label="Initial / test" value={`${draft.initialTrainingSize} / ${draft.testSetSize}`} detail="images" />
+              <ReviewItem label="Train / validation / test" value={splitSummary(draft, images.length)} detail="fixed when the project activates" />
               <ReviewItem label="Iteration batch" value={`${draft.iterationBatchSize}`} detail="images per cycle" />
-              <ReviewItem label="Strategy" value={draft.annotationPolicy.mode === 'single' ? 'Single annotation' : 'Consensus'} detail={strategySummary(draft)} />
+              <ReviewItem label="Strategy" value={draft.annotationPolicy.mode === 'single' ? 'Single annotation' : 'Consensus'} detail={strategySummary(draft, images.length)} />
               {draft.annotationPolicy.mode === 'consensus' && <>
                 <ReviewItem label="Resolver" value={resolverLabel(draft.annotationPolicy.resolver)} detail="Provisional API catalog entry" />
                 <ReviewItem label="Review threshold" value={`${Math.round(draft.annotationPolicy.reviewThreshold * 100)}%`} detail="Agreement below this value requires review" />
@@ -297,6 +304,17 @@ function NumberField({ label, help, value, onChange }: { label: string; help: st
   return <label className="number-field"><span>{label}</span><input type="number" min={1} step={1} value={value} onChange={(e) => onChange(Math.max(0, Number(e.target.value)))} /><small>{help}</small></label>
 }
 
+function SplitSizeField({ label, help, value, unit, onValueChange, onUnitChange }: {
+  label: string
+  help: string
+  value: number
+  unit: ProjectDraft['testSetUnit']
+  onValueChange: (value: number) => void
+  onUnitChange: (unit: ProjectDraft['testSetUnit']) => void
+}) {
+  return <label className="number-field split-size-field"><span>{label}</span><span className="split-size-control"><input type="number" min={unit === 'count' ? 1 : 0.1} max={unit === 'percentage' ? 99.9 : undefined} step={unit === 'count' ? 1 : 0.1} value={value} onChange={(event) => onValueChange(Math.max(0, Number(event.target.value)))} /><select aria-label={`${label} unit`} value={unit} onChange={(event) => onUnitChange(event.target.value as ProjectDraft['testSetUnit'])}><option value="count">images</option><option value="percentage">%</option></select></span><small>{help}</small></label>
+}
+
 function SummaryStat({ value, label }: { value: string | number; label: string }) {
   return <div><strong>{value}</strong><span>{label}</span></div>
 }
@@ -320,28 +338,46 @@ function validateStep(step: number, draft: ProjectDraft, images: LocalImage[]) {
     const unique = new Set(draft.classes.map((item) => item.name.trim().toLocaleLowerCase()))
     if (unique.size !== draft.classes.length) return 'Class names must be unique.'
   }
-  if (step === 2 && [draft.initialTrainingSize, draft.testSetSize, draft.iterationBatchSize].some((size) => !Number.isInteger(size) || size < 1)) return 'All set sizes must be positive whole numbers.'
+  if (step === 2) {
+    if ([draft.initialTrainingSize, draft.iterationBatchSize].some((size) => !Number.isInteger(size) || size < 1)) return 'Training and iteration sizes must be positive whole numbers.'
+    for (const [value, unit] of [[draft.testSetSize, draft.testSetUnit], [draft.validationSetSize, draft.validationSetUnit]] as const) {
+      if (value <= 0 || (unit === 'count' && !Number.isInteger(value)) || (unit === 'percentage' && value >= 100)) return 'Validation and test sizes must be positive whole-image counts or percentages below 100.'
+    }
+  }
   if (step === 3 && draft.annotationPolicy.mode === 'consensus') {
     if (draft.annotationPolicy.annotatorUsernames.length < 2) return 'Consensus annotation needs at least two selected annotators.'
     if (!draft.annotationPolicy.resolver) return 'Choose a resolution method offered by the API.'
   }
   if (step === 4) {
     if (!images.length) return 'Select a folder containing supported images.'
-    if (draft.initialTrainingSize + draft.testSetSize > images.length) return `The initial and test sets need ${draft.initialTrainingSize + draft.testSetSize} images; this folder has ${images.length}.`
+    const validation = resolveDraftSplitSize(images.length, draft.validationSetSize, draft.validationSetUnit)
+    const test = resolveDraftSplitSize(images.length, draft.testSetSize, draft.testSetUnit)
+    const required = draft.initialTrainingSize + validation + test
+    if (required > images.length) return `The minimum train, validation, and test sets need ${required} images; this folder has ${images.length}.`
   }
   return ''
 }
 
-function strategySummary(draft: ProjectDraft) {
+function strategySummary(draft: ProjectDraft, totalMedia: number) {
   const multiplier = draft.annotationPolicy.mode === 'consensus'
     ? draft.annotationPolicy.annotatorUsernames.length
     : 1
   const describe = (label: string, images: number) => `${label}: ${images * multiplier} work items`
+  const validation = resolveDraftSplitSize(totalMedia, draft.validationSetSize, draft.validationSetUnit)
+  const test = resolveDraftSplitSize(totalMedia, draft.testSetSize, draft.testSetUnit)
+  const train = Math.max(0, totalMedia - validation - test)
   return [
-    describe('Initial training', draft.initialTrainingSize),
-    describe('Test', draft.testSetSize),
+    describe('Train', train),
+    describe('Validation', validation),
+    describe('Test', test),
     describe('One acquisition batch', draft.iterationBatchSize),
   ].join(' · ')
+}
+
+function splitSummary(draft: ProjectDraft, totalMedia: number) {
+  const validation = resolveDraftSplitSize(totalMedia, draft.validationSetSize, draft.validationSetUnit)
+  const test = resolveDraftSplitSize(totalMedia, draft.testSetSize, draft.testSetUnit)
+  return `${Math.max(0, totalMedia - validation - test)} / ${validation} / ${test}`
 }
 
 function validateAll(draft: ProjectDraft, images: LocalImage[]) {

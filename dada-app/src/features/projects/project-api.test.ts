@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildPolicyBody, resolveAnnotatorIds, type ProjectMember } from './project-api'
+import {
+  buildPolicyBody,
+  buildProjectCreateBody,
+  resolveAnnotatorIds,
+  resolveDraftSplitSize,
+  type ProjectMember,
+} from './project-api'
 import type { ProjectDraft } from './types'
 
 const members: ProjectMember[] = [
@@ -16,6 +22,9 @@ const baseDraft: ProjectDraft = {
   classes: [],
   initialTrainingSize: 10,
   testSetSize: 5,
+  testSetUnit: 'count',
+  validationSetSize: 10,
+  validationSetUnit: 'percentage',
   iterationBatchSize: 5,
   collaborators: ['ana', 'bruno'],
   annotationPolicy: { mode: 'single' },
@@ -37,6 +46,22 @@ describe('resolveAnnotatorIds', () => {
     expect(() => resolveAnnotatorIds(members, ['ghost'])).toThrow(
       'ghost is not a project member.',
     )
+  })
+})
+
+describe('split sizing', () => {
+  it('sends exactly one size definition for each held-out split', () => {
+    expect(buildProjectCreateBody(baseDraft)).toMatchObject({
+      test_set_size: 5,
+      test_set_percentage: null,
+      validation_set_size: null,
+      validation_set_percentage: 10,
+    })
+  })
+
+  it('rounds percentage sizes up like the API', () => {
+    expect(resolveDraftSplitSize(12, 20, 'percentage')).toBe(3)
+    expect(resolveDraftSplitSize(12, 4, 'count')).toBe(4)
   })
 })
 

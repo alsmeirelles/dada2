@@ -18,6 +18,7 @@ import type {
   ProjectClass,
   ProjectClassInput,
   ProjectDraft,
+  SplitSizeUnit,
 } from './types'
 
 type UploadDisposition = 'upload_required' | 'already_present' | 'rejected'
@@ -163,6 +164,40 @@ export function buildPolicyBody(
   }
 }
 
+export function splitSizeBody(
+  prefix: 'test' | 'validation',
+  value: number,
+  unit: SplitSizeUnit,
+) {
+  return unit === 'percentage'
+    ? { [`${prefix}_set_size`]: null, [`${prefix}_set_percentage`]: value }
+    : { [`${prefix}_set_size`]: value, [`${prefix}_set_percentage`]: null }
+}
+
+export function resolveDraftSplitSize(
+  totalMedia: number,
+  value: number,
+  unit: SplitSizeUnit,
+) {
+  return unit === 'percentage' ? Math.ceil(totalMedia * value / 100) : value
+}
+
+export function buildProjectCreateBody(draft: ProjectDraft) {
+  return {
+    name: draft.name.trim(),
+    description: draft.description.trim() || null,
+    task_type: draft.taskType,
+    initial_training_size: draft.initialTrainingSize,
+    ...splitSizeBody('test', draft.testSetSize, draft.testSetUnit),
+    ...splitSizeBody(
+      'validation',
+      draft.validationSetSize,
+      draft.validationSetUnit,
+    ),
+    iteration_batch_size: draft.iterationBatchSize,
+  }
+}
+
 export async function createProjectWithDataset(
   draft: ProjectDraft,
   images: LocalImage[],
@@ -188,14 +223,7 @@ export async function createProjectWithDataset(
       method: 'POST',
       token,
       headers: { 'Idempotency-Key': pendingProjectCreateKey() },
-      body: {
-        name: draft.name.trim(),
-        description: draft.description.trim() || null,
-        task_type: draft.taskType,
-        initial_training_size: draft.initialTrainingSize,
-        test_set_size: draft.testSetSize,
-        iteration_batch_size: draft.iterationBatchSize,
-      },
+      body: buildProjectCreateBody(draft),
     })
     confirmProjectCreated()
     stage = 'created'

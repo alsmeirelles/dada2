@@ -1,7 +1,8 @@
 # Fase 4: Ativação, Seleções Reprodutíveis, Lotes e Administração de Usuários
 
 Status: API concluída em 2026-09-08 e fluxo de splits ajustado em 2026-09-15.
-O trabalho do App **não** faz parte desta entrega.
+O trabalho do App não fez parte da entrega da API e foi concluído separadamente
+em 2026-09-15.
 
 Plano de referência: [api-implementation-plan.md](../api-implementation-plan.md).
 Plano do App: [annotator-disagreement-adaptation-plan.md](../../../dada-app/docs/annotator-disagreement-adaptation-plan.md).
@@ -196,7 +197,7 @@ chamado, e o docstring de `delete_user` diz por quê.
 | Lotes de `acquisition` | Precisam de uma iteração e de um modelo treinado. Fase 7. O guard de conclusão das anotações iniciais já existe para o produtor futuro |
 | `GET /projects/{id}/iterations` e `/statistics` | Ver **D7**. O App já as chama e recebe `404`; é dívida anterior a esta fase |
 | Fila, leases, rascunhos e submissões | Fase 5 |
-| Trabalho do App: `/admin/users`, troca de senha e visibilidade de lotes | Fora desta entrega, como na Fase 3 |
+| Trabalho do App: `/admin/users`, troca de senha e visibilidade de lotes | Entregue separadamente no App em 2026-09-15 |
 | Celery, outbox e `worker_jobs` | Nada nesta fase precisa deles |
 
 ## Verificação
@@ -254,6 +255,6 @@ do Compose, com o ambiente conda `dada2` (uv não está instalado nesta máquina
 | Matriz de papéis nas rotas de lote | `viewer` lê o lote, mas recebe `403` no `PATCH` e no `start` |
 | Isolamento entre projetos | Um `batch_id` de outro projeto devolve `404` |
 
-Todas as cláusulas do critério da API estão cobertas. O critério do App
-permanece **não atendido**, porque o trabalho do App não faz parte desta
-entrega.
+Todas as cláusulas do critério da API estão cobertas. O critério do App foi
+implementado na entrega separada registrada no
+[plano do App](../../../dada-app/docs/annotator-disagreement-adaptation-plan.md).

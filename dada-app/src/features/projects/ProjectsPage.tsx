@@ -63,8 +63,8 @@ export function ProjectsPage() {
                 <div><dt>Batch</dt><dd>{project.iteration_batch_size}</dd></div>
               </dl>
               {(project.status === 'active' || project.status === 'ready') && (
-                <Link className="project-card__action" to={`/projects/${project.id}/annotate`}>
-                  Open annotation workspace
+                <Link className="project-card__action" to={`/projects/${project.id}/batches`}>
+                  View annotation batches
                 </Link>
               )}
               {project.status === 'draft' && (
