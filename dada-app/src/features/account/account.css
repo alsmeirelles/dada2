@@ -1,0 +1,8 @@
+.account-page { display: grid; place-items: start center; }
+.account-card { width: min(520px, 100%); padding: clamp(1.5rem, 5vw, 3rem); }
+.account-icon { width: 46px; height: 46px; margin-bottom: 1.2rem; display: grid; place-items: center; border-radius: 12px; color: var(--brand-dark); background: #f3f1ff; }
+.account-form { margin-top: 1.5rem; display: grid; gap: 1rem; }
+.account-form label { display: grid; gap: .4rem; font-size: .85rem; font-weight: 700; }
+.account-form input { min-height: 44px; border: 1px solid #cbd2da; border-radius: 8px; padding: .65rem .75rem; font: inherit; }
+.account-form small { color: var(--muted); font-weight: 400; }
+.field-error { margin: -.5rem 0 0; color: var(--danger); font-size: .8rem; }
