@@ -21,8 +21,8 @@ Errors use one envelope regardless of status code:
 ```json
 {
   "error": {
-    "code": "lease_expired",
-    "message": "The annotation lease has expired.",
+    "code": "resolution_lease_expired",
+    "message": "The manual resolution lease has expired.",
     "details": {},
     "trace_id": "opaque-trace-id"
   }
@@ -128,6 +128,8 @@ installation is told what actually blocks the change.
   "task_type": "detection",
   "status": "draft",
   "owner_id": "uuid",
+  "acquisition_strategy": "random",
+  "dataset_layout": "split",
   "initial_training_size": 100,
   "test_set_size": 50,
   "test_set_percentage": null,
@@ -231,14 +233,20 @@ Cancelling a session and deleting a project both purge immediately and
 permanently; no restore window exists. `DELETE /api/v1/projects/{project_id}` is
 owner-only and returns `204`.
 
-## Annotation batches — Phase 4
+## Annotation batches — Phase 4.1 target
 
-Activating a project freezes its train/validation/test split and opens three
-full-coverage batches: `test`, `validation`, and `initial_training` for the
-train remainder. Test and validation may be configured as absolute counts or
-percentages; percentages resolve to fixed counts at activation. The project
-moves from `draft` to `active` in the same transaction, so an active project
-always has its splits and batches.
+Before activation, a draft project prepares either `split` or `single_batch`
+layout. `split` freezes train/validation/test membership and opens three initial
+batches: every `test` image, every `validation` image, and the resolved first
+`initial_training` batch from the train split. `single_batch` is available only
+to random projects and opens one all-images `initial_annotation` batch. It has
+no splits, validation/test evaluation, model training, or acquisition
+iterations. Both layouts support single or consensus annotation policy.
+
+Test and validation may be configured as absolute counts or percentages;
+percentages resolve to fixed counts during draft preparation. The project moves
+from `draft` to `active` only after layout preparation and any label import
+review are complete.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -248,7 +256,8 @@ always has its splits and batches.
 | `POST` | `/api/v1/projects/{project_id}/batches/{batch_id}/start` | Freeze it and generate assignments |
 
 ```ts
-type BatchPurpose = 'initial_training' | 'validation' | 'test' | 'acquisition'
+type BatchPurpose =
+  | 'initial_annotation' | 'initial_training' | 'validation' | 'test' | 'acquisition'
 type BatchStatus =
   | 'preparing' | 'annotating' | 'resolving'
   | 'review_required' | 'resolved' | 'closed' | 'failed'
@@ -292,12 +301,38 @@ coincide.
 Acquisition batches, iteration records, and the routes below arrive with later
 phases; `GET /iterations` and `GET /statistics` are not implemented yet.
 
-## Iterations and splits
+## Dataset preparation, label imports, iterations, and splits
+
+Owners/managers prepare the draft dataset after media and classes are complete.
+Preparing freezes the selected layout, class-index mapping, and media inventory
+for activation. Changing one of these inputs resets prepared layout and draft
+imports.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/projects/{project_id}/dataset-layout/prepare` | Materialize split membership/first training selection or static all-images layout |
+| `DELETE` | `/api/v1/projects/{project_id}/dataset-layout` | Reset draft preparation and associated draft imports |
+| `POST` | `/api/v1/projects/{project_id}/annotation-imports` | Create an owner/manager-only YOLO-detection or COCO-segmentation import session |
+| `POST` | `/api/v1/annotation-imports/{import_id}/files/{file_id}` | Upload import content |
+| `POST` | `/api/v1/annotation-imports/{import_id}/validate` | Parse and return path/class-index/geometry preview results |
+| `POST` | `/api/v1/annotation-imports/{import_id}/accept` | Persist validated immutable seed documents |
+| `DELETE` | `/api/v1/annotation-imports/{import_id}` | Discard a draft import |
+
+YOLO detection labels match image relative paths without the image suffix; COCO
+segmentation labels match normalized `images.file_name`. Source class indexes
+must match the prepared project class `display_order`. Imports preserve their
+actor, file hashes, parser/version, mappings, and validation results. They are
+not assignments, submissions, consensus votes, or canonical resolutions.
 
 The API creates immutable train/validation/test membership when a project is
-activated. All three sets are annotated before the first acquisition may
-start; validation and test remain excluded from acquisition. Every iteration
-records its selection strategy and model/run identifiers for reproducibility.
+activated. All three initial sets must have accepted image resolutions before
+the first acquisition may start; validation and test remain excluded from
+acquisition. Every iteration records its selection strategy and model/run
+identifiers for reproducibility. The initial-training batch is not an
+acquisition iteration, and the final acquisition batch may be smaller than
+`iteration_batch_size`.
+
+Static `single_batch` projects have no split rows or iteration resources.
 
 Iteration states are:
 
@@ -319,36 +354,33 @@ item is complete. The explicit close operation lets clients safely reconcile a
 missed event. It returns `409 iteration_incomplete` with remaining counts when
 work is outstanding.
 
-## Annotation queue and leases
+## Image annotation assignments — Phase 5 target
 
 The existing global `/api/v1/queue/next` placeholder is superseded by scoped
-endpoints:
+direct image-assignment endpoints. An annotation batch item is always one
+complete image; each annotator submits one complete-image document. Annotation
+assignments are not claimed or leased.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/projects/{project_id}/iterations/{iteration_id}/queue` | Available, leased, and completed counts/items |
-| `POST` | `/api/v1/projects/{project_id}/iterations/{iteration_id}/leases` | Atomically acquire a specific or next item |
-| `POST` | `/api/v1/leases/{lease_id}/renew` | Extend an owned lease |
-| `DELETE` | `/api/v1/leases/{lease_id}` | Release without completion |
-| `GET` | `/api/v1/media/{media_id}/annotations` | Current annotation document and version |
-| `PUT` | `/api/v1/leases/{lease_id}/annotations` | Save a versioned draft |
-| `POST` | `/api/v1/leases/{lease_id}/complete` | Validate and submit final annotations |
+| `GET` | `/api/v1/projects/{project_id}/assignments` | Caller-visible assigned image work and counts |
+| `GET` | `/api/v1/projects/{project_id}/assignments/{assignment_id}` | One direct image assignment, media metadata, and draft state |
+| `PUT` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/draft` | Save a versioned draft for the complete-image document |
+| `POST` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/submit` | Validate and submit the final complete-image document |
 
-Lease acquisition is atomic. A successful response contains `lease_id`, media
-metadata, a signed `image_url`, `expires_at`, `renew_after`, annotation version,
-and any existing draft. Other users see that item as leased but receive no
-sensitive user data beyond display information permitted by the project.
+Assignment responses contain the assignment ID, media metadata, signed image
+URL, assignment/document version, and any existing caller draft. A peer's
+assignment for the same image never blocks the caller's assignment. Draft
+saving and final submission are versioned; final submission is idempotent.
 
-`renew_after` is the number of seconds after acquisition or the last renewal
-before the App should renew. Queue responses contain `items`, status counts,
-and `next_cursor`; each item contains `media_id`, `relative_path`, `status`,
-dimensions, an optional thumbnail URL, and limited lease display information.
-The iteration-list response includes the nullable `current_iteration` object.
+When a validated import supplies labels for the image, the response contains a
+caller-specific editable seed draft. Saving it creates the caller's own draft
+or submission and preserves an import-provenance link. The seed itself never
+counts as an annotation submission or resolution.
 
-Draft saving does not release the lease. Completion is idempotent and does.
-Disconnecting does not immediately release a lease; expiry prevents two users
-from editing during transient network loss. Owners/managers may explicitly
-revoke abandoned leases through a separately authorized operation.
+Object/instance cases derived during detection or segmentation consensus are
+`resolution_work_item`s, not annotation batch items. A Phase 6 manager review
+may use a resolution lease for one work item if `P6-08` approves it.
 
 ## Annotation documents
 
@@ -378,8 +410,8 @@ include normalized geometry and always returns the new version.
 ## Assisted segmentation
 
 The existing `/api/v1/inference/sam-predict` route should additionally require
-`project_id`, `lease_id`, and optional `embedding_cache_key`. The API verifies
-that the user owns an active lease for the image. Coordinates follow the same
+`project_id`, `assignment_id`, and optional `embedding_cache_key`. The API verifies
+that the user owns the direct image assignment. Coordinates follow the same
 original-image pixel convention as stored annotations.
 
 ## Real-time endpoint
@@ -397,7 +429,7 @@ access tokens must not be placed there.
 ```json
 {
   "sequence": 418,
-  "type": "lease.acquired",
+  "type": "assignment.updated",
   "project_id": "uuid",
   "occurred_at": "2026-07-18T12:00:00Z",
   "data": { "iteration_id": "uuid", "media_id": "uuid" }
@@ -405,6 +437,6 @@ access tokens must not be placed there.
 ```
 
 Event types initially include `upload.progress`, `upload.completed`,
-`lease.acquired`, `lease.released`, `annotation.completed`,
+`assignment.updated`, `annotation.submitted`,
 `iteration.status_changed`, `training.progress`, and `training.eta_updated`.
 Events are invalidation signals; clients refetch authoritative resources.

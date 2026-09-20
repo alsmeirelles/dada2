@@ -1,5 +1,11 @@
 # Dataset split workflow review
 
+> **Superseded implementation note:** The full-train initial-batch behavior
+> described below is the delivered Phase 4 behavior, not the adopted target.
+> The authoritative correction is the [Phase 4.1 annotation-sequence revision
+> plan](phase-4-annotation-sequence-revision-plan.md). Phase 5 must not start
+> until that correction is implemented and verified.
+
 This report records the Phase 4 dataset workflow after the decisions made on
 2026-09-15. It should be read with the [Phase 4 delivery
 notes](phases/phase_4.md) and the [API implementation
@@ -13,8 +19,8 @@ media inventory, validation is selected from the remainder, and train receives
 everything left. The three memberships are committed atomically with project
 activation and are not changed by a supported API operation.
 
-Activation also creates three `preparing` annotation batches. Each batch
-covers one complete split:
+The delivered activation implementation creates three `preparing` annotation
+batches. Each currently covers one complete split:
 
 | Batch purpose | Membership | Size |
 | --- | --- | --- |
@@ -101,12 +107,14 @@ recomputed from full provenance. This known limitation is unchanged.
 | --- | --- |
 | Fixed train/validation/test membership | Implemented atomically at activation |
 | Absolute or percentage held-out sizes | Implemented; percentages resolve to saved absolute counts at activation |
-| Annotation work includes all three sets | Implemented as three full-coverage batches |
-| First acquisition waits for all initial annotations | Guard implemented; acquisition producer remains deferred |
+| Annotation work includes all three sets | Delivered as three full-coverage batches; superseded by the Phase 4.1 initial-batch correction |
+| First acquisition waits for all initial annotations | Superseded: Phase 4.1 requires accepted consensus resolutions for every initial image |
 | Pre-split initial annotation | Deliberately unsupported under the revised decision |
 | Test or validation enlargement | Unsupported, unchanged |
 | Reproducible original split draw | Membership is durable; original split-selection seeds remain unstored |
 | Evaluation timing and cadence | Deferred |
 
-Phase 4 now establishes the three fixed annotated sets and the acquisition
-precondition. It does not implement the later learning or evaluation lifecycle.
+The delivered Phase 4 implementation establishes the fixed splits but requires
+the Phase 4.1 correction before the adopted image-annotation and
+consensus-before-acquisition flow is available. It does not implement the later
+learning or evaluation lifecycle.

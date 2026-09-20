@@ -9,6 +9,8 @@ Plano do App: [annotator-disagreement-adaptation-plan.md](../../../dada-app/docs
 Guia de operação: [development.md](../development.md).
 Revisão do fluxo de dados e aderência para aprendizado ativo:
 [dataset-split-workflow-review.md](../dataset-split-workflow-review.md).
+Correção obrigatória antes da Fase 5:
+[phase-4-annotation-sequence-revision-plan.md](../phase-4-annotation-sequence-revision-plan.md).
 
 ## Objetivo
 
@@ -71,13 +73,14 @@ pode esquecer de rodar.
 
 | Rota | Função |
 | --- | --- |
-| `POST /api/v1/projects/{id}/activate` | Congela três splits, cria três lotes de cobertura completa e ativa o projeto |
+| `POST /api/v1/projects/{id}/activate` | Implementação entregue: congela três splits e cria três lotes; a correção 4.1 substitui o lote completo de treino pelo primeiro lote de treino resolvido |
 | `GET /api/v1/projects/{id}/batches` | Inventário paginado dos lotes (ver **D7**) |
 | `GET /api/v1/projects/{id}/batches/{batch_id}` | Snapshot da política e contagens |
 | `PATCH /api/v1/projects/{id}/batches/{batch_id}` | Edita a política enquanto `preparing` |
 | `POST /api/v1/projects/{id}/batches/{batch_id}/start` | Congela e gera os assignments |
 
-A ativação executa numa transação só: resolve tamanhos percentuais, congela
+Esta descrição registra a implementação entregue. A correção 4.1, obrigatória
+antes da Fase 5, altera o fluxo de anotação. A ativação executa numa transação só: resolve tamanhos percentuais, congela
 `dataset_splits` para todas as imagens, cria os lotes `test`, `validation` e
 `initial_training`, copia a política padrão para dentro de cada um e move o
 projeto de `draft` para `active`.

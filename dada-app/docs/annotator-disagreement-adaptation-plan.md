@@ -16,7 +16,9 @@ reconciliation should be retained and extended.
 ## Current App baseline
 
 The current App assumes one annotation document and one exclusive image lease
-per selected media item:
+per selected media item. The target workflow removes leases from annotation:
+annotators receive direct complete-image assignments, while a later manual
+consensus review may lease a derived resolution work item.
 
 - `src/features/projects/NewProjectPage.tsx` collects project, class, learning,
   collaborator, and dataset settings, then submits them sequentially.
@@ -47,7 +49,8 @@ browser-only behavior.
 ### Single-annotation project
 
 1. The owner chooses **Single annotation** during project setup.
-2. Any eligible annotator may claim one assignment for a selected image.
+2. Each selected image assignment is directly available to its eligible
+   annotator; it is not claimed or leased.
 3. Submission resolves that image immediately.
 4. Existing annotation and activity behavior remains visually familiar.
 
@@ -80,16 +83,25 @@ Add these contract concepts:
 - `AnnotationMode = 'single' | 'consensus'`.
 - A discriminated `AnnotationPolicy` with mode, version, selected annotator
   IDs, resolver identity/version, parameters, and review thresholds.
-- `AnnotationBatch` and `BatchPurpose` for initial training, validation, test, and
-  acquisition selections.
-- `AnnotationAssignment` with `assignment_id`, `media_id`, caller-specific
-  status, and lease information.
+- `AnnotationBatch` and `BatchPurpose` for static initial annotation, initial
+  training, validation, test, and acquisition selections.
+- `DatasetLayout = 'split' | 'single_batch'`; `single_batch` is available only
+  for random projects and has one static all-images annotation batch.
+- `AnnotationBatchItem` with one `media_id`; it is always a complete image.
+- `AnnotationAssignment` with `assignment_id`, `media_id`, and caller-specific
+  status. It has no lease information.
+- `ResolutionWorkItem` for an image-level consensus case or a derived
+  detection/segmentation object/instance review case. It is separate from an
+  annotation batch item and may expose a resolution lease only in manual review.
+- `AnnotationImport` and `ImportedSeedDocument` view models for owner/manager
+  import review and a caller's prefilled annotation draft. Seeds are not
+  submissions, votes, or accepted resolutions.
 - Separate `SubmissionStatus` and `ResolutionStatus` values. A submission being
   complete must not imply that its image is resolved.
 - Expanded iteration state including `consolidating`.
 - Counts for images, resolved images, assignments, submitted assignments,
-  available/leased assignments, pending resolutions, and review-required
-  items.
+  available/in-progress assignments, pending resolutions, resolution work
+  items, and review-required items.
 - Manager-only evidence, resolver diagnostics, proposed/accepted resolutions,
   resolution history, and adjudication requests.
 
@@ -99,9 +111,11 @@ Update `src/api/types.ts` at the same time to replace the stale current-user
 Create API client functions for:
 
 - reading and version-updating the project policy;
+- preparing or resetting the draft dataset layout;
+- creating, uploading, reviewing, accepting, or discarding annotation imports;
 - reading/updating/starting an annotation batch;
-- acquiring the caller's next or specified assignment;
-- saving and completing the document attached to an assignment lease;
+- reading the caller's assigned images;
+- saving and completing the full-image document attached to an assignment;
 - listing manager resolution work;
 - reading one item's evidence and resolution history;
 - retrying resolution with explicit configuration; and
@@ -122,7 +136,8 @@ iterations(projectId)
 batch(projectId, batchId)
 assignmentQueue(projectId, iterationId, userId)
 resolutionQueue(projectId, batchId, filters)
-resolutionEvidence(projectId, batchItemId)
+imageResolutionEvidence(projectId, batchItemId)
+resolutionWorkItem(projectId, resolutionWorkItemId)
 statistics(projectId)
 ```
 
@@ -181,6 +196,15 @@ project wizard:
 - In Phase 5, add the active-learning choice and state plainly that disabling
   it makes future acquisition batches reproducible random selections from the
   eligible unlabeled pool.
+- When Random acquisition is selected, offer **Split dataset** and **One static
+  annotation batch**. The latter hides split and iteration controls, explains
+  that all images are annotated once with no training/evaluation/acquisition
+  loop, and continues to allow single or consensus annotation policy.
+- Add a **Prepare dataset and import labels** step after media and classes are
+  complete and before activation. Owners/managers can upload YOLO detection or
+  COCO segmentation labels, review path/class-index mapping and errors, then
+  accept or discard the import. Explain that changing classes, media, or the
+  prepared layout resets draft imports.
 
 The wizard must not imply that automated consensus is guaranteed to succeed.
 Its text should state that ambiguous items require owner/manager review.
@@ -213,17 +237,21 @@ their snapshots, and handle `409` by refetching before the user retries.
 ### Assignment-scoped behavior
 
 Update `src/features/annotation/types.ts`, `annotation-api.ts`, and
-`AnnotationWorkspacePage.tsx` so the unit of work is an assignment:
+`AnnotationWorkspacePage.tsx` so the unit of annotation work is a direct
+complete-image assignment:
 
 - Queue items use `assignment_id` as their React key and action identifier.
-- Lease acquisition requests an assignment, not an image.
-- Draft save, renewal, release, completion, and assisted segmentation continue
-  to use `lease_id`, whose response identifies the assignment.
+- Opening an assigned image does not claim or lease it.
+- Draft save and completion use `assignment_id`. There is no renewal, release,
+  expiry, or lease-loss path for annotation work.
+- When an assignment has an imported seed, initialize its editable draft from
+  that seed. Saving or submitting remains the caller's own work; retain import
+  provenance without treating the seed as a submission, vote, or resolution.
 - Completion displays **Submission received**. It must not display **Image
   resolved** unless the response explicitly reports an accepted resolution.
 - The current annotator can reopen only their own draft or submitted work as
   allowed by the API. Peer assignments never appear as editable work.
-- A peer leasing the same media does not disable or hide the caller's
+- A peer assigned the same media does not disable or hide the caller's
   assignment. Remove the current global `item.status === 'leased'` filtering
   and replace it with caller-assignment status rules.
 - “Next” and keyboard navigation traverse caller-eligible assignments.
@@ -310,7 +338,8 @@ Add manager-protected routes such as:
 
 ```text
 /projects/:projectId/consensus
-/projects/:projectId/consensus/:batchItemId
+/projects/:projectId/consensus/images/:batchItemId
+/projects/:projectId/consensus/work-items/:resolutionWorkItemId
 ```
 
 Client-side route protection is for UX only; the API remains authoritative.
@@ -360,7 +389,8 @@ Never mutate or delete raw evidence from this screen.
 
 Extend `src/features/annotation/types.ts` and `useProjectEvents.ts` for:
 
-- `assignment.leased` and `assignment.released`;
+- `assignment.updated` and, when enabled, `resolution_work_item.leased` and
+  `resolution_work_item.released`;
 - `annotation.submitted`;
 - `resolution.started` and `resolution.completed`;
 - `resolution.review_required`; and
@@ -386,8 +416,9 @@ Add user-facing handling for the revised stable error codes:
 | `resolution_config_conflict` | Preserve local form values, refetch resolver history, and require an explicit retry |
 | `adjudication_required` | Route authorized users to review; show annotators only a neutral pending-review state |
 
-Continue showing trace IDs for support. Lease loss, offline mode, and stale
-versions must leave canvas work recoverable without pretending it was accepted.
+Continue showing trace IDs for support. Offline mode, stale assignment versions,
+and any resolution-lease loss must leave canvas work recoverable without
+pretending it was accepted.
 
 ## Accessibility and content requirements
 
@@ -510,7 +541,7 @@ sees or can use global user controls; and every signed-in user can change their
 own password without exposing credentials in browser storage or UI state after
 submission.
 
-### Phase 5: assignment workspace
+### Phase 5: image-assignment workspace
 
 **Start gate:** first complete the [Phase 4.1 annotation-sequence revision
 plan](../../dada-api/docs/phase-4-annotation-sequence-revision-plan.md),
@@ -523,15 +554,20 @@ both prerequisites are satisfied.
   uses active learning. Persist and display the server value in setup, review,
   resumable drafts, and project settings according to the decided mutability
   rule.
+- For Random projects, persist and display the dataset-layout choice. Before
+  activation, provide the owner/manager label-import review and acceptance flow;
+  never distribute assignments while an import is processing, rejected, or
+  awaiting review.
 - When active learning is not selected, explain that acquisition batches are
-  reproducible random selections from the remaining eligible unlabeled pool.
+  reproducible random selections from the remaining eligible unlabeled pool
+  after the preceding image annotations have accepted resolutions.
   Do not show model-ranking language, scores, or training prerequisites for
   that acquisition path.
 - When active learning is selected, explain that acquisition uses the
   configured learning adapter after the Phase 7 learning boundary is
   available.
-- Convert queue, lease, draft, completion, navigation, and recovery behavior to
-  assignment scope.
+- Convert queue, draft, completion, navigation, and recovery behavior to
+  direct complete-image assignments. Do not expose annotation lease controls.
 - Revise progress language and add blindness tests.
 
 Exit gate: project creation and recovery preserve the acquisition strategy and
@@ -541,14 +577,16 @@ local recovery records do not collide.
 
 ### Phase 6: resolution and adjudication
 
-**Start gate:** resolve shared decisions `P6-01`–`P6-07` and App decisions
+**Start gate:** resolve shared decisions `P6-01`–`P6-08` and App decisions
 `A6-01`–`A6-04` in `dada-api/docs/phases/phase_6.md`; approve the complete
 [Consensus Engine Requirements](../../dada-api/docs/consensus-engine-requirements.md)
 before implementing API or App consensus behavior.
 
 - Add resolution progress and review-required states.
 - Build the review queue, evidence comparison, retry, acceptance, editing, and
-  adjudication flows.
+  adjudication flows. Distinguish image-level consensus cases from derived
+  object/instance resolution work items, and show resolution-lease controls
+  only if the approved Phase 6 policy requires them.
 
 Exit gate: an automatic result can be reviewed and accepted, a forced
 low-agreement case can be edited/adjudicated, and stale versions preserve the
@@ -596,10 +634,10 @@ and also block the App phase that references them.
 
 | ID | Pending App decision | Required documented outcome |
 | --- | --- | --- |
-| `A5-01` | Acquisition-strategy setup UX | Control placement and wording, default shown to users, validation, review summary, draft recovery, settings visibility, and treatment when the API says the setting is locked |
+| `A5-01` | Acquisition-strategy and dataset-layout setup UX | Control placement and wording, Random default, split versus static-batch validation, review summary, draft recovery, settings visibility, and treatment when the API says the setting is locked |
 | `A5-02` | Random-acquisition presentation | Explanation of unlabeled-pool eligibility and reproducibility, manager visibility of seed/strategy provenance, empty/exhausted-pool messaging, and removal of model-guided language |
-| `A5-03` | Assignment queue and lease UX | Queue ordering/filtering, “next” behavior, lease timer/warnings, renewal and offline behavior, manager revocation/reassignment messaging, and accessibility behavior |
-| `A5-04` | Submission and recovery UX | Reopen rules, success terminology, stale-draft reconciliation choices, recovery expiry/display, empty-annotation confirmation, and visibility after own submission |
+| `A5-03` | Image-assignment queue UX | Direct assigned-image queue ordering/filtering, navigation, offline and stale-version recovery, manager reassignment messaging, accessibility behavior, and no annotation-lease controls |
+| `A5-04` | Submission, import seed, and recovery UX | Owner/manager import review/errors, seeded-draft provenance, reopen rules, success terminology, stale-draft reconciliation choices, recovery expiry/display, empty-annotation confirmation, and visibility after own submission |
 | `A6-01` | Review queue information design | Default filters/sort, row diagnostics, pagination, lazy image/evidence loading, reason vocabulary, and aggregate vs. named evidence visibility |
 | `A6-02` | Evidence comparison interaction | Overlay colors/patterns, side-by-side breakpoint, keyboard controls, task-specific metrics, large-object handling, and nonvisual equivalents |
 | `A6-03` | Adjudication editing and confirmation | Starting source, draft/recovery key, accept/edit/replace/retry confirmations, unsaved-navigation behavior, and stale-version reconciliation |
@@ -620,7 +658,9 @@ and also block the App phase that references them.
 - Policy discriminated-union parsing and task/resolver compatibility.
 - Username-to-user-ID mapping, duplicate prevention, and group-size validation.
 - Assignment estimates for each selected set.
-- Assignment queue view-model behavior when peers lease the same media.
+- Split versus static-batch setup validation, YOLO/COCO import preview errors,
+  import audit presentation, and caller-specific seeded-draft initialization.
+- Assignment queue view-model behavior when peers are assigned the same media.
 - Recovery isolation by assignment and stale-version reconciliation.
 - Submission vs. resolution counters and iteration state presentation.
 - Evidence overlay toggles, metrics formatting, and adjudication payloads.
@@ -635,7 +675,7 @@ and also block the App phase that references them.
    independent documents.
 4. Verify neither annotator can discover peer evidence before submission.
 5. Interrupt one assignment, restore only its recovery snapshot, and complete
-   it after lease reacquisition.
+   it after assignment-version reconciliation.
 6. Observe automatic classification, detection, and segmentation resolution.
 7. Force each task's low-agreement path and adjudicate as a manager.
 8. Exercise a stale adjudication conflict without losing local edits.
@@ -646,6 +686,10 @@ and also block the App phase that references them.
 11. Create projects with active learning enabled and disabled; verify the
     persisted review/settings value and random-acquisition wording and pool
     exhaustion behavior.
+12. Prepare a split project and a static random project; import labels before
+    assignment distribution; verify that each annotator receives editable seed
+    content, saved work is attributed to that annotator, and consensus receives
+    only the saved submissions.
 
 Run the existing `npm run lint`, `npm test`, and `npm run build` gates for each
 App phase. The coordinated release suite must use the candidate API with no

@@ -3,11 +3,12 @@
 > **Phase 6 gate:** This document is a normative task annex to the
 > [Consensus Engine Requirements](../consensus-engine-requirements.md). Do not
 > implement it until that specification is **Approved** and decisions
-> `P6-01`–`P6-07` are documented in `docs/phases/phase_6.md`.
+> `P6-01`–`P6-08` are documented in `docs/phases/phase_6.md`.
 
 ## Scope
 
-Segmentation consensus also has two stages: object identification/class
+Segmentation consensus starts from one image-level batch item and has two
+stages: object identification/class
 disambiguation followed by mask refinement. STAPLE or a pixel-vote applied to
 all masks at once is incorrect when annotators disagree about which instances
 exist or how they should be classified.

@@ -28,8 +28,11 @@ may cache server data but must not become a second source of truth.
 - Let a user select a local dataset directory.
 - Recursively discover and review supported image files.
 - Upload bytes with progress, retry, resume, cancellation, and checksums.
+- Upload and review owner/manager annotation-label imports before assignments
+  are distributed.
 - Render task-specific annotation tools.
-- Acquire and renew annotation leases and recover from lost leases.
+- Open direct complete-image assignments and recover local drafts. Resolution
+  leases, if implemented, are confined to manual consensus review.
 - Display active-learning queues, training progress, ETA, and statistics.
 - Keep unsaved edits locally only as short-lived recovery data.
 
@@ -38,7 +41,10 @@ may cache server data but must not become a second source of truth.
 - Authenticate and authorize every request and real-time connection.
 - Own project, membership, class, media, annotation, and iteration records.
 - Issue upload sessions and verify uploaded content.
-- Allocate annotation work atomically and enforce leases.
+- Parse, validate, audit, and retain YOLO detection/COCO segmentation imports;
+  seed caller drafts without creating submissions or resolutions.
+- Allocate complete-image annotation assignments atomically. Enforce leases
+  only for approved manual resolution work items.
 - Normalize and validate annotation geometry.
 - Coordinate active-learning selection and GPU work.
 - Publish project events and signed artifact URLs.
@@ -91,7 +97,7 @@ explicitly documented alternative. Project roles are `owner`, `manager`,
 ## Real-time behavior
 
 REST controls durable state. A project-scoped WebSocket publishes hints that
-state changed: media availability, lease changes, upload processing, iteration
+state changed: media availability, resolution-lease changes, upload processing, iteration
 transitions, training progress, and ETA. Events carry monotonically increasing
 sequence numbers. After reconnect or a sequence gap, the App refetches REST
 resources rather than treating events as durable history.
@@ -112,8 +118,9 @@ without geometry. The API validates bounds and may return normalized geometry.
 - All mutating create/complete calls accept an `Idempotency-Key`.
 - Editable resources carry a `version`; stale updates return `409 Conflict`.
 - Upload chunks are retryable and independently acknowledged.
-- A lease must be renewed before expiry; submission after expiry is rejected
-  unless the API explicitly restores that lease to the same user.
+- Annotation submissions use assignment versions, not leases. If Phase 6
+  approves resolution leases, a manual-resolution edit must be renewed before
+  expiry and stale edits are rejected or reconciled by the API.
 - Client timestamps are informational. Server timestamps decide ordering and
   expiry.
 - Structured errors use the contract in `api-contract.md` and include a trace

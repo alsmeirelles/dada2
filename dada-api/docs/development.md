@@ -266,10 +266,21 @@ directory removal with no cross-project reference counting.
 
 ## Activation and batches
 
-Activation is the moment a configured project becomes work. In one transaction
-it freezes `dataset_splits` for every image, creates the `test` and
-`initial_training` batches, copies the project's default policy onto each of
-them, and moves the project from `draft` to `active`.
+Activation is the moment a configured project becomes work. The current Phase 4
+implementation is superseded by the required [Phase 4.1 annotation-sequence
+revision plan](phase-4-annotation-sequence-revision-plan.md): activation must
+freeze `dataset_splits` for every image, create complete `test` and `validation`
+batches plus the resolved first `initial_training` image batch, copy the
+project's default policy onto each, and move the project from `draft` to
+`active`.
+
+Random projects may instead prepare a static `single_batch` layout: one
+all-images initial annotation batch, no train/validation/test rows, and no
+later training or acquisition iterations. Both layouts may use consensus.
+Before activation and before assignments exist, an owner/manager may import
+YOLO detection or COCO segmentation labels. Imports are audited seed documents
+that prefill each annotator's own draft; they are not submissions, votes, or
+canonical resolutions.
 
 The test half is drawn from the whole dataset first and the training set from
 what remains, so no image can reach both. That ordering is what makes the
@@ -309,8 +320,11 @@ provenance, not a request parameter. The candidate order is
 `(relative_path, id)`, the same order the media inventory route returns, so the
 selection input is something a client can already read.
 
-Acquisition batches need an iteration, which needs a trained model, so they
-arrive with the learning port. The `purpose` column already carries the value.
+An acquisition batch is created only after all initial image batch items have
+accepted consensus resolutions. Random acquisition may then select from the
+eligible train pool; active learning additionally needs a trained/evaluated
+model. The learning port delivers that orchestration, and the `purpose` column
+already carries the acquisition value.
 
 ## Deletion and retention
 

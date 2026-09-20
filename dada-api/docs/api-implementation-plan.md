@@ -69,14 +69,26 @@ concrete need.
 
 - **Selection**: the reproducible set of media chosen randomly or by active
   learning.
-- **Annotation batch**: a selected set plus its policy snapshot and progress.
-  It has purpose `initial_training`, `validation`, `test`, or `acquisition` and
-  may belong to an iteration.
-- **Assignment**: one annotator's obligation to annotate one batch item.
-- **Lease**: a temporary exclusive edit lock on one assignment, not on the
-  underlying image.
+- **Dataset layout**: `split` for a train/validation/test project or
+  `single_batch` for a static all-images random project. The latter has no
+  acquisition iterations and cannot use active learning.
+- **Annotation batch**: a selected set of images plus its policy snapshot and progress.
+  It has purpose `initial_annotation`, `initial_training`, `validation`,
+  `test`, or `acquisition`; only acquisition batches belong to an iteration.
+- **Annotation batch item**: one complete image in an annotation batch.
+- **Assignment**: one annotator's obligation to annotate one complete image.
+  Annotation assignments are directly available to their assigned annotator;
+  they are not claimed or protected by leases.
+- **Resolution work item**: an image-level consensus case or a candidate
+  object/instance derived from an image's raw submissions during resolution.
+  It is not an annotation batch item.
+- **Resolution lease**: an optional exclusive edit lock on a manual
+  resolution/adjudication work item. Its lifecycle is a Phase 6 decision.
 - **Submission**: the annotator's immutable completed document. Draft versions
   remain scoped to its assignment.
+- **Imported seed document**: an immutable, audited label-import result copied
+  into each assigned annotator's editable draft. It is neither a submission nor
+  a canonical resolution.
 - **Resolution**: the immutable canonical annotation derived from one or more
   submissions, including provenance and disagreement diagnostics.
 - **Adjudication**: an authorized human decision that creates a resolution when
@@ -99,11 +111,12 @@ preparing -> annotating -> consolidating -> closing -> training -> ready
                  +--------------+--------------+----------+-> failed
 ```
 
-An iteration may close only when every batch item has an accepted resolution,
-not merely when every image has one submission. Training, evaluation, and
-active-learning acquisition consume only accepted resolution versions. Raw
-submissions remain available for audit and quality analytics but never enter a
-training export directly.
+An initial annotation cycle becomes acquisition-ready only when every initial
+image batch item has an accepted resolution, not merely when every assignment
+has submitted. Each later iteration follows the same image annotation then
+resolution sequence. Training, evaluation, and active-learning acquisition
+consume only accepted resolution versions. Raw submissions remain available for
+audit and quality analytics but never enter a training export directly.
 
 ## Consensus behavior by task
 
@@ -158,7 +171,7 @@ FastAPI application
   identity and project authorization
   projects, members, classes, policy defaults
   ingestion and media metadata             -> self-hosted persistent volume
-  selections, batches, assignments, leases -> PostgreSQL
+  selections, image batches, assignments     -> PostgreSQL
   drafts, submissions, resolutions          -> PostgreSQL
   outbox and worker jobs                     -> PostgreSQL -> Celery/Redis
   learning adapter                           -> selection/training workers
@@ -168,8 +181,8 @@ FastAPI application
 
 PostgreSQL is authoritative. Redis/Celery may transport work and events, but
 correctness must survive duplicate, delayed, and lost messages. Selection,
-assignments, leases, submissions, resolution state, job state, idempotency, and
-outbox events remain durable.
+assignments, submissions, resolution state, resolution leases, job state,
+idempotency, and outbox events remain durable.
 
 ## Persistence model and invariants
 
@@ -180,16 +193,17 @@ The remaining migrations should introduce these records:
 | Project setup | projects, project_members, classes, annotation_policy_defaults | one owner; policy versions are optimistic and group members are annotators in the project |
 | Ingestion | upload_sessions, upload_items, chunks, content_objects, media | checksums and dimensions verified before media is usable; no client absolute paths |
 | Learning | dataset_splits, iterations, iteration_selections, model_runs | immutable validation/test splits; project-selected active-learning or random acquisition; reproducible seed, strategy, input, and model/run IDs where applicable |
-| Annotation work | annotation_batches, batch_items, annotation_assignments, leases | unique `(batch_item_id, annotator_id)`; at most one active lease per assignment; policy is immutable after annotation starts |
+| Annotation work | annotation_batches, batch_items, annotation_assignments | a batch item is one image; unique `(batch_item_id, annotator_id)`; policy is immutable after annotation starts |
 | Annotation evidence | annotation_documents, annotation_objects, submissions | drafts belong to one assignment; a submitted revision is immutable; at most one accepted submission per assignment |
-| Resolution | resolution_runs, resolution_inputs, resolved_annotations, adjudications | accepted canonical version is explicit; raw inputs are never overwritten; one active resolution job per item/config fingerprint |
+| Label import | annotation_imports, annotation_import_files, imported_seed_documents | owner/manager-only before assignment distribution; source mapping and class-index snapshot are immutable; seeds are never consensus votes |
+| Resolution | resolution_runs, resolution_inputs, resolution_work_items, resolution_leases, resolved_annotations, adjudications | a work item may be derived for object/instance review; accepted canonical version is explicit; raw inputs are never overwritten |
 | Annotator performance | resolution_object_evidence, annotator_performance_observations, annotator_performance_summaries | observations are project-scoped, immutable, and tied to the accepted resolution version; summaries are regenerable caches, never the source of truth |
 | Operations | idempotency_records, outbox_events, worker_jobs, audit_entries | repeated keys return the original result for the same actor, route, and body |
 
 Persist all geometry in original-image pixel coordinates and retain original
-dimensions. A lease is exclusive only for an assignment. Consequently, two
-configured annotators may simultaneously lease different assignments for the
-same media, while the same assignment can never have two live leases.
+dimensions. Every configured annotator may independently annotate their direct
+assignment for the same image. A lease is considered only for a manual
+resolution work item and never controls annotation access.
 
 Annotators must not receive peer drafts, submissions, identities, agreement
 scores, or consensus results until they submit their own assignment. This
@@ -261,7 +275,7 @@ remain, with the following additions or semantic changes.
 | `GET` | `/api/v1/projects/{project_id}/batches/{batch_id}/resolutions` | List resolution/review status for managers |
 | `GET` | `/api/v1/projects/{project_id}/batch-items/{item_id}/evidence` | Manager view of raw submissions, metrics, and resolution history |
 | `POST` | `/api/v1/projects/{project_id}/batch-items/{item_id}/resolve` | Retry a resolver with a versioned configuration |
-| `POST` | `/api/v1/projects/{project_id}/batch-items/{item_id}/adjudicate` | Submit an audited canonical document or accept a proposed result |
+| `POST` | `/api/v1/projects/{project_id}/resolution-work-items/{item_id}/adjudicate` | Submit an audited canonical document or accept a proposed result for an image case or derived object/instance |
 | `GET` | `/api/v1/projects/{project_id}/annotator-performance` | Authorized project-scoped aggregate performance summaries and sample sizes |
 
 A policy representation includes `mode`, ordered `annotator_ids`,
@@ -270,20 +284,19 @@ and `version`. In `single` mode, `annotator_ids` may be empty to mean any
 eligible project annotator. In `consensus` mode the explicit snapshotted group
 is required.
 
-### Queue, leases, and annotation documents
+### Image-assignment queues and annotation documents
 
-The scoped iteration queue remains the normal annotator entry point, but it
-returns the current user's assignments rather than globally locked images.
+The scoped assignment queue remains the normal annotator entry point, but it
+returns the current user's direct image assignments rather than globally locked
+images.
 Queue items include `assignment_id`, `media_id`, the caller's assignment
 status, and aggregate batch progress that does not disclose peer identities or
-content. The lease-acquisition request may specify `assignment_id`; a “next”
-request atomically selects one eligible assignment for the caller.
+content. Opening an assignment never claims or leases it.
 
-Lease, draft, completion, and assisted-segmentation routes may retain their
-URLs, but completion returns the accepted submission and current item
-resolution status. It does not imply that the media is resolved. Recovery
-snapshots and optimistic versions are keyed by `assignment_id` plus the draft
-version, not by media alone.
+Draft, completion, and assisted-segmentation routes use `assignment_id`.
+Completion returns the accepted submission and current image resolution status;
+it does not imply that the media is resolved. Recovery snapshots and optimistic
+versions are keyed by `assignment_id` plus the draft version, not by media alone.
 
 `GET /api/v1/media/{media_id}/annotations` must be replaced or narrowed because
 “current annotation” is ambiguous. Use explicit views:
@@ -298,7 +311,7 @@ Iteration/batch responses distinguish at least:
 
 - total images and resolved images;
 - total assignments and submitted assignments;
-- available and leased assignments;
+- available, in-progress, and submitted assignments;
 - items awaiting resolution and items requiring review.
 
 Add stable conflict/error codes including `policy_locked`,
@@ -311,8 +324,8 @@ Add authorization actions `manage_annotation_policy`, `read_annotation_evidence`
 managers receive these actions; annotators do not. Continue to centralize the complete matrix in
 `services/authorization.py`.
 
-Add events `assignment.leased`, `assignment.released`,
-`annotation.submitted`, `resolution.started`, `resolution.completed`,
+Add events `assignment.updated`, `annotation.submitted`,
+`resolution.started`, `resolution.completed`,
 `resolution.review_required`, and `resolution.adjudicated`. Events are hints;
 REST remains authoritative. Annotator-facing event data must not leak blind
 peer evidence.
@@ -327,14 +340,14 @@ peer evidence.
   project columns.
 - Add models and repositories under `dada_api/models/` and
   `dada_api/repositories/` for classes, members, ingestion, splits, iterations,
-  batches, assignments, leases, documents, submissions, resolutions, raw-to-
+  batches, assignments, documents, submissions, resolution work items/leases, resolutions, raw-to-
   canonical object evidence, and annotator performance observations/summaries.
 - Add Pydantic schemas under `dada_api/schemas/` for policy discriminated
   unions, assignment queues, evidence, diagnostics, and adjudication. Validate
   resolver/task compatibility at the service boundary.
 - Replace the Phase 1 project placeholders in
   `api/v1/endpoints/projects.py`; add endpoints/modules for uploads, iterations,
-  batches, assignments/leases, annotations, resolutions, statistics, and
+  batches, assignments, annotations, resolution work items, resolutions, statistics, and
   events. Retire the global prototype queue once the scoped assignment queue is
   live.
 - Extend `services/authorization.py` with the new manager actions and add
@@ -385,8 +398,8 @@ The required changes are summarized here to make API dependencies explicit:
 - Revise `features/annotation/types.ts` and `annotation-api.ts` around
   assignments and separate submission/resolution status. Prefer generated
   OpenAPI types and small view-model adapters over duplicating wire shapes.
-- Update `AnnotationWorkspacePage.tsx` so queue navigation, lease acquisition,
-  draft recovery, completion, and shortcuts use `assignment_id`. Do not hide an
+- Update `AnnotationWorkspacePage.tsx` so queue navigation, direct assignment
+  opening, draft recovery, completion, and shortcuts use `assignment_id`. Do not hide an
   image merely because another group member is editing their own assignment,
   and do not show peer names or annotations in the ordinary workspace.
 - Update `ProjectActivityPage.tsx` to show image resolution progress separately
@@ -554,8 +567,16 @@ Stable errors include `username_taken`, `user_in_use`,
 `last_active_administrator`, `self_administration_change`, `version_conflict`,
 and `current_password_incorrect`.
 
-- Freeze train/validation/test membership, create full-coverage batches for all
-  three splits, and record strategy, seed, and selection inputs.
+- Freeze train/validation/test membership and record strategy, seed, and
+  selection inputs. The required Phase 4.1 correction creates complete
+  validation/test batches and only the resolved first training batch.
+- Add draft dataset preparation: `split` or random-only `single_batch`; lock
+  the prepared media/classes/layout before label import and reset preparation
+  plus draft imports when those inputs change.
+- Add owner/manager-only YOLO-detection and COCO-segmentation import sessions.
+  Validate source class indexes against project `display_order`, preserve audit
+  provenance, and seed annotator drafts without creating submissions or
+  canonical resolutions.
 - Create an annotation batch for each selected set, snapshot its policy, and
   generate assignments atomically when it starts.
 - Add batch/iteration state services and prevent policy edits after start.
@@ -599,7 +620,7 @@ work begins:
 Discovery and experiments may inform a decision, but no production
 implementation may be merged under the phase until this gate is satisfied.
 
-### Phase 5: assignment queues, leases, drafts, and submissions
+### Phase 5: image-assignment queues, drafts, and submissions
 
 **Start gate:** first complete the [Phase 4.1 annotation-sequence revision
 plan](phase-4-annotation-sequence-revision-plan.md), including its required
@@ -611,18 +632,28 @@ implementation must not start before both prerequisites are satisfied.
 - Extend project creation with an explicit acquisition strategy: use active
   learning or do not use active learning. Persist the choice as a versioned,
   API-visible project setting and return it in project reads.
-- When active learning is not selected, acquisition batches are reproducible
-  random selections from the current eligible unlabeled pool. They still
-  record strategy, server-generated seed, ordered input fingerprint, requested
-  size, and selected media IDs. Validation and test media are never eligible.
+- Persist the selected dataset layout. `single_batch` is allowed only for the
+  random strategy and creates no iterations; `split` remains required for
+  active learning.
+- When active learning is not selected, Phase 7 will create reproducible random
+  acquisition batches from the current eligible unlabeled pool only after the
+  preceding image annotations have accepted resolutions. They record strategy,
+  server-generated seed, ordered input fingerprint, requested size, and
+  selected media IDs. Validation and test media are never eligible.
 - When active learning is selected, acquisition is delegated to the versioned
   learning boundary delivered in Phase 7. Phase 5 defines the contract and
   state transition without inventing model scores or a temporary algorithm.
 
-- Implement caller-scoped queues and atomic assignment leasing, renewal,
-  release, expiry, and manager revocation/reassignment.
+- Implement caller-scoped queues of direct image assignments. An assigned
+  annotator opens and annotates the complete image directly: do not implement
+  claim, lease, renewal, expiry, or release endpoints for annotation work.
 - Implement optimistic draft versions and immutable, idempotent final
-  submissions with task/geometry validation.
+  full-image submissions with task/geometry validation. Detection and
+  segmentation objects are entries inside the image document, not batch items.
+- At assignment creation, clone any validated imported seed document into each
+  annotator's editable draft. A later save/submission is authored by that
+  annotator while retaining import provenance; imports themselves cannot enter
+  single-mode resolution or consensus.
 - In single mode, create the canonical resolution transactionally from the
   submitted document. In consensus mode, transition the item to resolution
   readiness only after every required assignment is submitted.
@@ -632,22 +663,22 @@ App work:
 - Add the active-learning choice to project creation and review. Explain that
   disabling it makes each acquisition batch a random sample of the remaining
   unlabeled pool; do not describe that path as model-guided.
-- Convert the existing workspace, recovery, queue, and annotation API code from
-  media-exclusive leases to assignment-exclusive leases while keeping peer
+- Convert the existing workspace, recovery, queue, and annotation API code
+  from media-exclusive leases to direct image assignments while keeping peer
   work blind.
 - Follow the App plan's
-  [Phase 5 assignment-workspace work](../../dada-app/docs/annotator-disagreement-adaptation-plan.md#phase-5-assignment-workspace).
+  [Phase 5 image-assignment workspace work](../../dada-app/docs/annotator-disagreement-adaptation-plan.md#phase-5-image-assignment-workspace).
 
-Exit gate: project creation persists the acquisition strategy and the
-non-active-learning path produces a reproducible random acquisition that
-excludes validation/test and already selected media. Concurrent database tests
-prove that two group members can lease different assignments for the same
-media, but no assignment can be leased twice; stale drafts, expired leases,
-duplicate completions, and cross-user access fail correctly.
+Exit gate: project creation persists the acquisition strategy; direct image
+assignments permit every configured consensus annotator to independently
+annotate the same image; and stale drafts, duplicate completions, and
+cross-user access fail correctly. Acquisition production remains blocked until
+Phase 6 has accepted resolutions for the initial images and Phase 7 performs
+the random or model-guided selection.
 
 ### Phase 6: consensus engine, diagnostics, and adjudication
 
-**Start gate:** resolve API decisions `P6-01`–`P6-07` and App decisions
+**Start gate:** resolve API decisions `P6-01`–`P6-08` and App decisions
 `A6-01`–`A6-04` in `docs/phases/phase_6.md`, complete every blocking item in
 [Consensus Engine Requirements](consensus-engine-requirements.md), and mark
 that document **Approved** before implementing the consensus engine.
@@ -665,6 +696,10 @@ that document **Approved** before implementing the consensus engine.
   immutable provenance. Persist raw-to-canonical mappings and the task-specific
   annotator performance observations defined above. Enforce review thresholds
   and build manager evidence, retry, and adjudication endpoints.
+- Create resolution work items only from image-level consensus cases. For
+  detection and segmentation, candidate objects/instances may become distinct
+  manual review work items. A resolution lease, if approved, applies only to
+  one such manual work item, never to an annotation assignment.
 
 App work:
 
@@ -688,7 +723,9 @@ plans.
 
 - Implement the versioned learning port, worker jobs, transactional outbox,
   deterministic training/acquisition adapter, progress, ETA, retries, and
-  failure recovery.
+  failure recovery. Create the first acquisition only after all initial images
+  have accepted resolutions: random selection may proceed directly; active
+  learning first trains and evaluates from the accepted initial resolutions.
 - Generate dataset manifests only from accepted resolution IDs and include
   resolution provenance in model-run lineage.
 - Implement authorized assisted-segmentation dispatch/results. Its output is an
@@ -734,7 +771,8 @@ plans.
 - Update App requirements, architecture, API contract, testing guide, API
   development guide, README files, and generated OpenAPI to use assignment and
   resolution terminology consistently.
-- Add ADRs for policy snapshots, assignment-scoped leases, blind annotation,
+- Add ADRs for policy snapshots, direct image assignments, resolution-work-item
+  leases, blind annotation,
   task-specific consensus, manual adjudication, PostgreSQL authority, outbox,
   and learning/consensus adapter boundaries.
 - Publish a compatibility record tying the App release to an OpenAPI version,
@@ -755,7 +793,7 @@ browser tests, the minimum regression matrix includes:
 
 1. Policy version conflicts, task/resolver compatibility, group membership,
    policy locking, member removal, reassignment, and audit history.
-2. Deterministic assignment generation and concurrent lease behavior at the
+2. Deterministic assignment generation and direct concurrent image work at the
    assignment level, including simultaneous work on the same image.
 3. Blindness: annotators cannot read peer drafts, submissions, identity,
    metrics, resolution state details, or manager evidence before submission.
@@ -766,11 +804,17 @@ browser tests, the minimum regression matrix includes:
 6. Iteration closure based on resolved images rather than submission counts and
    strict exclusion of unresolved/raw evidence from exports.
 7. Browser journeys for single mode, two-person consensus, simultaneous same
-   image work, lease loss, offline recovery per assignment, automatic
-   resolution, manual adjudication, polling fallback, and sequence gaps.
+   image work, offline recovery per assignment, automatic resolution, manual
+   adjudication with a resolution lease when enabled, polling fallback, and
+   sequence gaps.
 8. Project creation and iteration journeys for active-learning acquisition and
    reproducible random acquisition, including exclusion of validation/test and
    previously selected media.
+9. Dataset preparation for split and static random `single_batch` projects;
+   active-learning rejection for static projects; YOLO detection and COCO
+   segmentation imports; class-index/path validation; import audit provenance;
+   seeded drafts for every assigned annotator; and proof that imports never
+   become submissions, consensus votes, or accepted resolutions on their own.
 
 Repository/service integration tests must use PostgreSQL rather than an
 in-memory substitute. Consensus algorithm tests use small committed golden
@@ -791,12 +835,12 @@ and share the same gate and decision record.
 
 | ID | Pending decision | Required documented outcome |
 | --- | --- | --- |
-| `P5-01` | Acquisition-strategy project contract | Field name and enum, default for new projects, mutability before/after activation, version/audit behavior, development-reset treatment, and OpenAPI examples |
+| `P5-01` | Acquisition strategy and dataset-layout contract | Field names/enums, Random default, `split` versus random-only static `single_batch`, mutability before/after preparation/activation, version/audit behavior, development-reset treatment, and OpenAPI examples |
 | `P5-02` | Random acquisition semantics | Sampling algorithm/order, seed lifecycle, fingerprint, and provenance. The eligible pool, completed/cancelled/incomplete-item handling, final undersized-batch rule, and `iteration_batch_size` requested-size rule are fixed by the [Phase 4.1 revision plan](phase-4-annotation-sequence-revision-plan.md). |
-| `P5-03` | Lease lifecycle | Duration, renewal window, grace/expiry behavior, fairness and queue ordering, disconnect handling, manager revocation, and concurrent-claim semantics |
-| `P5-04` | Assignment reassignment and submission lifecycle | Reassignment/waiver authority and audit, consensus minimum after changes, whether submitted work may reopen, revision policy, and duplicate-completion response |
-| `P5-05` | Annotation document contract | Versioned classification/detection/segmentation schemas, explicit single-label vs. multi-label project configuration, coordinate precision, empty-annotation semantics, geometry limits, validation errors, and payload/complexity limits |
-| `P5-06` | Blindness release boundary | Exactly what aggregate state an annotator may read before submission, after own submission, after item resolution, and after batch closure; event redaction rules |
+| `P5-03` | Image-assignment access | Direct assigned-image access without annotation leases or claims; queue ordering; disconnect and recovery behavior; manager reassignment; and concurrent visibility of the same image to the configured consensus group |
+| `P5-04` | Assignment reassignment and submission lifecycle | Reassignment authority and audit before submission; immutable full-image submission revisions; whether submitted work may reopen; duplicate-completion response; and return of cancelled/incomplete images to the eligible train pool |
+| `P5-05` | Full-image annotation and import contract | Versioned classification/detection/segmentation image-document schemas; YOLO detection and COCO segmentation import adapters; class-index mapping; imported-seed provenance; explicit single-label vs. multi-label configuration; object entries within detection/segmentation documents; coordinate precision; empty-annotation semantics; geometry limits; validation errors; and payload/complexity limits |
+| `P5-06` | Blindness and import-visibility boundary | Exactly what aggregate state an annotator may read before submission, after own submission, after item resolution, and after batch closure; imported-seed source visibility; and event redaction rules |
 | `P6-01` | Resolver/package catalog | Supported Cleanlab and crowd-kit versions, adapter versions, pipeline IDs, dependency isolation, compatibility policy, and capability fallback behavior |
 | `P6-02` | Resolver configuration and quality gates | Typed parameters, defaults/bounds, task-specific thresholds, calibration dataset and approval evidence, tie/ambiguity rules, and migration from provisional policy IDs |
 | `P6-03` | Segmentation refinement implementation | Maintained STAPLE dependency or approved internal implementation, supported crowd-kit strategies, rasterization/polygonization libraries, and reference fixtures |
@@ -804,9 +848,10 @@ and share the same gate and decision record.
 | `P6-05` | Resolution job execution | Worker/queue topology, command/result envelopes, timeouts, retry/backoff limits, cancellation, stale/duplicate result handling, CPU/memory limits, and permanent-failure recovery |
 | `P6-06` | Resolution acceptance/versioning | Automatic acceptance criteria, proposal vs. accepted states, retry configuration/version conflicts, supersession, one-active-result invariant, and adjudication precedence |
 | `P6-07` | Evidence and performance policy | Raw evidence retention/access, raw-to-canonical mapping rules, observation eligibility, privacy/minimum-sample rules, and behavior when a resolution is superseded |
+| `P6-08` | Resolution work-item and lease policy | Image-case versus derived object/instance work-item identity; creation, closure, and provenance; which manual review actions require a resolution lease; lease duration/renewal/revocation; and concurrent-adjudication conflict handling |
 | `P7-01` | Learning and export protocol | Versioned command/result envelopes, manifest format, artifact storage, accepted-resolution lineage, transport-independent errors, and compatibility policy |
 | `P7-02` | Active-learning implementation | Initial model/training adapter, acquisition score and tie-breaking, cold-start behavior, reproducibility inputs, model/run retention, and behavior when the adapter is unavailable |
-| `P7-03` | Iteration and evaluation policy | Available user-selectable validation metrics and thresholds, comparison direction, training/evaluation cadence, interaction between the user-defined maximum acquisition-iteration count and metric threshold, retry/resume semantics, ETA/progress contract, and failure rollback. The initial training batch is excluded from the acquisition-iteration count and test evaluation is final-only, as fixed by the [Phase 4.1 revision plan](phase-4-annotation-sequence-revision-plan.md). |
+| `P7-03` | Iteration and evaluation policy | Available user-selectable validation metrics and thresholds, comparison direction, training/evaluation cadence, interaction between the user-defined maximum acquisition-iteration count and metric threshold, retry/resume semantics, ETA/progress contract, and failure rollback. The initial training batch is excluded from the acquisition-iteration count; every acquisition follows accepted consensus resolutions; and test evaluation is final-only, as fixed by the [Phase 4.1 revision plan](phase-4-annotation-sequence-revision-plan.md). |
 | `P7-04` | Assisted-segmentation provider | Model/provider, request/result schema, artifact/version provenance, limits/timeouts, failure UX contract, and confirmation that suggestions never count as votes |
 | `P7-05` | Quality-statistics publication | Metrics/formulas, authorized roles, minimum sample sizes, suppression/privacy rules, refresh cadence, and whether exports include aggregates |
 | `P8-01` | Event delivery contract | WebSocket topology, ticket TTL/single-use rules, sequence scope and retention, event schemas/redaction, reconnect/gap algorithm, and polling fallback cadence |

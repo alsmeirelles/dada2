@@ -66,10 +66,14 @@ The minimum API regression matrix includes:
    resumed chunks, duplicate completion, and cancellation.
 3. Project and iteration transition validation, immutable test splits, and
    reproducible selection metadata.
-4. Concurrent lease acquisition, renewal/expiry races, stale annotation
-   versions, duplicate submissions, and automatic iteration closure.
-5. Worker retry, duplicate results, timeout/failure recovery, ETA, metrics, and
-   assisted-segmentation lease authorization.
+4. Direct image-assignment access by each configured consensus annotator, stale
+   annotation versions, duplicate submissions, and automatic iteration closure.
+5. Resolution-work-item lease contention, renewal/expiry races when Phase 6
+   approves leases, worker retry, duplicate results, timeout/failure recovery,
+   ETA, metrics, and assisted-segmentation authorization.
+6. Draft split preparation and static random `single_batch` projects; active
+   learning rejection for static projects; YOLO detection and COCO segmentation
+   import validation, audit provenance, and per-annotator seeded drafts.
 6. Event-ticket expiry/replay, project isolation, monotonic sequences,
    reconnect, and REST reconciliation after a sequence gap.
 
@@ -81,7 +85,8 @@ idempotency behavior, and required CORS/exposed upload headers.
 
 Before a coordinated release, run the browser scenarios above against the
 candidate API deployment with no request mocking. Use two independent user
-sessions for lease contention. Include at least one interrupted upload across
+sessions to annotate the same assigned image independently and, where enabled,
+to test resolution-work-item lease contention. Include at least one interrupted upload across
 an API process restart and one iteration completed through the fake or staging
 worker. The released App's expected OpenAPI version must be recorded with the
 test result.

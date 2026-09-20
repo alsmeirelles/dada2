@@ -3,7 +3,7 @@
 > **Phase 6 gate:** This document is a normative task annex to the
 > [Consensus Engine Requirements](../consensus-engine-requirements.md). Do not
 > implement it until that specification is **Approved** and decisions
-> `P6-01`–`P6-07` are documented in `docs/phases/phase_6.md`.
+> `P6-01`–`P6-08` are documented in `docs/phases/phase_6.md`.
 
 ## Scope
 
@@ -18,7 +18,7 @@ observed labels.
 
 ## Inputs and normalization
 
-For one batch item, load the accepted submission revision for every required
+For one image-level batch item, load the accepted submission revision for every required
 assignment in the policy snapshot. Validate that each submission uses only
 active project classes and that classification objects have `geometry: null`.
 
