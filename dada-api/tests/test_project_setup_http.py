@@ -490,7 +490,10 @@ async def test_activation_reports_missing_prerequisites(database: None) -> None:
     assert "classes" in empty.json()["error"]["details"]["missing"]
     assert "media" in empty.json()["error"]["details"]["missing"]
     assert with_classes.status_code == 409
-    assert with_classes.json()["error"]["details"]["missing"] == ["media"]
+    assert with_classes.json()["error"]["details"]["missing"] == [
+        "media",
+        "dataset_layout",
+    ]
 
 
 @pytest.mark.parametrize(

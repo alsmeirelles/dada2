@@ -1,4 +1,4 @@
-"""Dataset freezing, batch policy snapshots, and assignment generation."""
+"""Batch creation, policy snapshots, and assignment generation."""
 
 from datetime import UTC, datetime
 
@@ -17,29 +17,17 @@ from dada_api.models.batch import (
     BatchPurpose,
     BatchStatus,
 )
-from dada_api.models.dataset import DatasetSplit, SplitName
-from dada_api.models.media import Media
+from dada_api.models.label_import import (
+    AnnotationImport,
+    ImportedSeedDocument,
+    ImportStatus,
+)
 from dada_api.models.project import Project
 from dada_api.models.user import User
 from dada_api.schemas.batch import BatchPolicyUpdate
 from dada_api.services import annotation_policy, audit, selection
 
 PAGE_SIZE = 50
-
-
-async def _ordered_media_ids(session: AsyncSession, project: Project) -> list[str]:
-    """Return a project's media identifiers in the deterministic listing order.
-
-    The order matches the media inventory route, so the recorded selection
-    input can be reproduced from what a client can already read.
-    """
-    return list(
-        await session.scalars(
-            select(Media.id)
-            .where(Media.project_id == project.id)
-            .order_by(Media.relative_path, Media.id)
-        )
-    )
 
 
 async def _snapshot_policy(
@@ -65,15 +53,30 @@ async def _snapshot_policy(
         )
 
 
-async def _create_batch(
+async def create_batch(
     session: AsyncSession,
     project: Project,
     purpose: BatchPurpose,
     candidates: list[str],
     size: int,
-) -> AnnotationBatch:
-    """Select media, create the batch that annotates it, and record how."""
+) -> list[str]:
+    """Draw media reproducibly, open the batch that annotates it, and record how.
+
+    The recorded seed and fingerprint describe this very draw, so a split
+    selected from the whole inventory can be recomputed from its batch.
+
+    Args:
+        session: Active database session, committed by the caller.
+        project: Project the batch belongs to.
+        purpose: Why the media is being selected.
+        candidates: Eligible media identifiers, in deterministic order.
+        size: Requested batch size; fewer are taken when fewer remain.
+
+    Returns:
+        The chosen media identifiers.
+    """
     seed = selection.new_seed()
+    chosen = selection.choose_up_to(candidates, size, seed)
     batch = AnnotationBatch(
         project_id=project.id,
         purpose=purpose,
@@ -90,137 +93,9 @@ async def _create_batch(
     session.add(batch)
     await _snapshot_policy(session, project, batch)
 
-    for media_id in selection.choose(candidates, size, seed):
+    for media_id in chosen:
         session.add(BatchItem(batch_id=batch.id, media_id=media_id))
-    return batch
-
-
-async def freeze_and_create(
-    session: AsyncSession,
-    project: Project,
-) -> list[AnnotationBatch]:
-    """Freeze the three-way split and open its annotation batches.
-
-    Test is drawn first and validation from the remainder. Train receives
-    everything left. Each split gets a full-coverage annotation batch, so the
-    first acquisition can later require completion of all three.
-
-    The caller commits, so a failure anywhere leaves the project untouched.
-
-    Args:
-        session: Active database session, committed by the caller.
-        project: Project being activated.
-
-    Returns:
-        The test, validation, and initial-training batches, in that order.
-    """
-    media_ids = await _ordered_media_ids(session, project)
-    if project.test_set_size is None or project.validation_set_size is None:
-        raise ValueError("held-out sizes must be resolved before freezing")
-
-    test_ids = selection.choose(media_ids, project.test_set_size, selection.new_seed())
-    test_set = set(test_ids)
-    after_test = [media_id for media_id in media_ids if media_id not in test_set]
-    validation_ids = selection.choose(
-        after_test, project.validation_set_size, selection.new_seed()
-    )
-    validation_set = set(validation_ids)
-    train_ids = [
-        media_id
-        for media_id in media_ids
-        if media_id not in test_set and media_id not in validation_set
-    ]
-
-    for media_id in media_ids:
-        split = SplitName.train
-        if media_id in test_set:
-            split = SplitName.test
-        elif media_id in validation_set:
-            split = SplitName.validation
-        session.add(
-            DatasetSplit(
-                project_id=project.id,
-                media_id=media_id,
-                split=split,
-            )
-        )
-
-    test_batch = await _create_batch(
-        session, project, BatchPurpose.test, test_ids, project.test_set_size
-    )
-    validation_batch = await _create_batch(
-        session,
-        project,
-        BatchPurpose.validation,
-        validation_ids,
-        project.validation_set_size,
-    )
-    training_batch = await _create_batch(
-        session,
-        project,
-        BatchPurpose.initial_training,
-        train_ids,
-        len(train_ids),
-    )
-    return [test_batch, validation_batch, training_batch]
-
-
-async def first_acquisition_ready(
-    session: AsyncSession,
-    project: Project,
-) -> bool:
-    """Return whether every frozen image has completed its first annotation.
-
-    Acquisition is deferred to a later phase. That phase must call this guard
-    before creating its first acquisition batch.
-    """
-    purposes = (
-        BatchPurpose.initial_training,
-        BatchPurpose.validation,
-        BatchPurpose.test,
-    )
-    split_items = await session.scalar(
-        select(func.count())
-        .select_from(DatasetSplit)
-        .where(DatasetSplit.project_id == project.id)
-    )
-    batch_items = await session.scalar(
-        select(func.count())
-        .select_from(BatchItem)
-        .join(AnnotationBatch, AnnotationBatch.id == BatchItem.batch_id)
-        .where(
-            AnnotationBatch.project_id == project.id,
-            AnnotationBatch.purpose.in_(purposes),
-        )
-    )
-    total_assignments = await session.scalar(
-        select(func.count())
-        .select_from(AnnotationAssignment)
-        .join(BatchItem, BatchItem.id == AnnotationAssignment.batch_item_id)
-        .join(AnnotationBatch, AnnotationBatch.id == BatchItem.batch_id)
-        .where(
-            AnnotationBatch.project_id == project.id,
-            AnnotationBatch.purpose.in_(purposes),
-        )
-    )
-    pending_assignments = await session.scalar(
-        select(func.count())
-        .select_from(AnnotationAssignment)
-        .join(BatchItem, BatchItem.id == AnnotationAssignment.batch_item_id)
-        .join(AnnotationBatch, AnnotationBatch.id == BatchItem.batch_id)
-        .where(
-            AnnotationBatch.project_id == project.id,
-            AnnotationBatch.purpose.in_(purposes),
-            AnnotationAssignment.status == ASSIGNMENT_PENDING,
-        )
-    )
-    expected = split_items or 0
-    return (
-        expected > 0
-        and batch_items == expected
-        and (total_assignments or 0) >= expected
-        and pending_assignments == 0
-    )
+    return chosen
 
 
 async def annotator_ids(session: AsyncSession, batch: AnnotationBatch) -> list[str]:
@@ -437,6 +312,11 @@ async def start(
     item. A single-mode batch produces one unclaimed assignment per item,
     because the policy names no owner and any eligible annotator may take it.
 
+    Only an active project distributes work. Activation is what closes the
+    label-import review, so starting a prepared draft's batch would hand out
+    assignments before their seeds are settled. Every assignment whose image
+    has an accepted imported seed is linked to it.
+
     Validation happens before any assignment is created and everything commits
     together, so a refused start leaves no partial work behind.
 
@@ -450,8 +330,9 @@ async def start(
         The started batch.
 
     Raises:
-        ApiError: 409 when the batch already started, 422 when the snapshotted
-            group is no longer valid for the project.
+        ApiError: 409 when the batch already started or the project is not
+            active, 422 when the snapshotted group is no longer valid for the
+            project.
     """
     if batch.status != BatchStatus.preparing:
         raise ApiError(
@@ -460,6 +341,13 @@ async def start(
             "The batch has already been started.",
             details={"status": batch.status},
         )
+    if project.status != "active":
+        raise ApiError(
+            409,
+            "project_not_active",
+            "Assignments are distributed only after the project is activated.",
+            details={"status": project.status},
+        )
 
     mode = AnnotationMode(batch.mode)
     group = await annotator_ids(session, batch)
@@ -467,17 +355,40 @@ async def start(
         session, project, mode, group, batch.resolver
     )
 
-    item_ids = list(
-        await session.scalars(
-            select(BatchItem.id).where(BatchItem.batch_id == batch.id)
+    items = (
+        await session.execute(
+            select(BatchItem.id, BatchItem.media_id).where(
+                BatchItem.batch_id == batch.id
+            )
         )
+    ).all()
+    seeds = dict(
+        (
+            await session.execute(
+                select(ImportedSeedDocument.media_id, ImportedSeedDocument.id)
+                .join(
+                    AnnotationImport,
+                    AnnotationImport.id == ImportedSeedDocument.import_id,
+                )
+                .where(
+                    AnnotationImport.project_id == project.id,
+                    AnnotationImport.status == ImportStatus.accepted,
+                )
+            )
+        ).all()
     )
     owners: list[str | None] = (
         list(group) if mode is AnnotationMode.consensus else [None]
     )
-    for item_id in item_ids:
+    for item_id, media_id in items:
         for owner in owners:
-            session.add(AnnotationAssignment(batch_item_id=item_id, annotator_id=owner))
+            session.add(
+                AnnotationAssignment(
+                    batch_item_id=item_id,
+                    annotator_id=owner,
+                    seed_document_id=seeds.get(media_id),
+                )
+            )
 
     batch.status = BatchStatus.annotating
     batch.started_at = datetime.now(UTC)
@@ -492,8 +403,9 @@ async def start(
         after={
             "mode": mode.value,
             "annotator_ids": group,
-            "items": len(item_ids),
-            "assignments": len(item_ids) * len(owners),
+            "items": len(items),
+            "assignments": len(items) * len(owners),
+            "seeded_items": sum(1 for _, media_id in items if media_id in seeds),
         },
     )
     await session.commit()

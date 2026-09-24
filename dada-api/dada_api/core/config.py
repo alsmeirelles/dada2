@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     max_project_files: int = Field(default=100_000, gt=0)
     upload_chunk_bytes: int = Field(default=8 * 1024 * 1024, gt=0)
     upload_session_ttl_hours: int = Field(default=24, gt=0)
+    max_import_file_bytes: int = Field(default=50 * 1024 * 1024, gt=0)
     media_root: Path = Path("var/media")
     upload_parts_root: Path = Path("var/upload-parts")
     realtime_transport: str = "websocket"

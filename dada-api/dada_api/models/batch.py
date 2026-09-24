@@ -20,11 +20,13 @@ from dada_api.db.base import Base
 
 ASSIGNMENT_PENDING = "pending"
 ITEM_PENDING = "pending"
+ITEM_RESOLVED = "resolved"
 
 
 class BatchPurpose(StrEnum):
     """Why a set of media was selected for annotation."""
 
+    initial_annotation = "initial_annotation"
     initial_training = "initial_training"
     validation = "validation"
     test = "test"
@@ -129,7 +131,12 @@ class AnnotationBatchAnnotator(Base):
 
 
 class BatchItem(Base):
-    """One selected image inside a batch."""
+    """One selected image inside a batch.
+
+    ``status`` becomes ``resolved`` only when the image has an accepted
+    canonical resolution. Submitted assignments alone never set it, which is
+    what makes it the signal the first-acquisition guard can trust.
+    """
 
     __tablename__ = "batch_items"
     __table_args__ = (UniqueConstraint("batch_id", "media_id", name="uq_batch_item"),)
@@ -164,6 +171,10 @@ class AnnotationAssignment(Base):
 
     The annotator reference restricts deletion for the same reason the group
     snapshot does: an assignment is retained domain evidence.
+
+    ``seed_document_id`` links the imported labels that prefill this
+    assignment's editable work. The seed is immutable, so the link acts as the
+    annotator's own copy until their first save creates a real draft.
     """
 
     __tablename__ = "annotation_assignments"
@@ -186,6 +197,11 @@ class AnnotationAssignment(Base):
         nullable=True,
     )
     status: Mapped[str] = mapped_column(String(32), default=ASSIGNMENT_PENDING)
+    seed_document_id: Mapped[str | None] = mapped_column(
+        ForeignKey("imported_seed_documents.id"),
+        index=True,
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

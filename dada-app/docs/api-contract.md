@@ -128,6 +128,8 @@ installation is told what actually blocks the change.
   "task_type": "detection",
   "status": "draft",
   "owner_id": "uuid",
+  "acquisition_strategy": "random",
+  "dataset_layout": "split",
   "initial_training_size": 100,
   "test_set_size": 50,
   "test_set_percentage": null,
@@ -231,14 +233,20 @@ Cancelling a session and deleting a project both purge immediately and
 permanently; no restore window exists. `DELETE /api/v1/projects/{project_id}` is
 owner-only and returns `204`.
 
-## Annotation batches — Phase 4
+## Annotation batches — Phase 4.1 target
 
-Activating a project freezes its train/validation/test split and opens three
-full-coverage batches: `test`, `validation`, and `initial_training` for the
-train remainder. Test and validation may be configured as absolute counts or
-percentages; percentages resolve to fixed counts at activation. The project
-moves from `draft` to `active` in the same transaction, so an active project
-always has its splits and batches.
+Before activation, a draft project prepares either `split` or `single_batch`
+layout. `split` freezes train/validation/test membership and opens three initial
+batches: every `test` image, every `validation` image, and the resolved first
+`initial_training` batch from the train split. `single_batch` is available only
+to random projects and opens one all-images `initial_annotation` batch. It has
+no splits, validation/test evaluation, model training, or acquisition
+iterations. Both layouts support single or consensus annotation policy.
+
+Test and validation may be configured as absolute counts or percentages;
+percentages resolve to fixed counts during draft preparation. The project moves
+from `draft` to `active` only after layout preparation and any label import
+review are complete.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -248,7 +256,8 @@ always has its splits and batches.
 | `POST` | `/api/v1/projects/{project_id}/batches/{batch_id}/start` | Freeze it and generate assignments |
 
 ```ts
-type BatchPurpose = 'initial_training' | 'validation' | 'test' | 'acquisition'
+type BatchPurpose =
+  | 'initial_annotation' | 'initial_training' | 'validation' | 'test' | 'acquisition'
 type BatchStatus =
   | 'preparing' | 'annotating' | 'resolving'
   | 'review_required' | 'resolved' | 'closed' | 'failed'
@@ -292,12 +301,38 @@ coincide.
 Acquisition batches, iteration records, and the routes below arrive with later
 phases; `GET /iterations` and `GET /statistics` are not implemented yet.
 
-## Iterations and splits
+## Dataset preparation, label imports, iterations, and splits
+
+Owners/managers prepare the draft dataset after media and classes are complete.
+Preparing freezes the selected layout, class-index mapping, and media inventory
+for activation. Changing one of these inputs resets prepared layout and draft
+imports.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/projects/{project_id}/dataset-layout/prepare` | Materialize split membership/first training selection or static all-images layout |
+| `DELETE` | `/api/v1/projects/{project_id}/dataset-layout` | Reset draft preparation and associated draft imports |
+| `POST` | `/api/v1/projects/{project_id}/annotation-imports` | Create an owner/manager-only YOLO-detection or COCO-segmentation import session |
+| `POST` | `/api/v1/annotation-imports/{import_id}/files/{file_id}` | Upload import content |
+| `POST` | `/api/v1/annotation-imports/{import_id}/validate` | Parse and return path/class-index/geometry preview results |
+| `POST` | `/api/v1/annotation-imports/{import_id}/accept` | Persist validated immutable seed documents |
+| `DELETE` | `/api/v1/annotation-imports/{import_id}` | Discard a draft import |
+
+YOLO detection labels match image relative paths without the image suffix; COCO
+segmentation labels match normalized `images.file_name`. Source class indexes
+must match the prepared project class `display_order`. Imports preserve their
+actor, file hashes, parser/version, mappings, and validation results. They are
+not assignments, submissions, consensus votes, or canonical resolutions.
 
 The API creates immutable train/validation/test membership when a project is
-activated. All three sets are annotated before the first acquisition may
-start; validation and test remain excluded from acquisition. Every iteration
-records its selection strategy and model/run identifiers for reproducibility.
+activated. All three initial sets must have accepted image resolutions before
+the first acquisition may start; validation and test remain excluded from
+acquisition. Every iteration records its selection strategy and model/run
+identifiers for reproducibility. The initial-training batch is not an
+acquisition iteration, and the final acquisition batch may be smaller than
+`iteration_batch_size`.
+
+Static `single_batch` projects have no split rows or iteration resources.
 
 Iteration states are:
 
@@ -408,3 +443,76 @@ Event types initially include `upload.progress`, `upload.completed`,
 `lease.acquired`, `lease.released`, `annotation.completed`,
 `iteration.status_changed`, `training.progress`, and `training.eta_updated`.
 Events are invalidation signals; clients refetch authoritative resources.
+
+## Phase 4.1 implemented shapes
+
+These complement the Phase 4.1 sections above with what the API returns.
+Decisions are recorded in `dada-api/docs/phases/phase_4.1.md`.
+
+`POST /projects` accepts `acquisition_strategy` (`random` | `active_learning`,
+default `random`) and `dataset_layout` (`split` | `single_batch`, default
+`split`). `initial_training_size` is optional and nullable; when absent the
+first training batch uses `iteration_batch_size`. A `single_batch` project
+sends no size fields and only `random`. `Project` also returns
+`dataset_prepared_at`, set while the draft is prepared.
+
+Two read routes make the Phase 4.1 resources reachable:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/dataset-layout` | Prepared layout summary |
+| `GET` | `/api/v1/annotation-imports/{import_id}` | Import status, files, and report |
+
+`prepare` has no body and returns `201` with the layout summary:
+
+```ts
+type DatasetLayoutSummary = {
+  dataset_layout: 'split' | 'single_batch'
+  prepared_at: string | null
+  train_size: number
+  validation_size: number
+  test_size: number
+  first_training_batch_size: number | null
+  training_pool_size: number    // train images not held by a live training batch
+  batch_ids: string[]
+  annotation_import_id: string | null
+}
+```
+
+An import is created from a manifest, then each file is sent whole as the raw
+request body to `/annotation-imports/{import_id}/files/{client_file_id}`:
+
+```ts
+type AnnotationImportCreate = {
+  format: 'yolo_detection' | 'coco_segmentation'
+  files: { client_file_id: string; relative_path: string; size_bytes: number; sha256: string }[]
+}
+type AnnotationImport = {
+  id: string
+  project_id: string
+  format: 'yolo_detection' | 'coco_segmentation'
+  parser_version: string
+  status: 'uploading' | 'validated' | 'rejected' | 'accepted'
+  created_by: string
+  report: {
+    labelled_images: number
+    objects: number
+    unlabelled_images: number
+    errors: { code: string; client_file_id: string; detail: string }[]
+  } | null
+  files: { client_file_id: string; relative_path: string; size_bytes: number; sha256: string; received: boolean }[]
+  created_at: string
+  validated_at: string | null
+  accepted_at: string | null
+}
+```
+
+`activation_incomplete.details.missing` may now also contain `dataset_layout`
+(not prepared) and `label_import` (an import is not accepted). New stable
+codes: `preparation_incomplete`, `dataset_already_prepared`,
+`dataset_not_prepared`, `project_not_active`, `import_not_supported`,
+`import_already_exists`, `import_not_uploading`, `import_files_incomplete`,
+`import_not_valid`, and `import_accepted`. Import report error codes are
+`invalid_relative_path`, `unmatched_path`, `ambiguous_media_match`,
+`duplicate_source_label`, `unknown_class_index`, `malformed_label`,
+`invalid_geometry`, and `unsupported_geometry`.

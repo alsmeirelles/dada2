@@ -781,12 +781,96 @@ async def test_activation_requires_classes_and_ingested_media(database: None) ->
             json={},
         )
 
-        activated = await client.post(
+        unprepared = await client.post(
             f"/api/v1/projects/{project['id']}/activate",
             headers={**_auth(token), "Idempotency-Key": "activate-2"},
             json={},
         )
+        assert unprepared.status_code == 409
+        assert unprepared.json()["error"]["details"]["missing"] == ["dataset_layout"]
+
+        prepared = await client.post(
+            f"/api/v1/projects/{project['id']}/dataset-layout/prepare",
+            headers=_auth(token),
+        )
+        assert prepared.status_code == 201, prepared.text
+
+        activated = await client.post(
+            f"/api/v1/projects/{project['id']}/activate",
+            headers={**_auth(token), "Idempotency-Key": "activate-3"},
+            json={},
+        )
         assert activated.status_code == 200, activated.text
+
+
+async def test_new_media_resets_a_prepared_draft(database: None) -> None:
+    await _create_user("owner")
+    token = await _token("owner")
+    images = [_png(color=(index * 60, 0, 0)) for index in range(4)]
+
+    async with _client() as client:
+        project = await _project(client, token)
+        await client.post(
+            f"/api/v1/projects/{project['id']}/classes",
+            headers=_auth(token),
+            json={"name": "crack", "color": "#FF0000", "display_order": 0},
+        )
+        first = await _manifest(
+            client,
+            token,
+            project["id"],
+            [_entry(f"f{index}", f"{index}.png", images[index]) for index in range(3)],
+        )
+        for index in range(3):
+            await _put_chunk(
+                client, token, first.json()["id"], f"f{index}", images[index]
+            )
+        await client.post(
+            f"/api/v1/uploads/{first.json()['id']}/complete",
+            headers=_auth(token),
+            json={},
+        )
+        prepared = await client.post(
+            f"/api/v1/projects/{project['id']}/dataset-layout/prepare",
+            headers=_auth(token),
+        )
+        assert prepared.status_code == 201, prepared.text
+
+        second = await _manifest(
+            client,
+            token,
+            project["id"],
+            [_entry("f3", "3.png", images[3])],
+            key="second-upload",
+        )
+        await _put_chunk(client, token, second.json()["id"], "f3", images[3])
+        completed = await client.post(
+            f"/api/v1/uploads/{second.json()['id']}/complete",
+            headers=_auth(token),
+            json={},
+        )
+        assert completed.status_code == 200, completed.text
+
+        reread = await client.get(
+            f"/api/v1/projects/{project['id']}", headers=_auth(token)
+        )
+        layout = await client.get(
+            f"/api/v1/projects/{project['id']}/dataset-layout", headers=_auth(token)
+        )
+
+    assert reread.json()["dataset_prepared_at"] is None
+    assert layout.json()["batch_ids"] == []
+    assert layout.json()["train_size"] == 0
+
+    async with async_session_factory() as session:
+        reasons = [
+            entry.after["reason"]
+            for entry in await session.scalars(
+                select(AuditEntry).where(AuditEntry.action == "dataset.reset")
+            )
+        ]
+
+    assert reasons == ["media_changed"]
 
 
 async def test_member_roles_reach_ingestion_through_the_central_matrix(

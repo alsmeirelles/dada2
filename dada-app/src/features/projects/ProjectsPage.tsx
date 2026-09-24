@@ -60,7 +60,7 @@ export function ProjectsPage() {
               <dl>
                 <div><dt>Images</dt><dd>{project.media_count ?? '—'}</dd></div>
                 <div><dt>Resolved</dt><dd>{project.resolved_images ?? project.completed_annotations ?? '—'}</dd></div>
-                <div><dt>Batch</dt><dd>{project.iteration_batch_size}</dd></div>
+                <div><dt>Batch</dt><dd>{project.iteration_batch_size ?? 'Static'}</dd></div>
               </dl>
               {(project.status === 'active' || project.status === 'ready') && (
                 <Link className="project-card__action" to={`/projects/${project.id}/batches`}>

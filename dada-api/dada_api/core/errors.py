@@ -66,6 +66,9 @@ def redact_validation_errors(
     passwords and other credentials into the response body, which the
     idempotency middleware then persists.
 
+    A model validator that raises ``ValueError`` leaves the exception itself in
+    ``ctx``; it is reported by its message so the error stays serialisable.
+
     Args:
         errors: Validation errors reported by Pydantic.
 
@@ -73,7 +76,18 @@ def redact_validation_errors(
         The same errors without their ``input`` entries.
     """
     return [
-        {key: value for key, value in error.items() if key != "input"}
+        {
+            key: (
+                {
+                    name: str(item) if isinstance(item, Exception) else item
+                    for name, item in value.items()
+                }
+                if key == "ctx"
+                else value
+            )
+            for key, value in error.items()
+            if key != "input"
+        }
         for error in errors
     ]
 

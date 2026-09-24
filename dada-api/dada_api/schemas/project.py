@@ -11,27 +11,47 @@ ProjectStatus = Literal[
     "draft", "ingesting", "ready", "active", "training", "completed", "failed"
 ]
 ProjectRoleName = Literal["owner", "manager", "annotator", "viewer"]
+AcquisitionStrategyName = Literal["random", "active_learning"]
+DatasetLayoutName = Literal["split", "single_batch"]
 HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
+SIZE_FIELDS = (
+    "initial_training_size",
+    "test_set_size",
+    "test_set_percentage",
+    "validation_set_size",
+    "validation_set_percentage",
+    "iteration_batch_size",
+)
 
 
 class ProjectCreate(BaseModel):
-    """Create-project request contract."""
+    """Create-project request contract.
+
+    A ``split`` project requires ``iteration_batch_size`` and one count or
+    percentage for each held-out split. ``initial_training_size`` is optional:
+    when omitted, the first training batch uses ``iteration_batch_size``.
+
+    A ``single_batch`` project annotates every image once and never trains, so
+    it accepts no size at all and only the ``random`` acquisition strategy.
+    """
 
     name: str = Field(min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=4000)
     task_type: TaskType
-    initial_training_size: int = Field(ge=1)
+    acquisition_strategy: AcquisitionStrategyName = "random"
+    dataset_layout: DatasetLayoutName = "split"
+    initial_training_size: int | None = Field(default=None, ge=1)
     test_set_size: int | None = Field(default=None, ge=1)
     test_set_percentage: float | None = Field(default=None, gt=0, lt=100)
     validation_set_size: int | None = Field(default=None, ge=1)
     validation_set_percentage: float | None = Field(default=None, gt=0, lt=100)
-    iteration_batch_size: int = Field(ge=1)
+    iteration_batch_size: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="before")
     @classmethod
     def validate_split_size_definitions(cls, value: Any) -> Any:
         """Require one count or percentage for each held-out split."""
-        if not isinstance(value, dict):
+        if not isinstance(value, dict) or value.get("dataset_layout") == "single_batch":
             return value
         data = dict(value)
         if (
@@ -48,6 +68,19 @@ class ProjectCreate(BaseModel):
                     f"{prefix}_set_percentage"
                 )
         return data
+
+    @model_validator(mode="after")
+    def validate_dataset_layout(self) -> "ProjectCreate":
+        """Enforce the layout's size rules and its acquisition compatibility."""
+        if self.dataset_layout == "split":
+            if self.iteration_batch_size is None:
+                raise ValueError("a split project requires iteration_batch_size")
+            return self
+        if self.acquisition_strategy != "random":
+            raise ValueError("single_batch requires the random acquisition strategy")
+        if any(getattr(self, name) is not None for name in SIZE_FIELDS):
+            raise ValueError("single_batch accepts no split or iteration sizes")
+        return self
 
 
 class ProjectUpdate(BaseModel):
@@ -67,12 +100,15 @@ class ProjectResponse(BaseModel):
     task_type: TaskType
     status: ProjectStatus
     owner_id: UUID
-    initial_training_size: int
+    acquisition_strategy: AcquisitionStrategyName
+    dataset_layout: DatasetLayoutName
+    initial_training_size: int | None
     test_set_size: int | None
     test_set_percentage: float | None
     validation_set_size: int | None
     validation_set_percentage: float | None
-    iteration_batch_size: int
+    iteration_batch_size: int | None
+    dataset_prepared_at: datetime | None
     version: int
     created_at: datetime
     updated_at: datetime
