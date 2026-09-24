@@ -24,6 +24,7 @@ venv/
 # Local assistant working context
 .claude/
 CLAUDE.md
+AGENTS.md
 
 # Locally stored media and temporary upload parts
 dada-api/var/

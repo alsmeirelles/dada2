@@ -6,11 +6,13 @@ import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
 import { listBatches, startBatch, updateBatchPolicy } from './batch-api'
+import { getDatasetLayout } from './dataset-api'
 import { getAnnotationPolicy, getProject, listMembers } from './project-api'
 import type { AnnotationBatch, AnnotationPolicy, BatchPurpose } from './types'
 
 const purposeLabels: Record<BatchPurpose, string> = {
-  initial_training: 'Train',
+  initial_annotation: 'All images',
+  initial_training: 'First training',
   validation: 'Validation',
   test: 'Test',
   acquisition: 'Acquisition',
@@ -33,6 +35,11 @@ export function ProjectBatchesPage() {
   const batches = useQuery({
     queryKey: ['project-batches', projectId],
     queryFn: () => listBatches(projectId, token!),
+    enabled: Boolean(projectId && token),
+  })
+  const layout = useQuery({
+    queryKey: ['dataset-layout', projectId],
+    queryFn: () => getDatasetLayout(projectId, token!),
     enabled: Boolean(projectId && token),
   })
   const self = members.data?.items.find((member) => member.user_id === user?.id)
@@ -71,7 +78,9 @@ export function ProjectBatchesPage() {
 
   return <main className="page-container batch-page">
     <div className="page-heading">
-      <div><Link className="back-link back-link--flow" to="/projects"><ArrowLeft size={17} /> Projects</Link><p className="eyebrow">{project.data?.name}</p><h1>Annotation batches</h1><p className="muted">Train, validation, and test are fixed at activation. Every initial assignment must be submitted before the first acquisition round.</p></div>
+      <div><Link className="back-link back-link--flow" to="/projects"><ArrowLeft size={17} /> Projects</Link><p className="eyebrow">{project.data?.name}</p><h1>Annotation batches</h1><p className="muted">{project.data?.dataset_layout === 'single_batch'
+        ? 'One static batch covers every image. There is no training or acquisition loop.'
+        : `Validation and test are annotated in full, together with the first training batch. The first acquisition waits until every initial image has an accepted resolution.${layout.data ? ` ${layout.data.training_pool_size} training images remain in the unlabeled pool.` : ''}`}</p></div>
       <div className="batch-actions">
         {hasStartedBatch && <Link className="button button--primary" to={`/projects/${projectId}/annotate`}>Open annotation workspace</Link>}
         {canManage && <Link className="button button--secondary" to={`/projects/${projectId}/settings`}>Default policy settings</Link>}

@@ -3,9 +3,10 @@
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dada_api.api.deps import require_project_action
+from dada_api.api.deps import get_current_user, require_project_action
 from dada_api.db.session import get_session
 from dada_api.models.project import Project, ProjectClass
+from dada_api.models.user import User
 from dada_api.schemas.project import (
     ProjectClassCreate,
     ProjectClassPage,
@@ -49,6 +50,7 @@ async def list_classes(
 async def create_class(
     request: ProjectClassCreate,
     project: Project = Depends(require_project_action(ProjectAction.manage_classes)),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ProjectClass:
     """Add a class to a project.
@@ -56,12 +58,13 @@ async def create_class(
     Args:
         request: Validated creation request.
         project: Project resolved and authorized by the dependency.
+        user: Authenticated user recorded as the actor.
         session: Active database session.
 
     Returns:
         The created class.
     """
-    return await class_service.create_class(session, project, request)
+    return await class_service.create_class(session, user, project, request)
 
 
 @router.patch(
@@ -71,6 +74,7 @@ async def update_class(
     class_id: str,
     request: ProjectClassUpdate,
     project: Project = Depends(require_project_action(ProjectAction.manage_classes)),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ProjectClass:
     """Apply a versioned update to a class.
@@ -79,13 +83,14 @@ async def update_class(
         class_id: Class being updated.
         request: Validated update request carrying the expected version.
         project: Project resolved and authorized by the dependency.
+        user: Authenticated user recorded as the actor.
         session: Active database session.
 
     Returns:
         The updated class.
     """
     item = await class_service.get_class(session, project, class_id)
-    return await class_service.update_class(session, item, request)
+    return await class_service.update_class(session, user, project, item, request)
 
 
 @router.delete(
@@ -95,6 +100,7 @@ async def update_class(
 async def delete_class(
     class_id: str,
     project: Project = Depends(require_project_action(ProjectAction.manage_classes)),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     """Remove a class from a project.
@@ -102,11 +108,12 @@ async def delete_class(
     Args:
         class_id: Class being removed.
         project: Project resolved and authorized by the dependency.
+        user: Authenticated user recorded as the actor.
         session: Active database session.
 
     Returns:
         An empty response.
     """
     item = await class_service.get_class(session, project, class_id)
-    await class_service.delete_class(session, item)
+    await class_service.delete_class(session, user, project, item)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

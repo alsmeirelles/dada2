@@ -56,3 +56,20 @@ def choose(media_ids: Sequence[str], size: int, seed: int) -> list[str]:
     if size > len(media_ids):
         raise ValueError("The selection asks for more media than is available.")
     return random.Random(seed).sample(list(media_ids), size)
+
+
+def choose_up_to(media_ids: Sequence[str], size: int, seed: int) -> list[str]:
+    """Choose at most ``size`` candidates, taking all of them when fewer remain.
+
+    The final training batch may be smaller than the requested size once the
+    eligible pool runs short, so the request is a ceiling rather than a demand.
+
+    Args:
+        media_ids: Candidate identifiers, in a deterministic order.
+        size: Requested batch size.
+        seed: Recorded seed for this selection.
+
+    Returns:
+        The chosen identifiers.
+    """
+    return choose(media_ids, min(size, len(media_ids)), seed)

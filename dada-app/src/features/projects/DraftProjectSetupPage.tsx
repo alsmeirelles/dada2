@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
+import { DatasetPreparationPanel } from './DatasetPreparationPanel'
 import { hashImages, scanImageFiles, type LocalImage } from './ingest'
 import {
   createClass,
@@ -38,6 +39,7 @@ export function DraftProjectSetupPage() {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['project', projectId] })
     queryClient.invalidateQueries({ queryKey: ['project-classes', projectId] })
+    queryClient.invalidateQueries({ queryKey: ['dataset-layout', projectId] })
   }
   const editProject = useMutation({ mutationFn: (form: HTMLFormElement) => updateProject(projectId, { name: new FormData(form).get('name') as string, description: (new FormData(form).get('description') as string) || null, version: project.data!.version }, token!), onSuccess: refresh })
   const saveClass = useMutation({ mutationFn: (entry: ProjectClass) => updateClass(projectId, entry.id, { name: entry.name, color: entry.color, display_order: entry.display_order, version: entry.version }, token!), onSuccess: refresh })
@@ -45,7 +47,7 @@ export function DraftProjectSetupPage() {
   const deleteClass = useMutation({ mutationFn: (id: string) => removeClass(projectId, id, token!), onSuccess: refresh })
   const resume = useMutation({
     mutationFn: () => createProjectWithDataset(buildDraft(), images, token!, (progress, text) => setMessage(`${progress}% — ${text}`), projectId),
-    onSuccess: () => navigate('/projects', { replace: true }),
+    onSuccess: () => { setMessage(null); setImages([]); refresh() },
   })
   const activeUploadId = loadSetup()?.projectId === projectId ? loadSetup()?.uploadId : undefined
   const cancel = useMutation({
@@ -59,12 +61,13 @@ export function DraftProjectSetupPage() {
     return {
       name: current.name, description: current.description ?? '', taskType: current.task_type,
       classes: (classes.data?.items ?? []).map(({ id, name, color }) => ({ id, name, color })),
+      datasetLayout: current.dataset_layout,
       initialTrainingSize: current.initial_training_size,
       testSetSize: current.test_set_percentage ?? current.test_set_size ?? 1,
       testSetUnit: current.test_set_percentage !== null ? 'percentage' : 'count',
       validationSetSize: current.validation_set_percentage ?? current.validation_set_size ?? 1,
       validationSetUnit: current.validation_set_percentage !== null ? 'percentage' : 'count',
-      iterationBatchSize: current.iteration_batch_size,
+      iterationBatchSize: current.iteration_batch_size ?? 1,
       collaborators: (members.data?.items ?? []).filter((member) => member.role !== 'owner').map((member) => member.username),
       annotationPolicy: policy.data?.mode === 'consensus' ? { mode: 'consensus', annotatorUsernames: policy.data.annotator_ids.map((id) => policyMembers.get(id)).filter((name): name is string => Boolean(name)), resolver: policy.data.resolver ?? '', reviewThreshold: policy.data.review_thresholds?.agreement ?? .75 } : { mode: 'single' },
     }
@@ -91,8 +94,10 @@ export function DraftProjectSetupPage() {
       <div><h2>Team and strategy</h2><p className="muted">Manage members and the annotation policy before resuming the dataset upload.</p><Link className="button button--secondary" to={`/projects/${projectId}/settings`}>Open project settings</Link></div>
       <div><h2>Dataset</h2><input ref={(node) => { fileInput.current = node; node?.setAttribute('webkitdirectory', '') }} className="sr-only" type="file" multiple accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={selectFiles} /><Button variant="secondary" onClick={() => fileInput.current?.click()}>Choose image folder</Button>{activeUploadId && <Button variant="ghost" disabled={cancel.isPending} onClick={() => { if (window.confirm('Cancel this upload? Its temporary files will be permanently purged.')) cancel.mutate() }}>{cancel.isPending ? 'Cancelling…' : 'Cancel interrupted upload'}</Button>}{images.length > 0 && <p className="notice">{images.length} images ready. Upload resumes from the server-confirmed byte offset.</p>}</div>
       {(message || resume.isError || editProject.isError || saveClass.isError || deleteClass.isError) && <p className="form-error" role="alert">{message ?? errorText(resume.error ?? editProject.error ?? saveClass.error ?? deleteClass.error)}</p>}
-      <Button onClick={() => { saveSetup({ projectId, stage: 'policy' }); resume.mutate() }} disabled={!images.length || resume.isPending}>{resume.isPending ? 'Resuming…' : 'Resume upload and activate'}</Button>
+      {project.data!.dataset_prepared_at && <p className="notice">The dataset is prepared. Adding or removing classes, reordering them, or uploading new images resets the preparation and discards imported labels.</p>}
+      {images.length > 0 && <Button onClick={() => { saveSetup({ projectId, stage: 'policy' }); resume.mutate() }} disabled={resume.isPending}>{resume.isPending ? 'Resuming…' : 'Resume upload and prepare'}</Button>}
     </div></section>
+    <section className="wizard-card"><DatasetPreparationPanel project={project.data!} onActivated={() => navigate('/projects', { replace: true })} /></section>
   </main>
 }
 

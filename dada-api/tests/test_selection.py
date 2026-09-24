@@ -37,6 +37,21 @@ def test_selecting_more_than_is_available_is_refused() -> None:
         selection.choose(CANDIDATES, len(CANDIDATES) + 1, 1)
 
 
+def test_a_final_batch_takes_the_whole_pool_when_it_runs_short() -> None:
+    pool = CANDIDATES[:7]
+
+    chosen = selection.choose_up_to(pool, 25, 4242)
+
+    assert sorted(chosen) == sorted(pool)
+    assert chosen == selection.choose_up_to(pool, 25, 4242)
+
+
+def test_a_full_pool_is_sampled_to_the_requested_size() -> None:
+    assert selection.choose_up_to(CANDIDATES, 25, 4242) == selection.choose(
+        CANDIDATES, 25, 4242
+    )
+
+
 def test_seeds_are_generated_within_the_persisted_range() -> None:
     seeds = {selection.new_seed() for _ in range(50)}
 

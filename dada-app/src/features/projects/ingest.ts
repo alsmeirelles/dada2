@@ -26,20 +26,26 @@ export type ScanResult = {
   totalBytes: number
 }
 
-export function scanImageFiles(files: Iterable<File>): ScanResult {
-  const images: LocalImage[] = []
-  const rejected: RejectedLocalFile[] = []
-  let totalBytes = 0
+/** Paths relative to the selected folder, so its own name is never sent. */
+export function selectedRelativePaths(files: Iterable<File>) {
   const candidates = [...files].map((file) => ({
     file,
     sourcePath: normalizeRelativePath(file.webkitRelativePath || file.name),
   }))
   const selectedRoot = commonSelectedRoot(candidates.map((item) => item.sourcePath))
+  return candidates.map(({ file, sourcePath }) => ({
+    file,
+    sourcePath,
+    relativePath: selectedRoot ? sourcePath.split('/').slice(1).join('/') : sourcePath,
+  }))
+}
 
-  for (const { file, sourcePath } of candidates) {
-    const relativePath = selectedRoot
-      ? sourcePath.split('/').slice(1).join('/')
-      : sourcePath
+export function scanImageFiles(files: Iterable<File>): ScanResult {
+  const images: LocalImage[] = []
+  const rejected: RejectedLocalFile[] = []
+  let totalBytes = 0
+
+  for (const { file, sourcePath, relativePath } of selectedRelativePaths(files)) {
     const segments = relativePath.split('/')
 
     if (!relativePath || segments.includes('..')) {
@@ -78,11 +84,14 @@ export async function hashImages(
 ): Promise<LocalImage[]> {
   const hashed: LocalImage[] = []
   for (const [index, image] of images.entries()) {
-    const digest = await crypto.subtle.digest('SHA-256', await image.file.arrayBuffer())
-    hashed.push({ ...image, sha256: toHex(digest) })
+    hashed.push({ ...image, sha256: await sha256Hex(image.file) })
     onProgress?.(index + 1, images.length)
   }
   return hashed
+}
+
+export async function sha256Hex(blob: Blob) {
+  return toHex(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))
 }
 
 export function findDuplicateGroups(images: LocalImage[]): LocalImage[][] {

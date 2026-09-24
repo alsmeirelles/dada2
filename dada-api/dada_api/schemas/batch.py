@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field
 
 from dada_api.schemas.annotation_policy import AnnotationModeName
 
-BatchPurposeName = Literal["initial_training", "validation", "test", "acquisition"]
+BatchPurposeName = Literal[
+    "initial_annotation", "initial_training", "validation", "test", "acquisition"
+]
 BatchStatusName = Literal[
     "preparing",
     "annotating",

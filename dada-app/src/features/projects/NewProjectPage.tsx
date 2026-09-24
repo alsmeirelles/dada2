@@ -15,7 +15,12 @@ import { getCapabilities } from '../../api/capabilities'
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
-import { createProjectWithDataset, resolveDraftSplitSize } from './project-api'
+import { DatasetPreparationPanel } from './DatasetPreparationPanel'
+import {
+  createProjectWithDataset,
+  resolveDraftSplitSize,
+  resolvedFirstTrainingSize,
+} from './project-api'
 import { resolverLabel } from './resolver-label'
 import { loadSetup } from './setup-recovery'
 import {
@@ -25,9 +30,10 @@ import {
   type LocalImage,
   type RejectedLocalFile,
 } from './ingest'
-import type { ProjectClassInput, ProjectDraft, TaskType } from './types'
+import type { Project, ProjectClassInput, ProjectDraft, TaskType } from './types'
 
-const steps = ['Basics', 'Classes', 'Learning', 'Team', 'Dataset', 'Review']
+const steps = ['Basics', 'Classes', 'Learning', 'Team', 'Dataset', 'Review', 'Prepare']
+const PREPARE_STEP = steps.length - 1
 const taskOptions: Array<{ value: TaskType; title: string; description: string }> = [
   { value: 'classification', title: 'Classification', description: 'Assign one or more labels to an image.' },
   { value: 'detection', title: 'Object detection', description: 'Locate objects with bounding boxes.' },
@@ -38,7 +44,8 @@ const defaultColors = ['#6558D3', '#E5484D', '#16A085', '#E67E22', '#2980B9']
 const initialDraft: ProjectDraft = {
   name: '', description: '', taskType: 'detection',
   classes: [{ id: crypto.randomUUID(), name: '', color: defaultColors[0]! }],
-  initialTrainingSize: 20,
+  datasetLayout: 'split',
+  initialTrainingSize: null,
   testSetSize: 10,
   testSetUnit: 'count',
   validationSetSize: 10,
@@ -62,6 +69,7 @@ export function NewProjectPage() {
   const [submitMessage, setSubmitMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [created, setCreated] = useState<Project | null>(null)
   const duplicateGroups = useMemo(() => findDuplicateGroups(images), [images])
   const totalBytes = images.reduce((sum, image) => sum + image.sizeBytes, 0)
   const consensusPolicy = draft.annotationPolicy.mode === 'consensus' ? draft.annotationPolicy : null
@@ -113,11 +121,11 @@ export function NewProjectPage() {
     setIsSubmitting(true)
     setError(null)
     try {
-      await createProjectWithDataset(draft, images, token, (progress, message) => {
+      setCreated(await createProjectWithDataset(draft, images, token, (progress, message) => {
         setSubmitProgress(progress)
         setSubmitMessage(message)
-      })
-      navigate('/projects', { replace: true })
+      }))
+      setStep(PREPARE_STEP)
     } catch (reason) {
       const detail = reason instanceof ApiError
         ? `${reason.message}${reason.traceId ? ` (trace ${reason.traceId})` : ''}`
@@ -191,14 +199,26 @@ export function NewProjectPage() {
 
         {step === 2 && (
           <div className="wizard-section">
-            <div><p className="eyebrow">Step 3</p><h2 id="step-2-title">Active-learning sizes</h2><p className="muted">Choose how images are allocated when the project starts.</p></div>
-            <div className="number-grid">
-              <NumberField label="Minimum training set" help="Minimum images that must remain after held-out sets are fixed." value={draft.initialTrainingSize} onChange={(value) => updateDraft({ initialTrainingSize: value })} />
-              <SplitSizeField label="Validation set" help="Fixed at activation and annotated before acquisition." value={draft.validationSetSize} unit={draft.validationSetUnit} onValueChange={(value) => updateDraft({ validationSetSize: value })} onUnitChange={(unit) => updateDraft({ validationSetUnit: unit })} />
-              <SplitSizeField label="Test set" help="Fixed at activation and held out from acquisition." value={draft.testSetSize} unit={draft.testSetUnit} onValueChange={(value) => updateDraft({ testSetSize: value })} onUnitChange={(unit) => updateDraft({ testSetUnit: unit })} />
-              <NumberField label="Images per iteration" help="New annotations requested in each cycle." value={draft.iterationBatchSize} onChange={(value) => updateDraft({ iterationBatchSize: value })} />
-            </div>
-            <p className="notice">Activation creates full train, validation, and test annotation batches. The first acquisition waits for every assignment in all three batches.</p>
+            <div><p className="eyebrow">Step 3</p><h2 id="step-2-title">Dataset layout and sizes</h2><p className="muted">Later training batches are random selections from the remaining unlabeled training images.</p></div>
+            <fieldset className="task-picker"><legend>Dataset layout</legend>
+              <label aria-label="Split dataset" htmlFor="layout-split" className={draft.datasetLayout === 'split' ? 'task-option selected' : 'task-option'}>
+                <input id="layout-split" type="radio" name="dataset-layout" checked={draft.datasetLayout === 'split'} onChange={() => updateDraft({ datasetLayout: 'split' })} />
+                <span><strong>Split dataset</strong><small>Fixed validation and test sets, a first training batch, then acquisition batches.</small></span>
+              </label>
+              <label aria-label="One static annotation batch" htmlFor="layout-single-batch" className={draft.datasetLayout === 'single_batch' ? 'task-option selected' : 'task-option'}>
+                <input id="layout-single-batch" type="radio" name="dataset-layout" checked={draft.datasetLayout === 'single_batch'} onChange={() => updateDraft({ datasetLayout: 'single_batch' })} />
+                <span><strong>One static annotation batch</strong><small>Every image is annotated once. No training, evaluation, or acquisition loop.</small></span>
+              </label>
+            </fieldset>
+            {draft.datasetLayout === 'split' ? <>
+              <div className="number-grid">
+                <SplitSizeField label="Validation set" help="Fixed when the dataset is prepared; every image is annotated." value={draft.validationSetSize} unit={draft.validationSetUnit} onValueChange={(value) => updateDraft({ validationSetSize: value })} onUnitChange={(unit) => updateDraft({ validationSetUnit: unit })} />
+                <SplitSizeField label="Test set" help="Fixed when the dataset is prepared and held out from acquisition." value={draft.testSetSize} unit={draft.testSetUnit} onValueChange={(value) => updateDraft({ testSetSize: value })} onUnitChange={(unit) => updateDraft({ testSetUnit: unit })} />
+                <NumberField label="Images per iteration" help="Size of each later acquisition batch." value={draft.iterationBatchSize} onChange={(value) => updateDraft({ iterationBatchSize: value })} />
+                <OptionalNumberField label="First training batch" help={`Optional. Leave empty to use the images-per-iteration size (${draft.iterationBatchSize}).`} value={draft.initialTrainingSize} onChange={(value) => updateDraft({ initialTrainingSize: value })} />
+              </div>
+              <p className="notice">Preparation annotates every validation and test image plus the first training batch. The other training images stay in the unlabeled pool until acquisition, which starts only after every initial image has an accepted resolution.</p>
+            </> : <p className="notice">Single or consensus annotation still applies. The project closes when its one batch is resolved.</p>}
           </div>
         )}
 
@@ -272,8 +292,10 @@ export function NewProjectPage() {
               <ReviewItem label="Dataset" value={`${images.length} images`} detail={formatBytes(totalBytes)} />
               <ReviewItem label="Classes" value={`${draft.classes.length}`} detail={draft.classes.map((item) => item.name).join(', ')} />
               <ReviewItem label="Team" value={`${draft.collaborators.length} collaborator${draft.collaborators.length === 1 ? '' : 's'}`} detail={draft.collaborators.join(', ') || 'Owner only'} />
-              <ReviewItem label="Train / validation / test" value={splitSummary(draft, images.length)} detail="fixed when the project activates" />
-              <ReviewItem label="Iteration batch" value={`${draft.iterationBatchSize}`} detail="images per cycle" />
+              {draft.datasetLayout === 'split' ? <>
+                <ReviewItem label="Validation / test / first training" value={splitSummary(draft, images.length)} detail="fixed when the dataset is prepared" />
+                <ReviewItem label="Unlabeled training pool" value={`${trainingPoolSize(draft, images.length)} images`} detail={`later batches of ${draft.iterationBatchSize}, selected at random`} />
+              </> : <ReviewItem label="Dataset layout" value="One static batch" detail="every image annotated once" />}
               <ReviewItem label="Strategy" value={draft.annotationPolicy.mode === 'single' ? 'Single annotation' : 'Consensus'} detail={strategySummary(draft, images.length)} />
               {draft.annotationPolicy.mode === 'consensus' && <>
                 <ReviewItem label="Resolver" value={resolverLabel(draft.annotationPolicy.resolver)} detail="Provisional API catalog entry" />
@@ -286,15 +308,19 @@ export function NewProjectPage() {
           </div>
         )}
 
-        <footer className="wizard-actions">
+        {step === PREPARE_STEP && created && (
+          <DatasetPreparationPanel project={created} onActivated={() => navigate('/projects', { replace: true })} />
+        )}
+
+        {step !== PREPARE_STEP && <footer className="wizard-actions">
           <Button variant="secondary" onClick={() => setStep((current) => current - 1)} disabled={step === 0 || isSubmitting}><ArrowLeft size={17} /> Back</Button>
           <span className="validation-message" aria-live="polite">{validationError}</span>
-          {step < steps.length - 1 ? (
+          {step < PREPARE_STEP - 1 ? (
             <Button onClick={() => setStep((current) => current + 1)} disabled={Boolean(validationError) || hashProgress !== null}>Continue <ArrowRight size={17} /></Button>
           ) : (
-            <Button onClick={submit} disabled={Boolean(validateAll(draft, images)) || isSubmitting}>{isSubmitting ? 'Creating…' : 'Create project'} <Check size={17} /></Button>
+            <Button onClick={submit} disabled={Boolean(validateAll(draft, images)) || isSubmitting}>{isSubmitting ? 'Creating…' : 'Create and prepare'} <Check size={17} /></Button>
           )}
-        </footer>
+        </footer>}
       </section>
     </main>
   )
@@ -302,6 +328,10 @@ export function NewProjectPage() {
 
 function NumberField({ label, help, value, onChange }: { label: string; help: string; value: number; onChange: (value: number) => void }) {
   return <label className="number-field"><span>{label}</span><input type="number" min={1} step={1} value={value} onChange={(e) => onChange(Math.max(0, Number(e.target.value)))} /><small>{help}</small></label>
+}
+
+function OptionalNumberField({ label, help, value, onChange }: { label: string; help: string; value: number | null; onChange: (value: number | null) => void }) {
+  return <label className="number-field"><span>{label} <span className="optional">Optional</span></span><input type="number" min={1} step={1} value={value ?? ''} onChange={(e) => onChange(e.target.value === '' ? null : Math.max(0, Number(e.target.value)))} /><small>{help}</small></label>
 }
 
 function SplitSizeField({ label, help, value, unit, onValueChange, onUnitChange }: {
@@ -338,8 +368,9 @@ function validateStep(step: number, draft: ProjectDraft, images: LocalImage[]) {
     const unique = new Set(draft.classes.map((item) => item.name.trim().toLocaleLowerCase()))
     if (unique.size !== draft.classes.length) return 'Class names must be unique.'
   }
-  if (step === 2) {
-    if ([draft.initialTrainingSize, draft.iterationBatchSize].some((size) => !Number.isInteger(size) || size < 1)) return 'Training and iteration sizes must be positive whole numbers.'
+  if (step === 2 && draft.datasetLayout === 'split') {
+    if (!Number.isInteger(draft.iterationBatchSize) || draft.iterationBatchSize < 1) return 'Images per iteration must be a positive whole number.'
+    if (draft.initialTrainingSize !== null && (!Number.isInteger(draft.initialTrainingSize) || draft.initialTrainingSize < 1)) return 'The first training batch must be empty or a positive whole number.'
     for (const [value, unit] of [[draft.testSetSize, draft.testSetUnit], [draft.validationSetSize, draft.validationSetUnit]] as const) {
       if (value <= 0 || (unit === 'count' && !Number.isInteger(value)) || (unit === 'percentage' && value >= 100)) return 'Validation and test sizes must be positive whole-image counts or percentages below 100.'
     }
@@ -350,12 +381,21 @@ function validateStep(step: number, draft: ProjectDraft, images: LocalImage[]) {
   }
   if (step === 4) {
     if (!images.length) return 'Select a folder containing supported images.'
-    const validation = resolveDraftSplitSize(images.length, draft.validationSetSize, draft.validationSetUnit)
-    const test = resolveDraftSplitSize(images.length, draft.testSetSize, draft.testSetUnit)
-    const required = draft.initialTrainingSize + validation + test
-    if (required > images.length) return `The minimum train, validation, and test sets need ${required} images; this folder has ${images.length}.`
+    if (draft.datasetLayout === 'split') {
+      const { validation, test, firstTraining } = initialSizes(draft, images.length)
+      const required = validation + test + firstTraining
+      if (required > images.length) return `The validation, test, and first training sets need ${required} images; this folder has ${images.length}.`
+    }
   }
   return ''
+}
+
+function initialSizes(draft: ProjectDraft, totalMedia: number) {
+  return {
+    validation: resolveDraftSplitSize(totalMedia, draft.validationSetSize, draft.validationSetUnit),
+    test: resolveDraftSplitSize(totalMedia, draft.testSetSize, draft.testSetUnit),
+    firstTraining: resolvedFirstTrainingSize(draft),
+  }
 }
 
 function strategySummary(draft: ProjectDraft, totalMedia: number) {
@@ -363,21 +403,24 @@ function strategySummary(draft: ProjectDraft, totalMedia: number) {
     ? draft.annotationPolicy.annotatorUsernames.length
     : 1
   const describe = (label: string, images: number) => `${label}: ${images * multiplier} work items`
-  const validation = resolveDraftSplitSize(totalMedia, draft.validationSetSize, draft.validationSetUnit)
-  const test = resolveDraftSplitSize(totalMedia, draft.testSetSize, draft.testSetUnit)
-  const train = Math.max(0, totalMedia - validation - test)
+  if (draft.datasetLayout === 'single_batch') return describe('All images', totalMedia)
+  const { validation, test, firstTraining } = initialSizes(draft, totalMedia)
   return [
-    describe('Train', train),
     describe('Validation', validation),
     describe('Test', test),
+    describe('First training batch', firstTraining),
     describe('One acquisition batch', draft.iterationBatchSize),
   ].join(' · ')
 }
 
 function splitSummary(draft: ProjectDraft, totalMedia: number) {
-  const validation = resolveDraftSplitSize(totalMedia, draft.validationSetSize, draft.validationSetUnit)
-  const test = resolveDraftSplitSize(totalMedia, draft.testSetSize, draft.testSetUnit)
-  return `${Math.max(0, totalMedia - validation - test)} / ${validation} / ${test}`
+  const { validation, test, firstTraining } = initialSizes(draft, totalMedia)
+  return `${validation} / ${test} / ${firstTraining}`
+}
+
+function trainingPoolSize(draft: ProjectDraft, totalMedia: number) {
+  const { validation, test, firstTraining } = initialSizes(draft, totalMedia)
+  return Math.max(0, totalMedia - validation - test - firstTraining)
 }
 
 function validateAll(draft: ProjectDraft, images: LocalImage[]) {

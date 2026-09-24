@@ -266,10 +266,21 @@ directory removal with no cross-project reference counting.
 
 ## Activation and batches
 
-Activation is the moment a configured project becomes work. In one transaction
-it freezes `dataset_splits` for every image, creates the `test` and
-`initial_training` batches, copies the project's default policy onto each of
-them, and moves the project from `draft` to `active`.
+Activation is the moment a configured project becomes work. The current Phase 4
+implementation is superseded by the required [Phase 4.1 annotation-sequence
+revision plan](phase-4-annotation-sequence-revision-plan.md): activation must
+freeze `dataset_splits` for every image, create complete `test` and `validation`
+batches plus the resolved first `initial_training` image batch, copy the
+project's default policy onto each, and move the project from `draft` to
+`active`.
+
+Random projects may instead prepare a static `single_batch` layout: one
+all-images initial annotation batch, no train/validation/test rows, and no
+later training or acquisition iterations. Both layouts may use consensus.
+Before activation and before assignments exist, an owner/manager may import
+YOLO detection or COCO segmentation labels. Imports are audited seed documents
+that prefill each annotator's own draft; they are not submissions, votes, or
+canonical resolutions.
 
 The test half is drawn from the whole dataset first and the training set from
 what remains, so no image can reach both. That ordering is what makes the
@@ -309,8 +320,11 @@ provenance, not a request parameter. The candidate order is
 `(relative_path, id)`, the same order the media inventory route returns, so the
 selection input is something a client can already read.
 
-Acquisition batches need an iteration, which needs a trained model, so they
-arrive with the learning port. The `purpose` column already carries the value.
+An acquisition batch is created only after all initial image batch items have
+accepted consensus resolutions. Random acquisition may then select from the
+eligible train pool; active learning additionally needs a trained/evaluated
+model. The learning port delivers that orchestration, and the `purpose` column
+already carries the acquisition value.
 
 ## Deletion and retention
 
@@ -333,3 +347,79 @@ them without losing behavior.
 `GET /api/v1/capabilities` is served from validated settings and now advertises
 `upload_session_ttl_hours` alongside the existing upload limits, which this
 phase began enforcing.
+
+## Dataset preparation (Phase 4.1)
+
+A draft is prepared explicitly once its classes and media are in place, and
+activation only locks what preparation materialised. Decision records are in
+[phase_4.1.md](phases/phase_4.1.md).
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/dataset-layout` | Layout, split sizes, batches, training pool, import |
+| `POST` | `/api/v1/projects/{project_id}/dataset-layout/prepare` | Draw the split and open the initial batches |
+| `DELETE` | `/api/v1/projects/{project_id}/dataset-layout` | Discard the preparation and its import |
+
+`dataset_layout` and `acquisition_strategy` are chosen at project creation.
+`split` requires `iteration_batch_size`; `initial_training_size` is optional
+and falls back to it. `single_batch` accepts no sizes and only `random`.
+
+Preparing a `split` project draws test from the ordered inventory, validation
+from the remainder, and the first training batch from what is left; each batch
+records the seed and fingerprint of its own draw. Train images not drawn have
+no batch item and form the eligible training pool. Capacity is checked against
+the held-out sets and the first batch only (`409 preparation_incomplete` with
+`insufficient_media`).
+
+Adding or removing a class, changing a class `display_order`, or promoting new
+media resets a prepared draft in the same transaction and records a
+`dataset.reset` audit entry with the reason. Renaming or recolouring a class
+does not. Batches of a prepared draft cannot be started
+(`409 project_not_active`) until activation closes the import review.
+
+## Label import (Phase 4.1)
+
+Owners and managers may seed a prepared draft with existing labels: YOLO
+detection sidecars for detection projects and COCO polygon segmentation for
+segmentation projects. A project holds at most one import.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/projects/{project_id}/annotation-imports` | Open an import from a file manifest |
+| `POST` | `/api/v1/annotation-imports/{import_id}/files/{client_file_id}` | Send one whole file |
+| `POST` | `/api/v1/annotation-imports/{import_id}/validate` | Parse and report |
+| `POST` | `/api/v1/annotation-imports/{import_id}/accept` | Persist the seed documents |
+| `GET` | `/api/v1/annotation-imports/{import_id}` | Status, files, and report |
+| `DELETE` | `/api/v1/annotation-imports/{import_id}` | Discard an import that is not accepted |
+
+Files are capped by `DADA_MAX_IMPORT_FILE_BYTES` (advertised in
+`/capabilities`) and retained verbatim with their digests as provenance. Any
+parse error — unsafe or unmatched path, ambiguous or duplicate image, unknown
+class index, malformed line, out-of-bounds or self-intersecting geometry, or a
+run-length encoded mask — rejects the whole import; it is then discarded and
+started again. Activation reports `label_import` while an import is not
+accepted. Starting a batch links every assignment of a seeded image to its
+seed; the seed is never a submission, vote, or resolution.
+
+## Development data reset
+
+Phase 4.1 changes what activation produces, so development projects created
+earlier must be removed and rebuilt from their source media. No compatibility
+path exists for them. This procedure is for local development databases only
+and must never be run against production.
+
+1. Delete each existing project with `DELETE /api/v1/projects/{project_id}` as
+   its owner or an administrator. This purges its rows and its media tree.
+2. Alternatively, for a throwaway local database, run `docker compose down -v`,
+   then `make infra-up`, `make migrate`, and `make bootstrap-admin`.
+3. Verify that the following returns zero in every column, and that no project
+   directory remains under `DADA_MEDIA_ROOT`:
+
+   ```sql
+   SELECT (SELECT count(*) FROM projects),
+          (SELECT count(*) FROM dataset_splits),
+          (SELECT count(*) FROM annotation_batches),
+          (SELECT count(*) FROM media);
+   ```
+
+4. Recreate the projects through the App from their source folders.
