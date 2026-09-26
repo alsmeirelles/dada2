@@ -440,3 +440,76 @@ Event types initially include `upload.progress`, `upload.completed`,
 `assignment.updated`, `annotation.submitted`,
 `iteration.status_changed`, `training.progress`, and `training.eta_updated`.
 Events are invalidation signals; clients refetch authoritative resources.
+
+## Phase 4.1 implemented shapes
+
+These complement the Phase 4.1 sections above with what the API returns.
+Decisions are recorded in `dada-api/docs/phases/phase_4.1.md`.
+
+`POST /projects` accepts `acquisition_strategy` (`random` | `active_learning`,
+default `random`) and `dataset_layout` (`split` | `single_batch`, default
+`split`). `initial_training_size` is optional and nullable; when absent the
+first training batch uses `iteration_batch_size`. A `single_batch` project
+sends no size fields and only `random`. `Project` also returns
+`dataset_prepared_at`, set while the draft is prepared.
+
+Two read routes make the Phase 4.1 resources reachable:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/dataset-layout` | Prepared layout summary |
+| `GET` | `/api/v1/annotation-imports/{import_id}` | Import status, files, and report |
+
+`prepare` has no body and returns `201` with the layout summary:
+
+```ts
+type DatasetLayoutSummary = {
+  dataset_layout: 'split' | 'single_batch'
+  prepared_at: string | null
+  train_size: number
+  validation_size: number
+  test_size: number
+  first_training_batch_size: number | null
+  training_pool_size: number    // train images not held by a live training batch
+  batch_ids: string[]
+  annotation_import_id: string | null
+}
+```
+
+An import is created from a manifest, then each file is sent whole as the raw
+request body to `/annotation-imports/{import_id}/files/{client_file_id}`:
+
+```ts
+type AnnotationImportCreate = {
+  format: 'yolo_detection' | 'coco_segmentation'
+  files: { client_file_id: string; relative_path: string; size_bytes: number; sha256: string }[]
+}
+type AnnotationImport = {
+  id: string
+  project_id: string
+  format: 'yolo_detection' | 'coco_segmentation'
+  parser_version: string
+  status: 'uploading' | 'validated' | 'rejected' | 'accepted'
+  created_by: string
+  report: {
+    labelled_images: number
+    objects: number
+    unlabelled_images: number
+    errors: { code: string; client_file_id: string; detail: string }[]
+  } | null
+  files: { client_file_id: string; relative_path: string; size_bytes: number; sha256: string; received: boolean }[]
+  created_at: string
+  validated_at: string | null
+  accepted_at: string | null
+}
+```
+
+`activation_incomplete.details.missing` may now also contain `dataset_layout`
+(not prepared) and `label_import` (an import is not accepted). New stable
+codes: `preparation_incomplete`, `dataset_already_prepared`,
+`dataset_not_prepared`, `project_not_active`, `import_not_supported`,
+`import_already_exists`, `import_not_uploading`, `import_files_incomplete`,
+`import_not_valid`, and `import_accepted`. Import report error codes are
+`invalid_relative_path`, `unmatched_path`, `ambiguous_media_match`,
+`duplicate_source_label`, `unknown_class_index`, `malformed_label`,
+`invalid_geometry`, and `unsupported_geometry`.

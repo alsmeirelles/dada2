@@ -7,6 +7,7 @@ export const SETUP_STAGES = [
   'members',
   'policy',
   'uploaded',
+  'prepared',
   'activated',
 ] as const
 
@@ -18,7 +19,7 @@ export type SetupSnapshot = {
   /** Server session to query after an interrupted browser upload. */
   uploadId?: string
   /** Stable operation keys make a retry safe when its response was lost. */
-  keys?: Partial<Record<'project' | 'upload' | 'complete' | 'activate', string>>
+  keys?: Partial<Record<'project' | 'upload' | 'complete' | 'prepare' | 'activate', string>>
 }
 
 export function stageIndex(stage: SetupStage) {
@@ -62,7 +63,7 @@ export function loadSetup(): SetupSnapshot | null {
   }
 }
 
-export function setupKey(snapshot: SetupSnapshot | null, operation: 'project' | 'upload' | 'complete' | 'activate') {
+export function setupKey(snapshot: SetupSnapshot | null, operation: 'project' | 'upload' | 'complete' | 'prepare' | 'activate') {
   const existing = snapshot?.keys?.[operation]
   if (existing) return existing
   const key = crypto.randomUUID()

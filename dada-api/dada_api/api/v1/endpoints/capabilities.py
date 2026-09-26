@@ -19,6 +19,7 @@ async def read_capabilities() -> CapabilitiesResponse:
         max_project_files=settings.max_project_files,
         upload_chunk_bytes=settings.upload_chunk_bytes,
         upload_session_ttl_hours=settings.upload_session_ttl_hours,
+        max_import_file_bytes=settings.max_import_file_bytes,
         supported_task_types=["classification", "detection", "segmentation"],
         supported_annotation_modes=["single", "consensus"],
         consensus_resolvers={

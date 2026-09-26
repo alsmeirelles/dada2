@@ -3,10 +3,15 @@
 from fastapi import APIRouter, Depends, Header, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dada_api.api.deps import require_project_action, require_upload_action
+from dada_api.api.deps import (
+    get_current_user,
+    require_project_action,
+    require_upload_action,
+)
 from dada_api.db.session import get_session
 from dada_api.models.project import Project
 from dada_api.models.upload import UploadSession
+from dada_api.models.user import User
 from dada_api.schemas.upload import (
     UploadChunkResponse,
     UploadItemResponse,
@@ -137,18 +142,20 @@ async def complete_upload_session(
     upload: UploadSession = Depends(
         require_upload_action(ProjectAction.update_project)
     ),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UploadSessionResponse:
     """Verify every uploaded file and promote it into the project's media.
 
     Args:
         upload: Session resolved and authorized by the dependency.
+        user: Authenticated user recorded as the actor of any dataset reset.
         session: Active database session.
 
     Returns:
         The session in its final state.
     """
-    completed = await ingestion.complete_session(session, upload)
+    completed = await ingestion.complete_session(session, user, upload)
     return await _session_response(session, completed)
 
 

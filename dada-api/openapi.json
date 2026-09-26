@@ -17,6 +17,136 @@
         "title": "AdministratorPasswordReset",
         "type": "object"
       },
+      "AnnotationImportCreate": {
+        "description": "Create-import request naming the source format and its files.",
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ImportManifestFile"
+            },
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          },
+          "format": {
+            "enum": [
+              "yolo_detection",
+              "coco_segmentation"
+            ],
+            "title": "Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "files"
+        ],
+        "title": "AnnotationImportCreate",
+        "type": "object"
+      },
+      "AnnotationImportResponse": {
+        "description": "Label import representation with its provenance and review report.",
+        "properties": {
+          "accepted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "title": "Created By",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ImportFileResponse"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "format": {
+            "enum": [
+              "yolo_detection",
+              "coco_segmentation"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "parser_version": {
+            "title": "Parser Version",
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImportReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "uploading",
+              "validated",
+              "rejected",
+              "accepted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "validated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated At"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "format",
+          "parser_version",
+          "status",
+          "created_by",
+          "report",
+          "files",
+          "created_at",
+          "validated_at",
+          "accepted_at"
+        ],
+        "title": "AnnotationImportResponse",
+        "type": "object"
+      },
       "AnnotationPolicyResponse": {
         "description": "Policy representation expected by the App.",
         "properties": {
@@ -365,6 +495,7 @@
           },
           "purpose": {
             "enum": [
+              "initial_annotation",
               "initial_training",
               "validation",
               "test",
@@ -509,6 +640,11 @@
             "title": "Max File Bytes",
             "type": "integer"
           },
+          "max_import_file_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Max Import File Bytes",
+            "type": "integer"
+          },
           "max_project_files": {
             "exclusiveMinimum": 0.0,
             "title": "Max Project Files",
@@ -570,12 +706,98 @@
           "max_project_files",
           "upload_chunk_bytes",
           "upload_session_ttl_hours",
+          "max_import_file_bytes",
           "supported_task_types",
           "supported_annotation_modes",
           "consensus_resolvers",
           "realtime_transport"
         ],
         "title": "CapabilitiesResponse",
+        "type": "object"
+      },
+      "DatasetLayoutResponse": {
+        "description": "A project's prepared layout, its initial batches, and its training pool.\n\nBefore preparation every count is zero and ``prepared_at`` is null. A\n``single_batch`` project has no split rows, no first training batch, and\nno training pool.",
+        "properties": {
+          "annotation_import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annotation Import Id"
+          },
+          "batch_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Batch Ids",
+            "type": "array"
+          },
+          "dataset_layout": {
+            "enum": [
+              "split",
+              "single_batch"
+            ],
+            "title": "Dataset Layout",
+            "type": "string"
+          },
+          "first_training_batch_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Training Batch Size"
+          },
+          "prepared_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepared At"
+          },
+          "test_size": {
+            "title": "Test Size",
+            "type": "integer"
+          },
+          "train_size": {
+            "title": "Train Size",
+            "type": "integer"
+          },
+          "training_pool_size": {
+            "title": "Training Pool Size",
+            "type": "integer"
+          },
+          "validation_size": {
+            "title": "Validation Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dataset_layout",
+          "prepared_at",
+          "train_size",
+          "validation_size",
+          "test_size",
+          "first_training_batch_size",
+          "training_pool_size",
+          "batch_ids",
+          "annotation_import_id"
+        ],
+        "title": "DatasetLayoutResponse",
         "type": "object"
       },
       "DependencyStatus": {
@@ -662,6 +884,131 @@
           "service"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "ImportErrorResponse": {
+        "description": "One reason the import cannot be accepted.",
+        "properties": {
+          "client_file_id": {
+            "title": "Client File Id",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "client_file_id",
+          "detail"
+        ],
+        "title": "ImportErrorResponse",
+        "type": "object"
+      },
+      "ImportFileResponse": {
+        "description": "One source file and whether its bytes have arrived.",
+        "properties": {
+          "client_file_id": {
+            "title": "Client File Id",
+            "type": "string"
+          },
+          "received": {
+            "title": "Received",
+            "type": "boolean"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "client_file_id",
+          "relative_path",
+          "size_bytes",
+          "sha256",
+          "received"
+        ],
+        "title": "ImportFileResponse",
+        "type": "object"
+      },
+      "ImportManifestFile": {
+        "description": "One label file the client intends to upload.\n\n``size_bytes`` may be zero: an empty YOLO file marks an image as empty.",
+        "properties": {
+          "client_file_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client File Id",
+            "type": "string"
+          },
+          "relative_path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "client_file_id",
+          "relative_path",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "ImportManifestFile",
+        "type": "object"
+      },
+      "ImportReport": {
+        "description": "Preview of what accepting the import would seed.\n\nImages without labels stay valid, unlabelled images; they are counted\nrather than reported as errors.",
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ImportErrorResponse"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "labelled_images": {
+            "title": "Labelled Images",
+            "type": "integer"
+          },
+          "objects": {
+            "title": "Objects",
+            "type": "integer"
+          },
+          "unlabelled_images": {
+            "title": "Unlabelled Images",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "labelled_images",
+          "objects",
+          "unlabelled_images",
+          "errors"
+        ],
+        "title": "ImportReport",
         "type": "object"
       },
       "LoginRequest": {
@@ -933,8 +1280,26 @@
         "type": "object"
       },
       "ProjectCreate": {
-        "description": "Create-project request contract.",
+        "description": "Create-project request contract.\n\nA ``split`` project requires ``iteration_batch_size`` and one count or\npercentage for each held-out split. ``initial_training_size`` is optional:\nwhen omitted, the first training batch uses ``iteration_batch_size``.\n\nA ``single_batch`` project annotates every image once and never trains, so\nit accepts no size at all and only the ``random`` acquisition strategy.",
         "properties": {
+          "acquisition_strategy": {
+            "default": "random",
+            "enum": [
+              "random",
+              "active_learning"
+            ],
+            "title": "Acquisition Strategy",
+            "type": "string"
+          },
+          "dataset_layout": {
+            "default": "split",
+            "enum": [
+              "split",
+              "single_batch"
+            ],
+            "title": "Dataset Layout",
+            "type": "string"
+          },
           "description": {
             "anyOf": [
               {
@@ -948,14 +1313,28 @@
             "title": "Description"
           },
           "initial_training_size": {
-            "minimum": 1.0,
-            "title": "Initial Training Size",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Training Size"
           },
           "iteration_batch_size": {
-            "minimum": 1.0,
-            "title": "Iteration Batch Size",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iteration Batch Size"
           },
           "name": {
             "maxLength": 200,
@@ -1025,9 +1404,7 @@
         },
         "required": [
           "name",
-          "task_type",
-          "initial_training_size",
-          "iteration_batch_size"
+          "task_type"
         ],
         "title": "ProjectCreate",
         "type": "object"
@@ -1174,10 +1551,38 @@
       "ProjectResponse": {
         "description": "Project representation expected by the App.",
         "properties": {
+          "acquisition_strategy": {
+            "enum": [
+              "random",
+              "active_learning"
+            ],
+            "title": "Acquisition Strategy",
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "dataset_layout": {
+            "enum": [
+              "split",
+              "single_batch"
+            ],
+            "title": "Dataset Layout",
+            "type": "string"
+          },
+          "dataset_prepared_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Prepared At"
           },
           "description": {
             "anyOf": [
@@ -1196,12 +1601,26 @@
             "type": "string"
           },
           "initial_training_size": {
-            "title": "Initial Training Size",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Training Size"
           },
           "iteration_batch_size": {
-            "title": "Iteration Batch Size",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iteration Batch Size"
           },
           "name": {
             "title": "Name",
@@ -1295,12 +1714,15 @@
           "task_type",
           "status",
           "owner_id",
+          "acquisition_strategy",
+          "dataset_layout",
           "initial_training_size",
           "test_set_size",
           "test_set_percentage",
           "validation_set_size",
           "validation_set_percentage",
           "iteration_batch_size",
+          "dataset_prepared_at",
           "version",
           "created_at",
           "updated_at"
@@ -1953,6 +2375,396 @@
         "summary": "Read Admin Status",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/v1/annotation-imports/{import_id}": {
+      "delete": {
+        "description": "Discard an import that has not been accepted.\n\nArgs:\n    label_import: Import resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor.\n    session: Active database session.\n\nReturns:\n    An empty response.",
+        "operationId": "discard_annotation_import_api_v1_annotation_imports__import_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Discard Annotation Import",
+        "tags": [
+          "annotation-imports"
+        ]
+      },
+      "get": {
+        "description": "Return an import's status, files, and report so a client can resume.\n\nArgs:\n    label_import: Import resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The import representation.",
+        "operationId": "read_annotation_import_api_v1_annotation_imports__import_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Annotation Import",
+        "tags": [
+          "annotation-imports"
+        ]
+      }
+    },
+    "/api/v1/annotation-imports/{import_id}/accept": {
+      "post": {
+        "description": "Persist a validated import's immutable seed documents.\n\nArgs:\n    label_import: Import resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor.\n    session: Active database session.\n\nReturns:\n    The accepted import.",
+        "operationId": "accept_annotation_import_api_v1_annotation_imports__import_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Accept Annotation Import",
+        "tags": [
+          "annotation-imports"
+        ]
+      }
+    },
+    "/api/v1/annotation-imports/{import_id}/files/{client_file_id}": {
+      "post": {
+        "description": "Receive one whole label file, verified against the manifest.\n\nArgs:\n    client_file_id: Client identifier of the file from the manifest.\n    request: Raw request carrying the file bytes.\n    label_import: Import resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The received file.",
+        "operationId": "upload_annotation_import_file_api_v1_annotation_imports__import_id__files__client_file_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_file_id",
+            "required": true,
+            "schema": {
+              "title": "Client File Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportFileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload Annotation Import File",
+        "tags": [
+          "annotation-imports"
+        ]
+      }
+    },
+    "/api/v1/annotation-imports/{import_id}/validate": {
+      "post": {
+        "description": "Parse the import and return its path, class-index, and geometry report.\n\nArgs:\n    label_import: Import resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor.\n    session: Active database session.\n\nReturns:\n    The import with its report.",
+        "operationId": "validate_annotation_import_api_v1_annotation_imports__import_id__validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Validate Annotation Import",
+        "tags": [
+          "annotation-imports"
         ]
       }
     },
@@ -2892,6 +3704,94 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/annotation-imports": {
+      "post": {
+        "description": "Open a label import for a prepared draft.\n\nArgs:\n    request: Validated format and file manifest.\n    project: Project resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor.\n    session: Active database session.\n\nReturns:\n    The created import with its manifest.",
+        "operationId": "create_annotation_import_api_v1_projects__project_id__annotation_imports_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationImportCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Annotation Import",
+        "tags": [
+          "annotation-imports"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/annotation-policy": {
       "get": {
         "description": "Return a project's default annotation policy.\n\nArgs:\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The current policy and its ordered group.",
@@ -3513,7 +4413,7 @@
         ]
       },
       "post": {
-        "description": "Add a class to a project.\n\nArgs:\n    request: Validated creation request.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The created class.",
+        "description": "Add a class to a project.\n\nArgs:\n    request: Validated creation request.\n    project: Project resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor.\n    session: Active database session.\n\nReturns:\n    The created class.",
         "operationId": "create_class_api_v1_projects__project_id__classes_post",
         "parameters": [
           {
@@ -3601,7 +4501,7 @@
     },
     "/api/v1/projects/{project_id}/classes/{class_id}": {
       "delete": {
-        "description": "Remove a class from a project.\n\nArgs:\n    class_id: Class being removed.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    An empty response.",
+        "description": "Remove a class from a project.\n\nArgs:\n    class_id: Class being removed.\n    project: Project resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor.\n    session: Active database session.\n\nReturns:\n    An empty response.",
         "operationId": "delete_class_api_v1_projects__project_id__classes__class_id__delete",
         "parameters": [
           {
@@ -3679,7 +4579,7 @@
         ]
       },
       "patch": {
-        "description": "Apply a versioned update to a class.\n\nArgs:\n    class_id: Class being updated.\n    request: Validated update request carrying the expected version.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The updated class.",
+        "description": "Apply a versioned update to a class.\n\nArgs:\n    class_id: Class being updated.\n    request: Validated update request carrying the expected version.\n    project: Project resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor.\n    session: Active database session.\n\nReturns:\n    The updated class.",
         "operationId": "update_class_api_v1_projects__project_id__classes__class_id__patch",
         "parameters": [
           {
@@ -3771,6 +4671,231 @@
         "summary": "Update Class",
         "tags": [
           "classes"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/dataset-layout": {
+      "delete": {
+        "description": "Discard a draft's preparation and its label import.\n\nArgs:\n    project: Project resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor.\n    session: Active database session.\n\nReturns:\n    An empty response.",
+        "operationId": "reset_dataset_layout_api_v1_projects__project_id__dataset_layout_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reset Dataset Layout",
+        "tags": [
+          "dataset-layout"
+        ]
+      },
+      "get": {
+        "description": "Return a project's prepared layout, initial batches, and training pool.\n\nArgs:\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The layout summary.",
+        "operationId": "read_dataset_layout_api_v1_projects__project_id__dataset_layout_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetLayoutResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Dataset Layout",
+        "tags": [
+          "dataset-layout"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/dataset-layout/prepare": {
+      "post": {
+        "description": "Materialise a draft's split membership and its initial batches.\n\nArgs:\n    project: Project resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor.\n    session: Active database session.\n\nReturns:\n    The prepared layout summary.",
+        "operationId": "prepare_dataset_layout_api_v1_projects__project_id__dataset_layout_prepare_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetLayoutResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Prepare Dataset Layout",
+        "tags": [
+          "dataset-layout"
         ]
       }
     },
@@ -4604,7 +5729,7 @@
     },
     "/api/v1/uploads/{upload_id}/complete": {
       "post": {
-        "description": "Verify every uploaded file and promote it into the project's media.\n\nArgs:\n    upload: Session resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The session in its final state.",
+        "description": "Verify every uploaded file and promote it into the project's media.\n\nArgs:\n    upload: Session resolved and authorized by the dependency.\n    user: Authenticated user recorded as the actor of any dataset reset.\n    session: Active database session.\n\nReturns:\n    The session in its final state.",
         "operationId": "complete_upload_session_api_v1_uploads__upload_id__complete_post",
         "parameters": [
           {

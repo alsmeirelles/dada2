@@ -1,8 +1,14 @@
 """Phase 0 HTTP application contract tests."""
 
-from fastapi.testclient import TestClient
+import json
 
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from dada_api.core.errors import redact_validation_errors
 from dada_api.main import app
+from dada_api.schemas.project import ProjectCreate
 
 client = TestClient(app)
 
@@ -23,6 +29,7 @@ def test_capabilities_match_frontend_contract() -> None:
         "max_project_files": 100000,
         "upload_chunk_bytes": 8388608,
         "upload_session_ttl_hours": 24,
+        "max_import_file_bytes": 52428800,
         "supported_task_types": ["classification", "detection", "segmentation"],
         "supported_annotation_modes": ["single", "consensus"],
         "consensus_resolvers": {
@@ -78,6 +85,22 @@ def test_validation_errors_never_echo_the_submitted_value() -> None:
     assert errors
     assert all("input" not in error for error in errors)
     assert secret not in response.text
+
+
+def test_model_validator_errors_are_reported_by_message() -> None:
+    with pytest.raises(ValidationError) as raised:
+        ProjectCreate.model_validate(
+            {
+                "name": "Static",
+                "task_type": "detection",
+                "dataset_layout": "single_batch",
+                "iteration_batch_size": 3,
+            }
+        )
+
+    errors = redact_validation_errors(raised.value.errors())
+
+    assert "single_batch accepts no split or iteration sizes" in json.dumps(errors)
 
 
 def test_cors_allows_configured_app_origin_and_upload_headers() -> None:

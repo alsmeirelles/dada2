@@ -30,11 +30,33 @@ class ProjectRole(StrEnum):
     viewer = "viewer"
 
 
+class AcquisitionStrategy(StrEnum):
+    """How training batches after the initial one will be selected."""
+
+    random = "random"
+    active_learning = "active_learning"
+
+
+class DatasetLayout(StrEnum):
+    """How a project's media is organised into annotation work.
+
+    ``split`` freezes train, validation, and test membership. ``single_batch``
+    annotates every image once in one static batch and never trains or
+    acquires, so it is only available to random projects.
+    """
+
+    split = "split"
+    single_batch = "single_batch"
+
+
 class Project(Base):
     """Annotation project owned by exactly one user.
 
     ``owner_id`` always records the truthful creator. A global administrator
     holds owner-equivalent authority without being recorded as the owner.
+
+    ``dataset_prepared_at`` is set while a draft's layout is materialised and
+    cleared when that preparation is reset.
     """
 
     __tablename__ = "projects"
@@ -52,14 +74,22 @@ class Project(Base):
         ForeignKey("users.id", ondelete="RESTRICT"),
         index=True,
     )
-    initial_training_size: Mapped[int] = mapped_column(Integer)
+    acquisition_strategy: Mapped[str] = mapped_column(
+        String(32), default=AcquisitionStrategy.random
+    )
+    dataset_layout: Mapped[str] = mapped_column(String(16), default=DatasetLayout.split)
+    initial_training_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     test_set_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     test_set_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
     validation_set_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     validation_set_percentage: Mapped[float | None] = mapped_column(
         Float, nullable=True
     )
-    iteration_batch_size: Mapped[int] = mapped_column(Integer)
+    iteration_batch_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dataset_prepared_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
