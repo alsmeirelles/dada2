@@ -573,7 +573,8 @@ both prerequisites are satisfied.
 Exit gate: project creation and recovery preserve the acquisition strategy and
 the random path is described accurately. Two browser sessions can
 independently annotate the same image, neither sees peer evidence, and their
-local recovery records do not collide.
+local recovery records do not collide. All issues identified in the pending issues section of this document should be
+addressed.
 
 ### Phase 6: resolution and adjudication
 
@@ -590,7 +591,8 @@ before implementing API or App consensus behavior.
 
 Exit gate: an automatic result can be reviewed and accepted, a forced
 low-agreement case can be edited/adjudicated, and stale versions preserve the
-manager's local work.
+manager's local work. All issues identified in the pending issues section of this document should be
+addressed.
 
 ### Phase 7: learning and quality metrics
 
@@ -601,7 +603,8 @@ manager's local work.
 - Add agreement/review statistics and assisted-segmentation contract changes.
 
 Exit gate: unresolved submissions are never represented as training data in
-the UI, and assisted segmentation remains scoped to the active assignment.
+the UI, and assisted segmentation remains scoped to the active assignment. All issues identified in the pending issues 
+section of this document should be addressed.
 
 ### Phase 8: real-time and production hardening
 
@@ -612,7 +615,8 @@ the UI, and assisted segmentation remains scoped to the active assignment.
   permission-safe caching, and load-friendly pagination/lazy evidence loading.
 
 Exit gate: WebSocket and polling journeys converge on identical authoritative
-state without evidence leakage.
+state without evidence leakage. All issues identified in the pending issues section of this document should be
+addressed.
 
 ### Phase 9: coordinated release acceptance
 
@@ -624,7 +628,8 @@ state without evidence leakage.
 - Record the compatible API/OpenAPI and resolver versions.
 
 Exit gate: the complete single-mode, automatic-consensus, and manual-review
-journeys pass in the two latest Chrome and Firefox releases.
+journeys pass in the two latest Chrome and Firefox releases. All issues identified in the pending issues section of 
+this document should be addressed.
 
 ## Pending decision register for Phases 5–9
 
@@ -694,6 +699,31 @@ and also block the App phase that references them.
 Run the existing `npm run lint`, `npm test`, and `npm run build` gates for each
 App phase. The coordinated release suite must use the candidate API with no
 request mocking and record its OpenAPI version.
+
+### Pending Issues
+Issues found during browsing and manual usage are listed here and should be addressed as a phase requirement. The
+detailed issue descriptions are in dedicated issues files, listed below.
+
+#### Phase 5
+
+Detailed issues are in [Phase 5 issues](issues_before_phase5.md).
+
+#### Phase 6
+
+Not available yet.
+
+#### Phase 7
+
+Not available yet.
+
+#### Phase 8
+
+Not available yet.
+
+#### Phase 9
+
+Not available yet.
+
 
 ## File-level change map
 
