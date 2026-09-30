@@ -15,10 +15,12 @@ import {
   listMembers,
   removeMember,
   saveAnnotationPolicy,
+  updateProject,
   type ProjectMember,
 } from './project-api'
 import { resolverLabel } from './resolver-label'
-import type { AnnotationMode } from './types'
+import { clearSetup, loadSetup } from './setup-recovery'
+import type { AcquisitionStrategy, AnnotationMode } from './types'
 
 export function ProjectSettingsPage() {
   const { projectId = '' } = useParams()
@@ -35,6 +37,11 @@ export function ProjectSettingsPage() {
   const [agreement, setAgreement] = useState(0.75)
   const [username, setUsername] = useState('')
   const [memberRole, setMemberRole] = useState<'manager' | 'annotator' | 'viewer'>('annotator')
+  const [strategy, setStrategy] = useState<AcquisitionStrategy>('random')
+
+  useEffect(() => {
+    if (project.data) setStrategy(project.data.acquisition_strategy)
+  }, [project.data])
 
   useEffect(() => {
     if (!policy.data) return
@@ -87,9 +94,21 @@ export function ProjectSettingsPage() {
     mutationFn: (userId: string) => removeMember(projectId, userId, token!),
     onSuccess: refreshMembers,
   })
+  const saveStrategy = useMutation({
+    mutationFn: () => updateProject(projectId, { acquisition_strategy: strategy, version: project.data!.version }, token!),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['project', projectId], updated)
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+    onError: () => queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
   const removeProject = useMutation({
     mutationFn: () => deleteProject(projectId, token!),
-    onSuccess: () => { queryClient.removeQueries({ queryKey: ['projects'] }); navigate('/projects') },
+    onSuccess: () => {
+      if (loadSetup()?.projectId === projectId) clearSetup()
+      queryClient.removeQueries({ queryKey: ['projects'] })
+      navigate('/projects')
+    },
   })
 
   if (project.isLoading || members.isLoading || policy.isLoading) return <main className="page-container"><div className="panel status-panel">Loading annotation settings…</div></main>
@@ -128,6 +147,24 @@ export function ProjectSettingsPage() {
         {formError && <p className="form-error" role="alert">{formError}</p>}
         {save.isError && <p className="form-error" role="alert">{saveError(save.error)}</p>}
         <footer className="wizard-actions"><span /><Button onClick={() => save.mutate()} disabled={Boolean(formError) || save.isPending}>{save.isPending ? 'Saving…' : 'Save settings'}</Button></footer>
+      </div>
+    </section>
+    <section className="wizard-card">
+      <div className="wizard-section">
+        <div><p className="eyebrow">Acquisition</p><h2>Acquisition strategy</h2><p className="muted">Decides how later training batches are chosen. It never changes the fixed validation and test sets or the initial batches.</p></div>
+        {project.data?.dataset_layout === 'single_batch'
+          ? <p className="notice">Random acquisition. A static single-batch project has no later training batches, so the strategy cannot change.</p>
+          : <>
+            <label className="field">Strategy
+              <select value={strategy} onChange={(event) => setStrategy(event.target.value as AcquisitionStrategy)}>
+                <option value="random">Random acquisition</option>
+                <option value="active_learning">Active learning</option>
+              </select>
+              <small>{strategy === 'random' ? 'Randomly selected from the remaining eligible training images.' : 'A learning model chooses later training batches once the learning adapter is available.'}</small>
+            </label>
+            {saveStrategy.isError && <p className="form-error" role="alert">{saveError(saveStrategy.error)}</p>}
+            <footer className="wizard-actions"><span /><Button onClick={() => saveStrategy.mutate()} disabled={strategy === project.data?.acquisition_strategy || saveStrategy.isPending}>{saveStrategy.isPending ? 'Saving…' : 'Save strategy'}</Button></footer>
+          </>}
       </div>
     </section>
     <section className="wizard-card settings-members">

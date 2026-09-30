@@ -11,6 +11,7 @@ from dada_api.db.migrations import current_revision, migration_head
 from dada_api.db.session import async_session_factory, engine
 from dada_api.main import app
 from dada_api.models.idempotency import IdempotencyRecord
+from dada_api.models.project import Project
 from dada_api.models.user import User
 
 pytestmark = pytest.mark.skipif(
@@ -53,22 +54,24 @@ async def test_migrations_and_readiness() -> None:
         "Authorization": f"Bearer {token}",
         "Idempotency-Key": "phase0-idempotency-test",
     }
-    payload = {"image_id": "image-1", "annotations": []}
+    payload = {
+        "name": "Phase 0 idempotency",
+        "task_type": "detection",
+        "test_set_size": 1,
+        "iteration_batch_size": 1,
+    }
     async with httpx.AsyncClient(
         transport=transport, base_url="http://testserver"
     ) as client:
-        first = await client.post(
-            "/api/v1/queue/annotations", headers=headers, json=payload
-        )
-        replay = await client.post(
-            "/api/v1/queue/annotations", headers=headers, json=payload
-        )
-    assert first.status_code == 200
-    assert replay.status_code == 200
+        first = await client.post("/api/v1/projects", headers=headers, json=payload)
+        replay = await client.post("/api/v1/projects", headers=headers, json=payload)
+    assert first.status_code == 201, first.text
+    assert replay.status_code == 201
     assert replay.json() == first.json()
     assert replay.headers["idempotency-replayed"] == "true"
 
     async with async_session_factory() as session:
         await session.execute(delete(IdempotencyRecord))
+        await session.execute(delete(Project).where(Project.owner_id == user.id))
         await session.execute(delete(User).where(User.username == "phase0-integration"))
         await session.commit()

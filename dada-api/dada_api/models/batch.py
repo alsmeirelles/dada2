@@ -18,13 +18,41 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from dada_api.db.base import Base
 
-ASSIGNMENT_PENDING = "pending"
-ITEM_PENDING = "pending"
+
+class ItemStatus(StrEnum):
+    """Lifecycle of one image inside a batch."""
+
+    pending = "pending"
+    awaiting_resolution = "awaiting_resolution"
+    resolved = "resolved"
+    cancelled = "cancelled"
+
+
+class AssignmentStatus(StrEnum):
+    """Lifecycle of one annotator's work on one image.
+
+    ``reassigned`` and ``cancelled`` are terminal: the row stays as evidence
+    but no longer counts as work.
+    """
+
+    pending = "pending"
+    in_progress = "in_progress"
+    submitted = "submitted"
+    reassigned = "reassigned"
+    cancelled = "cancelled"
+
+
+ACTIVE_ASSIGNMENT_STATUSES = (
+    AssignmentStatus.pending,
+    AssignmentStatus.in_progress,
+    AssignmentStatus.submitted,
+)
 
 
 class BatchPurpose(StrEnum):
     """Why a set of media was selected for annotation."""
 
+    initial_annotation = "initial_annotation"
     initial_training = "initial_training"
     validation = "validation"
     test = "test"
@@ -129,7 +157,12 @@ class AnnotationBatchAnnotator(Base):
 
 
 class BatchItem(Base):
-    """One selected image inside a batch."""
+    """One selected image inside a batch.
+
+    ``status`` becomes ``resolved`` only when the image has an accepted
+    canonical resolution. Submitted assignments alone never set it, which is
+    what makes it the signal the first-acquisition guard can trust.
+    """
 
     __tablename__ = "batch_items"
     __table_args__ = (UniqueConstraint("batch_id", "media_id", name="uq_batch_item"),)
@@ -147,7 +180,7 @@ class BatchItem(Base):
         ForeignKey("media.id", ondelete="CASCADE"),
         index=True,
     )
-    status: Mapped[str] = mapped_column(String(32), default=ITEM_PENDING)
+    status: Mapped[str] = mapped_column(String(32), default=ItemStatus.pending)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -155,15 +188,19 @@ class BatchItem(Base):
 
 
 class AnnotationAssignment(Base):
-    """One annotator's obligation to annotate one batch item.
+    """One annotator's obligation to annotate one complete image.
 
-    ``annotator_id`` is null in ``single`` mode, where the policy names no
-    group and any eligible annotator may claim the work. In ``consensus`` mode
-    one row exists per snapshotted group member, and the unique constraint is
-    what makes an item's required submission count enforceable.
+    Every assignment names its annotator, so it is directly available to them
+    without any claim. In ``consensus`` mode one row exists per snapshotted
+    group member, and the unique constraint is what makes an item's required
+    submission count enforceable.
 
     The annotator reference restricts deletion for the same reason the group
     snapshot does: an assignment is retained domain evidence.
+
+    ``draft`` holds the annotator's editable objects and ``version`` guards it
+    against stale writes. When the image has imported labels the draft starts
+    as a copy of them, and ``seed_document_id`` keeps that provenance.
     """
 
     __tablename__ = "annotation_assignments"
@@ -180,13 +217,28 @@ class AnnotationAssignment(Base):
         ForeignKey("batch_items.id", ondelete="CASCADE"),
         index=True,
     )
-    annotator_id: Mapped[str | None] = mapped_column(
+    annotator_id: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(32), default=AssignmentStatus.pending)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    draft: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
+    draft_saved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    seed_document_id: Mapped[str | None] = mapped_column(
+        ForeignKey("imported_seed_documents.id", ondelete="SET NULL"),
         index=True,
         nullable=True,
     )
-    status: Mapped[str] = mapped_column(String(32), default=ASSIGNMENT_PENDING)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )

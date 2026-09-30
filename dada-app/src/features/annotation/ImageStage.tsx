@@ -15,14 +15,14 @@ import type {
   AnnotationDocument,
   AnnotationObject,
   AnnotationTool,
-  Lease,
+  AssignmentMedia,
 } from './types'
 import { clampZoom, zoomAroundPoint } from './viewport'
 
 type DraftBox = { start: Point; end: Point; pointerId: number }
 
 type ImageStageProps = {
-  media: Lease['media']
+  media: AssignmentMedia
   document: AnnotationDocument
   classes: ProjectClassInput[]
   tool: AnnotationTool
@@ -245,7 +245,7 @@ export function ImageStage({
         </svg>
       </div>
       {samPending && <div className="sam-progress"><LoaderCircle size={16} /> Predicting mask…</div>}
-      {locked && <div className="canvas-lock" role="alert">Lease lost — editing disabled</div>}
+      {locked && <div className="canvas-lock" role="status">Read-only — editing disabled</div>}
       <div className="zoom-controls" aria-label="Zoom controls">
         <Button variant="ghost" aria-label="Zoom out" onClick={() => setZoom((value) => clampZoom(value / 1.2))}><Minus size={17} /></Button>
         <button className="zoom-value" onClick={fit} title="Fit image">{Math.round(zoom * 100)}%</button>

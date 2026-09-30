@@ -1,4 +1,9 @@
-"""Ordered object-class management inside a project."""
+"""Ordered object-class management inside a project.
+
+Classes are a dataset-preparation input: their ``display_order`` is the index
+imported labels are matched against. Any change to that mapping resets a
+prepared draft in the same transaction.
+"""
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -7,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dada_api.core.cursors import decode_cursor, encode_cursor
 from dada_api.core.errors import ApiError
 from dada_api.models.project import Project, ProjectClass
+from dada_api.models.user import User
 from dada_api.schemas.project import ProjectClassCreate, ProjectClassUpdate
+from dada_api.services import datasets
+
+CLASSES_CHANGED = "classes_changed"
 
 PAGE_SIZE = 200
 
@@ -61,6 +70,7 @@ async def list_classes(
 
 async def create_class(
     session: AsyncSession,
+    actor: User,
     project: Project,
     request: ProjectClassCreate,
 ) -> ProjectClass:
@@ -68,6 +78,7 @@ async def create_class(
 
     Args:
         session: Active database session.
+        actor: User adding the class.
         project: Authorized project.
         request: Validated creation request.
 
@@ -85,6 +96,7 @@ async def create_class(
         version=1,
     )
     session.add(item)
+    await datasets.reset_if_prepared(session, actor, project, CLASSES_CHANGED)
     try:
         await session.commit()
     except IntegrityError as error:
@@ -120,13 +132,20 @@ async def get_class(
 
 async def update_class(
     session: AsyncSession,
+    actor: User,
+    project: Project,
     item: ProjectClass,
     request: ProjectClassUpdate,
 ) -> ProjectClass:
     """Apply a versioned update to a class.
 
+    A new name or colour leaves the class-index mapping intact, so only a
+    changed ``display_order`` resets a prepared draft.
+
     Args:
         session: Active database session.
+        actor: User updating the class.
+        project: Project owning the class.
         item: Class being updated.
         request: Validated update request carrying the expected version.
 
@@ -145,6 +164,8 @@ async def update_class(
         )
 
     fields = request.model_dump(exclude_unset=True, exclude={"version"})
+    if fields.get("display_order", item.display_order) != item.display_order:
+        await datasets.reset_if_prepared(session, actor, project, CLASSES_CHANGED)
     for name, value in fields.items():
         setattr(item, name, value)
     item.version += 1
@@ -157,12 +178,20 @@ async def update_class(
     return item
 
 
-async def delete_class(session: AsyncSession, item: ProjectClass) -> None:
+async def delete_class(
+    session: AsyncSession,
+    actor: User,
+    project: Project,
+    item: ProjectClass,
+) -> None:
     """Remove a class from its project.
 
     Args:
         session: Active database session.
+        actor: User removing the class.
+        project: Project owning the class.
         item: Class being removed.
     """
+    await datasets.reset_if_prepared(session, actor, project, CLASSES_CHANGED)
     await session.delete(item)
     await session.commit()

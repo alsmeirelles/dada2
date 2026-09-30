@@ -21,8 +21,8 @@ Errors use one envelope regardless of status code:
 ```json
 {
   "error": {
-    "code": "lease_expired",
-    "message": "The annotation lease has expired.",
+    "code": "resolution_lease_expired",
+    "message": "The manual resolution lease has expired.",
     "details": {},
     "trace_id": "opaque-trace-id"
   }
@@ -128,6 +128,8 @@ installation is told what actually blocks the change.
   "task_type": "detection",
   "status": "draft",
   "owner_id": "uuid",
+  "acquisition_strategy": "random",
+  "dataset_layout": "split",
   "initial_training_size": 100,
   "test_set_size": 50,
   "test_set_percentage": null,
@@ -231,14 +233,20 @@ Cancelling a session and deleting a project both purge immediately and
 permanently; no restore window exists. `DELETE /api/v1/projects/{project_id}` is
 owner-only and returns `204`.
 
-## Annotation batches — Phase 4
+## Annotation batches — Phase 4.1 target
 
-Activating a project freezes its train/validation/test split and opens three
-full-coverage batches: `test`, `validation`, and `initial_training` for the
-train remainder. Test and validation may be configured as absolute counts or
-percentages; percentages resolve to fixed counts at activation. The project
-moves from `draft` to `active` in the same transaction, so an active project
-always has its splits and batches.
+Before activation, a draft project prepares either `split` or `single_batch`
+layout. `split` freezes train/validation/test membership and opens three initial
+batches: every `test` image, every `validation` image, and the resolved first
+`initial_training` batch from the train split. `single_batch` is available only
+to random projects and opens one all-images `initial_annotation` batch. It has
+no splits, validation/test evaluation, model training, or acquisition
+iterations. Both layouts support single or consensus annotation policy.
+
+Test and validation may be configured as absolute counts or percentages;
+percentages resolve to fixed counts during draft preparation. The project moves
+from `draft` to `active` only after layout preparation and any label import
+review are complete.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -248,7 +256,8 @@ always has its splits and batches.
 | `POST` | `/api/v1/projects/{project_id}/batches/{batch_id}/start` | Freeze it and generate assignments |
 
 ```ts
-type BatchPurpose = 'initial_training' | 'validation' | 'test' | 'acquisition'
+type BatchPurpose =
+  | 'initial_annotation' | 'initial_training' | 'validation' | 'test' | 'acquisition'
 type BatchStatus =
   | 'preparing' | 'annotating' | 'resolving'
   | 'review_required' | 'resolved' | 'closed' | 'failed'
@@ -292,12 +301,38 @@ coincide.
 Acquisition batches, iteration records, and the routes below arrive with later
 phases; `GET /iterations` and `GET /statistics` are not implemented yet.
 
-## Iterations and splits
+## Dataset preparation, label imports, iterations, and splits
+
+Owners/managers prepare the draft dataset after media and classes are complete.
+Preparing freezes the selected layout, class-index mapping, and media inventory
+for activation. Changing one of these inputs resets prepared layout and draft
+imports.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/projects/{project_id}/dataset-layout/prepare` | Materialize split membership/first training selection or static all-images layout |
+| `DELETE` | `/api/v1/projects/{project_id}/dataset-layout` | Reset draft preparation and associated draft imports |
+| `POST` | `/api/v1/projects/{project_id}/annotation-imports` | Create an owner/manager-only YOLO-detection or COCO-segmentation import session |
+| `POST` | `/api/v1/annotation-imports/{import_id}/files/{file_id}` | Upload import content |
+| `POST` | `/api/v1/annotation-imports/{import_id}/validate` | Parse and return path/class-index/geometry preview results |
+| `POST` | `/api/v1/annotation-imports/{import_id}/accept` | Persist validated immutable seed documents |
+| `DELETE` | `/api/v1/annotation-imports/{import_id}` | Discard a draft import |
+
+YOLO detection labels match image relative paths without the image suffix; COCO
+segmentation labels match normalized `images.file_name`. Source class indexes
+must match the prepared project class `display_order`. Imports preserve their
+actor, file hashes, parser/version, mappings, and validation results. They are
+not assignments, submissions, consensus votes, or canonical resolutions.
 
 The API creates immutable train/validation/test membership when a project is
-activated. All three sets are annotated before the first acquisition may
-start; validation and test remain excluded from acquisition. Every iteration
-records its selection strategy and model/run identifiers for reproducibility.
+activated. All three initial sets must have accepted image resolutions before
+the first acquisition may start; validation and test remain excluded from
+acquisition. Every iteration records its selection strategy and model/run
+identifiers for reproducibility. The initial-training batch is not an
+acquisition iteration, and the final acquisition batch may be smaller than
+`iteration_batch_size`.
+
+Static `single_batch` projects have no split rows or iteration resources.
 
 Iteration states are:
 
@@ -319,36 +354,33 @@ item is complete. The explicit close operation lets clients safely reconcile a
 missed event. It returns `409 iteration_incomplete` with remaining counts when
 work is outstanding.
 
-## Annotation queue and leases
+## Image annotation assignments — Phase 5 target
 
 The existing global `/api/v1/queue/next` placeholder is superseded by scoped
-endpoints:
+direct image-assignment endpoints. An annotation batch item is always one
+complete image; each annotator submits one complete-image document. Annotation
+assignments are not claimed or leased.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/projects/{project_id}/iterations/{iteration_id}/queue` | Available, leased, and completed counts/items |
-| `POST` | `/api/v1/projects/{project_id}/iterations/{iteration_id}/leases` | Atomically acquire a specific or next item |
-| `POST` | `/api/v1/leases/{lease_id}/renew` | Extend an owned lease |
-| `DELETE` | `/api/v1/leases/{lease_id}` | Release without completion |
-| `GET` | `/api/v1/media/{media_id}/annotations` | Current annotation document and version |
-| `PUT` | `/api/v1/leases/{lease_id}/annotations` | Save a versioned draft |
-| `POST` | `/api/v1/leases/{lease_id}/complete` | Validate and submit final annotations |
+| `GET` | `/api/v1/projects/{project_id}/assignments` | Caller-visible assigned image work and counts |
+| `GET` | `/api/v1/projects/{project_id}/assignments/{assignment_id}` | One direct image assignment, media metadata, and draft state |
+| `PUT` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/draft` | Save a versioned draft for the complete-image document |
+| `POST` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/submit` | Validate and submit the final complete-image document |
 
-Lease acquisition is atomic. A successful response contains `lease_id`, media
-metadata, a signed `image_url`, `expires_at`, `renew_after`, annotation version,
-and any existing draft. Other users see that item as leased but receive no
-sensitive user data beyond display information permitted by the project.
+Assignment responses contain the assignment ID, media metadata, signed image
+URL, assignment/document version, and any existing caller draft. A peer's
+assignment for the same image never blocks the caller's assignment. Draft
+saving and final submission are versioned; final submission is idempotent.
 
-`renew_after` is the number of seconds after acquisition or the last renewal
-before the App should renew. Queue responses contain `items`, status counts,
-and `next_cursor`; each item contains `media_id`, `relative_path`, `status`,
-dimensions, an optional thumbnail URL, and limited lease display information.
-The iteration-list response includes the nullable `current_iteration` object.
+When a validated import supplies labels for the image, the response contains a
+caller-specific editable seed draft. Saving it creates the caller's own draft
+or submission and preserves an import-provenance link. The seed itself never
+counts as an annotation submission or resolution.
 
-Draft saving does not release the lease. Completion is idempotent and does.
-Disconnecting does not immediately release a lease; expiry prevents two users
-from editing during transient network loss. Owners/managers may explicitly
-revoke abandoned leases through a separately authorized operation.
+Object/instance cases derived during detection or segmentation consensus are
+`resolution_work_item`s, not annotation batch items. A Phase 6 manager review
+may use a resolution lease for one work item if `P6-08` approves it.
 
 ## Annotation documents
 
@@ -378,8 +410,8 @@ include normalized geometry and always returns the new version.
 ## Assisted segmentation
 
 The existing `/api/v1/inference/sam-predict` route should additionally require
-`project_id`, `lease_id`, and optional `embedding_cache_key`. The API verifies
-that the user owns an active lease for the image. Coordinates follow the same
+`project_id`, `assignment_id`, and optional `embedding_cache_key`. The API verifies
+that the user owns the direct image assignment. Coordinates follow the same
 original-image pixel convention as stored annotations.
 
 ## Real-time endpoint
@@ -397,7 +429,7 @@ access tokens must not be placed there.
 ```json
 {
   "sequence": 418,
-  "type": "lease.acquired",
+  "type": "assignment.updated",
   "project_id": "uuid",
   "occurred_at": "2026-07-18T12:00:00Z",
   "data": { "iteration_id": "uuid", "media_id": "uuid" }
@@ -405,6 +437,178 @@ access tokens must not be placed there.
 ```
 
 Event types initially include `upload.progress`, `upload.completed`,
-`lease.acquired`, `lease.released`, `annotation.completed`,
+`assignment.updated`, `annotation.submitted`,
 `iteration.status_changed`, `training.progress`, and `training.eta_updated`.
 Events are invalidation signals; clients refetch authoritative resources.
+
+## Phase 4.1 implemented shapes
+
+These complement the Phase 4.1 sections above with what the API returns.
+Decisions are recorded in `dada-api/docs/phases/phase_4.1.md`.
+
+`POST /projects` accepts `acquisition_strategy` (`random` | `active_learning`,
+default `random`) and `dataset_layout` (`split` | `single_batch`, default
+`split`). `initial_training_size` is optional and nullable; when absent the
+first training batch uses `iteration_batch_size`. A `single_batch` project
+sends no size fields and only `random`. `Project` also returns
+`dataset_prepared_at`, set while the draft is prepared.
+
+Two read routes make the Phase 4.1 resources reachable:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/dataset-layout` | Prepared layout summary |
+| `GET` | `/api/v1/annotation-imports/{import_id}` | Import status, files, and report |
+
+`prepare` has no body and returns `201` with the layout summary:
+
+```ts
+type DatasetLayoutSummary = {
+  dataset_layout: 'split' | 'single_batch'
+  prepared_at: string | null
+  train_size: number
+  validation_size: number
+  test_size: number
+  first_training_batch_size: number | null
+  training_pool_size: number    // train images not held by a live training batch
+  batch_ids: string[]
+  annotation_import_id: string | null
+}
+```
+
+An import is created from a manifest, then each file is sent whole as the raw
+request body to `/annotation-imports/{import_id}/files/{client_file_id}`:
+
+```ts
+type AnnotationImportCreate = {
+  format: 'yolo_detection' | 'coco_segmentation'
+  files: { client_file_id: string; relative_path: string; size_bytes: number; sha256: string }[]
+}
+type AnnotationImport = {
+  id: string
+  project_id: string
+  format: 'yolo_detection' | 'coco_segmentation'
+  parser_version: string
+  status: 'uploading' | 'validated' | 'rejected' | 'accepted'
+  created_by: string
+  report: {
+    labelled_images: number
+    objects: number
+    unlabelled_images: number
+    errors: { code: string; client_file_id: string; detail: string }[]
+  } | null
+  files: { client_file_id: string; relative_path: string; size_bytes: number; sha256: string; received: boolean }[]
+  created_at: string
+  validated_at: string | null
+  accepted_at: string | null
+}
+```
+
+`activation_incomplete.details.missing` may now also contain `dataset_layout`
+(not prepared) and `label_import` (an import is not accepted). New stable
+codes: `preparation_incomplete`, `dataset_already_prepared`,
+`dataset_not_prepared`, `project_not_active`, `import_not_supported`,
+`import_already_exists`, `import_not_uploading`, `import_files_incomplete`,
+`import_not_valid`, and `import_accepted`. Import report error codes are
+`invalid_relative_path`, `unmatched_path`, `ambiguous_media_match`,
+`duplicate_source_label`, `unknown_class_index`, `malformed_label`,
+`invalid_geometry`, and `unsupported_geometry`.
+
+## Phase 5 implemented shapes
+
+These complement "Image annotation assignments — Phase 5 target". Decisions are
+recorded in `dada-api/docs/phases/phase_5.md`.
+
+The global `/api/v1/queue/*` placeholders are removed.
+
+```ts
+type AssignmentStatus = 'pending' | 'in_progress' | 'submitted' | 'reassigned' | 'cancelled'
+
+// GET /api/v1/projects/{project_id}/assignments?purpose=&state=&cursor=
+type AssignmentQueuePage = {
+  items: {
+    id: string; batch_id: string; batch_purpose: BatchPurpose
+    media_id: string; relative_path: string; width: number; height: number
+    status: AssignmentStatus; version: number; seeded_from_import: boolean; updated_at: string
+  }[]
+  next_cursor: string | null
+  counts: { pending: number; in_progress: number; submitted: number } // the caller's own
+}
+
+// GET /api/v1/projects/{project_id}/assignments/{assignment_id}
+type AssignmentDetail = {
+  id: string; project_id: string; batch_id: string; batch_purpose: BatchPurpose
+  task_type: TaskType; status: AssignmentStatus; version: number
+  media: { id: string; relative_path: string; width: number; height: number; image_url: string }
+  objects: AnnotationObject[]           // draft while open, latest submission once submitted
+  seeded_from_import: boolean
+  draft_saved_at: string | null; revision: number | null; submitted_at: string | null
+}
+
+// PUT .../draft and POST .../submit share one body
+type DocumentWrite = { version: number; objects: AnnotationObject[] }
+type DraftSaved = { id: string; status: AssignmentStatus; version: number; draft_saved_at: string }
+type SubmissionReceived = {
+  id: string; status: AssignmentStatus; version: number
+  submission_id: string; revision: number; submitted_at: string
+  image_resolved: boolean               // true only in single mode
+}
+```
+
+**Image URL.** `image_url` is a path relative to the API origin:
+`/api/v1/media/{media_id}/content?expires=…&signature=…`. It is valid for one
+hour and needs no bearer, so it works in an `<img>` or SVG `<image>`. The App
+prefixes it with `VITE_API_BASE_URL`.
+
+**Submitting.** Send `Idempotency-Key: submit:{assignment_id}:{version}`, so a
+retry after a lost response replays the original result.
+
+**Errors on these routes.**
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `version_conflict` | 409 | The assignment changed since it was read |
+| `assignment_already_submitted` | 409 | Already submitted |
+| `assignment_not_active` | 409 | Reassigned or cancelled by a manager |
+| `assignment_not_owned` | 403 | Someone else's assignment; this applies to managers and administrators too |
+| `invalid_document` | 422 | `details.errors: [{object_id, code}]` |
+| `invalid_media_url` | 403 | Tampered or expired image link |
+
+The `invalid_document` codes are `unknown_class`, `wrong_geometry`,
+`out_of_bounds`, `degenerate_geometry`, `self_intersecting`,
+`duplicate_object_id`, `duplicate_class`, and `empty_not_allowed`.
+
+**Manager routes** (`owner`, `manager`):
+
+| Method | Endpoint | Result |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/batches/{batch_id}/assignments` | `{items: BatchAssignment[], next_cursor}` |
+| `POST` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/reopen` | `BatchAssignment` |
+| `POST` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/reassign` | `201 BatchAssignment`, the new assignment; body `{annotator_id}` |
+| `POST` | `/api/v1/projects/{project_id}/batch-items/{item_id}/cancel` | `204` |
+
+```ts
+type BatchAssignment = {
+  id: string; batch_item_id: string; item_status: string; media_id: string; relative_path: string
+  annotator_id: string; status: AssignmentStatus; version: number; updated_at: string
+}
+```
+
+Their errors are:
+
+- `item_closed`: the image is already resolved or cancelled;
+- `assignment_not_submitted`;
+- `already_assigned`;
+- `invalid_assignee` (422);
+- `cancel_not_allowed`: validation and test images cannot be cancelled.
+
+**Batches.**
+
+- `GET /batches` and `GET /batches/{batch_id}` are now owner/manager only.
+- `Batch` gains `resolved_items`, `awaiting_resolution_items`,
+  `cancelled_items`, `available_assignments`, and `in_progress_assignments`.
+- `submitted_assignments` now counts only submitted assignments.
+
+**Projects.** `PATCH /api/v1/projects/{project_id}` accepts
+`acquisition_strategy` on `split` projects. A `single_batch` project returns
+`422 acquisition_strategy_not_allowed`.

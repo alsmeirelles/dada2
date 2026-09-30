@@ -13,7 +13,7 @@ adjudication, provenance, and performance evidence.
 
 Phase 6 **must not start implementation** until:
 
-1. decisions `P6-01`–`P6-07` and App decisions `A6-01`–`A6-04` are resolved in
+1. decisions `P6-01`–`P6-08` and App decisions `A6-01`–`A6-04` are resolved in
    `docs/phases/phase_6.md` with rationale, alternatives, contract/data effects,
    approver, and date;
 2. every `[TO DECIDE]` item in this document is replaced by the approved
@@ -88,8 +88,10 @@ Required invariants:
 4. At most one resolution version is accepted for an item at a time.
 5. Retrying or adjudicating creates a new version and supersedes history; it
    never updates raw evidence in place.
-6. Batch/iteration completion depends on accepted resolutions for every item,
-   not on submission count alone.
+6. Batch/iteration completion depends on accepted resolutions for every
+   image-level annotation batch item, not on submission count alone. Derived
+   resolution work items must also be closed before their parent image can be
+   accepted.
 7. Missing required submissions block automated resolution in the first
    release. A waived or reassigned assignment follows the approved Phase 5
    policy and may not reduce consensus below two independent submissions.
@@ -108,6 +110,9 @@ Required invariants:
 - Consensus mode snapshots submission IDs, document versions/content hashes,
   policy version, ordered annotator IDs, task, class catalog version, media
   identity/dimensions, and resolver configuration before dispatch.
+- Imported seed documents are excluded from the input snapshot. They may be
+  linked as provenance for a human-authored submission, but only submitted
+  annotator documents are observations or consensus votes.
 
 ### CE-F02 — resolver registry and capabilities
 
@@ -167,6 +172,9 @@ Required invariants:
   necessary.
 - Ordinary assignment/queue/event responses contain no raw peer evidence or
   named peer status.
+- Import audit remains visible only to authorized owners/managers. An ordinary
+  annotator may see the seeded content in their own editable assignment but not
+  another annotator's saved document or import history.
 
 ### CE-F07 — retries and configuration history
 
@@ -190,11 +198,25 @@ Required invariants:
 - Stale adjudication returns `409` without discarding the App's local recovery
   document.
 
+### CE-F08a — resolution work items and optional leases
+
+- An annotation batch item is always one complete image. A resolver may derive
+  a `resolution_work_item` for an image-level case or for a detection/
+  segmentation object or instance that needs manual review.
+- Derived work items retain a parent image batch-item ID, resolution-run ID,
+  deterministic candidate identity, evidence mapping, state, and provenance.
+  They do not replace or mutate annotation assignments or raw image documents.
+- Only a manual resolution/adjudication edit may require a resolution lease.
+  Annotation submission never requires a lease. The scope, lifecycle, and
+  conflict policy for resolution leases are decided by `P6-08`.
+
 ### CE-F09 — provenance and deterministic replay
 
 Every run records at least:
 
 - pipeline, adapter, and dependency names/versions;
+- imported-seed document ID and source import ID when a submitted document was
+  initialized from an import, without treating either as a resolver input;
 - complete typed parameters and review thresholds;
 - ordered submission IDs, document versions, and content hashes;
 - class catalog and media version/dimensions;
@@ -236,9 +258,10 @@ representation.
 
 The approved schema must represent resolution runs, ordered inputs, immutable
 proposals/resolved documents, accepted/superseded versions, adjudications,
-object/instance evidence, worker jobs, outbox events, and performance
-observations. Database constraints must enforce active-job and accepted-version
-uniqueness where possible. Content hashes use one documented canonical JSON
+resolution work items and optional resolution leases, object/instance evidence,
+worker jobs, outbox events, and performance observations. Database constraints
+must enforce active-job and accepted-version uniqueness where possible. Content
+hashes use one documented canonical JSON
 encoding.
 
 Large raster masks or derived evidence may use the configured artifact store,
@@ -252,9 +275,9 @@ The final OpenAPI contract must include:
 | Method | Endpoint | Requirement |
 | --- | --- | --- |
 | `GET` | `/api/v1/projects/{project_id}/batches/{batch_id}/resolutions` | Cursor/filtered manager queue with reason, state, counts, metrics summary, versions, and age |
-| `GET` | `/api/v1/projects/{project_id}/batch-items/{item_id}/evidence` | Versioned manager evidence, diagnostics, proposal, history, and pagination/lazy links |
-| `POST` | `/api/v1/projects/{project_id}/batch-items/{item_id}/resolve` | Idempotent retry with expected version and typed configuration |
-| `POST` | `/api/v1/projects/{project_id}/batch-items/{item_id}/adjudicate` | Idempotent accept/edit/replace action with expected version |
+| `GET` | `/api/v1/projects/{project_id}/batch-items/{item_id}/evidence` | Versioned manager evidence for one image-level batch item |
+| `POST` | `/api/v1/projects/{project_id}/batch-items/{item_id}/resolve` | Idempotent retry for an image-level consensus case |
+| `POST` | `/api/v1/projects/{project_id}/resolution-work-items/{item_id}/adjudicate` | Idempotent accept/edit/replace action for an image case or derived object/instance work item; optional resolution lease follows `P6-08` |
 | `GET` | `/api/v1/projects/{project_id}/annotator-performance` | Authorized aggregates with sample sizes and suppression rules |
 
 Stable errors include `resolution_not_ready`, `resolution_config_conflict`,

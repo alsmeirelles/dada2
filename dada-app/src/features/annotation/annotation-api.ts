@@ -1,76 +1,84 @@
 import { apiRequest } from '../../api/client'
+import { config } from '../../config/env'
 import type { Page, Project, ProjectClassInput } from '../projects/types'
 import type {
-  AnnotationDocument,
-  AnnotationQueue,
+  AnnotationObject,
+  AssignmentDetail,
+  AssignmentQueue,
+  AssignmentQueueItem,
+  DraftSaved,
   EventTicket,
   IterationList,
-  Lease,
   ProjectStatistics,
   SamPrediction,
   SamPrompt,
+  SubmissionReceived,
   WorkspaceBootstrap,
 } from './types'
 
+type AssignmentPage = Page<AssignmentQueueItem> & Pick<AssignmentQueue, 'counts'>
+
 export async function getWorkspaceBootstrap(projectId: string, token: string): Promise<WorkspaceBootstrap> {
-  const [project, classes, iterations] = await Promise.all([
+  const [project, classes] = await Promise.all([
     apiRequest<Project>(`/api/v1/projects/${projectId}`, { token }),
     apiRequest<Page<ProjectClassInput>>(`/api/v1/projects/${projectId}/classes`, { token }),
-    apiRequest<IterationList>(`/api/v1/projects/${projectId}/iterations`, { token }),
   ])
-  return { project, classes: classes.items, iteration: iterations.current_iteration }
+  return { project, classes: classes.items }
 }
 
-export function getQueue(projectId: string, iterationId: string, token: string) {
-  return apiRequest<AnnotationQueue>(
-    `/api/v1/projects/${projectId}/iterations/${iterationId}/queue`,
+export async function listAssignments(projectId: string, token: string): Promise<AssignmentQueue> {
+  const items: AssignmentQueueItem[] = []
+  let page: AssignmentPage | null = null
+  do {
+    const query: string = page?.next_cursor ? `?cursor=${encodeURIComponent(page.next_cursor)}` : ''
+    page = await apiRequest<AssignmentPage>(`/api/v1/projects/${projectId}/assignments${query}`, { token })
+    items.push(...page.items)
+  } while (page.next_cursor)
+  return { items, counts: page.counts }
+}
+
+export async function getAssignment(projectId: string, assignmentId: string, token: string) {
+  const detail = await apiRequest<AssignmentDetail>(
+    `/api/v1/projects/${projectId}/assignments/${assignmentId}`,
     { token },
   )
+  return { ...detail, media: { ...detail.media, image_url: `${config.apiBaseUrl}${detail.media.image_url}` } }
 }
 
-export function acquireLease(
+export function saveDraft(
   projectId: string,
-  iterationId: string,
-  assignmentId: string | null,
+  assignmentId: string,
+  version: number,
+  objects: AnnotationObject[],
   token: string,
 ) {
-  return apiRequest<Lease>(
-    `/api/v1/projects/${projectId}/iterations/${iterationId}/leases`,
-    {
-      method: 'POST', token,
-      body: assignmentId ? { assignment_id: assignmentId } : { selection: 'next' },
-    },
-  )
-}
-
-export function renewLease(leaseId: string, token: string) {
-  return apiRequest<Pick<Lease, 'expires_at' | 'renew_after'>>(
-    `/api/v1/leases/${leaseId}/renew`,
-    { method: 'POST', token, body: {} },
-  )
-}
-
-export function releaseLease(leaseId: string, token: string) {
-  return apiRequest<void>(`/api/v1/leases/${leaseId}`, { method: 'DELETE', token })
-}
-
-export function saveAnnotationDraft(leaseId: string, document: AnnotationDocument, token: string) {
-  return apiRequest<AnnotationDocument>(`/api/v1/leases/${leaseId}/annotations`, {
-    method: 'PUT', token, body: document,
+  return apiRequest<DraftSaved>(`/api/v1/projects/${projectId}/assignments/${assignmentId}/draft`, {
+    method: 'PUT', token, body: { version, objects },
   })
 }
 
-export function completeAnnotation(leaseId: string, document: AnnotationDocument, token: string) {
-  return apiRequest<AnnotationDocument>(`/api/v1/leases/${leaseId}/complete`, {
+export function submitAssignment(
+  projectId: string,
+  assignmentId: string,
+  version: number,
+  objects: AnnotationObject[],
+  token: string,
+) {
+  return apiRequest<SubmissionReceived>(`/api/v1/projects/${projectId}/assignments/${assignmentId}/submit`, {
     method: 'POST', token,
-    headers: { 'Idempotency-Key': crypto.randomUUID() },
-    body: document,
+    headers: { 'Idempotency-Key': submissionKey(assignmentId, version) },
+    body: { version, objects },
   })
+}
+
+/** One key per assignment version, so a retry after a lost response replays the original result. */
+export function submissionKey(assignmentId: string, version: number) {
+  return `submit:${assignmentId}:${version}`
 }
 
 export function predictSegmentation(
   projectId: string,
-  lease: Lease,
+  assignment: AssignmentDetail,
   prompts: SamPrompt[],
   token: string,
 ) {
@@ -78,22 +86,11 @@ export function predictSegmentation(
     method: 'POST', token,
     body: {
       project_id: projectId,
-      lease_id: lease.lease_id,
-      image_id: lease.media.id,
+      assignment_id: assignment.id,
+      image_id: assignment.media.id,
       prompts,
     },
   })
-}
-
-export function closeIteration(projectId: string, iterationId: string, token: string) {
-  return apiRequest<IterationList['current_iteration']>(
-    `/api/v1/projects/${projectId}/iterations/${iterationId}/close`,
-    {
-      method: 'POST', token,
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
-      body: {},
-    },
-  )
 }
 
 export async function getProjectActivity(projectId: string, token: string) {

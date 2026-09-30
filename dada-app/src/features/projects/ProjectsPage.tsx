@@ -1,4 +1,4 @@
-import { AlertCircle, FolderOpen, Plus, Settings } from 'lucide-react'
+import { Activity, AlertCircle, FolderOpen, Layers3, PenLine, Plus, Settings, Users, Wrench } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { ApiError } from '../../api/client'
@@ -60,31 +60,38 @@ export function ProjectsPage() {
               <dl>
                 <div><dt>Images</dt><dd>{project.media_count ?? '—'}</dd></div>
                 <div><dt>Resolved</dt><dd>{project.resolved_images ?? project.completed_annotations ?? '—'}</dd></div>
-                <div><dt>Batch</dt><dd>{project.iteration_batch_size}</dd></div>
+                <div><dt>Batch</dt><dd>{project.iteration_batch_size ?? 'Static'}</dd></div>
               </dl>
-              {(project.status === 'active' || project.status === 'ready') && (
-                <Link className="project-card__action" to={`/projects/${project.id}/batches`}>
-                  View annotation batches
+              <nav className="project-card__actions" aria-label={`${project.name} actions`}>
+                {project.status === 'active' && (
+                  <Link className="project-card__action" to={`/projects/${project.id}/annotate`}>
+                    <PenLine size={16} aria-hidden="true" /> Open my assignments
+                  </Link>
+                )}
+                {(project.status === 'active' || project.status === 'ready') && (
+                  <Link className="project-card__action" to={`/projects/${project.id}/batches`}>
+                    <Layers3 size={16} aria-hidden="true" /> View annotation batches
+                  </Link>
+                )}
+                {project.status === 'draft' && (
+                  <Link className="project-card__action" to={`/projects/${project.id}/setup`}>
+                    <Wrench size={16} aria-hidden="true" /> Resume project setup
+                  </Link>
+                )}
+                <Link className="project-card__action" to={`/projects/${project.id}/settings`}>
+                  <Settings size={16} aria-hidden="true" /> Annotation settings
                 </Link>
-              )}
-              {project.status === 'draft' && (
-                <Link className="project-card__action" to={`/projects/${project.id}/setup`}>
-                  Resume project setup
-                </Link>
-              )}
-              <Link className="project-card__action" to={`/projects/${project.id}/settings`}>
-                <Settings size={16} aria-hidden="true" /> Annotation settings
-              </Link>
-              {(project.status === 'training' || project.status === 'completed' || project.status === 'failed') && (
-                <Link className="project-card__action" to={`/projects/${project.id}/activity`}>
-                  View iteration activity
-                </Link>
-              )}
-              {(project.review_required_count ?? 0) > 0 && (
-                <Link className="project-card__action" to={`/projects/${project.id}/consensus`}>
-                  Review {project.review_required_count} consensus item{project.review_required_count === 1 ? '' : 's'}
-                </Link>
-              )}
+                {(project.status === 'training' || project.status === 'completed' || project.status === 'failed') && (
+                  <Link className="project-card__action" to={`/projects/${project.id}/activity`}>
+                    <Activity size={16} aria-hidden="true" /> View iteration activity
+                  </Link>
+                )}
+                {(project.review_required_count ?? 0) > 0 && (
+                  <Link className="project-card__action" to={`/projects/${project.id}/consensus`}>
+                    <Users size={16} aria-hidden="true" /> Review {project.review_required_count} consensus item{project.review_required_count === 1 ? '' : 's'}
+                  </Link>
+                )}
+              </nav>
             </article>
           ))}
         </section>

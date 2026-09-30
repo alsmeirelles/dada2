@@ -103,6 +103,21 @@ def promote_part(session_id: str, item_id: str, storage_key: str) -> None:
     shutil.move(str(_part_path(session_id, item_id)), str(target))
 
 
+def iter_media(storage_key: str, chunk_bytes: int = 1024 * 1024) -> Iterator[bytes]:
+    """Yield a promoted media file's bytes in chunks, closing it when done.
+
+    Args:
+        storage_key: Key from :func:`media_storage_key`.
+        chunk_bytes: Size of each yielded chunk.
+
+    Yields:
+        Consecutive byte ranges of the stored file.
+    """
+    with open(_resolve_within(get_settings().media_root, storage_key), "rb") as handle:
+        while chunk := handle.read(chunk_bytes):
+            yield chunk
+
+
 def delete_session_parts(session_id: str) -> None:
     """Remove every stored part of an upload session."""
     path = _resolve_within(get_settings().upload_parts_root, session_id)

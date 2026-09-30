@@ -21,8 +21,9 @@ from dada_api.models.upload import (
     UploadSession,
     UploadStatus,
 )
+from dada_api.models.user import User
 from dada_api.schemas.upload import UploadSessionCreate
-from dada_api.services import storage
+from dada_api.services import datasets, storage
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ def normalize_relative_path(raw: str) -> str | None:
     return "/".join(segments)
 
 
-def _printable(value: str) -> str:
+def printable(value: str) -> str:
     """Return a value safe to persist, dropping control characters.
 
     A rejected entry still records what the client sent so an operator can see
@@ -172,8 +173,8 @@ async def create_session(
             UploadItem(
                 session_id=upload.id,
                 client_file_id=entry.client_file_id,
-                relative_path=normalized or _printable(entry.relative_path),
-                file_name=_printable(entry.file_name),
+                relative_path=normalized or printable(entry.relative_path),
+                file_name=printable(entry.file_name),
                 media_type=entry.media_type.lower(),
                 size_bytes=entry.size_bytes,
                 sha256=entry.sha256,
@@ -316,14 +317,18 @@ async def store_chunk(
 
 async def complete_session(
     session: AsyncSession,
+    actor: User,
     upload: UploadSession,
 ) -> UploadSession:
     """Verify every uploaded file and promote it into the project's media.
 
-    Repeating the call on a completed session returns it unchanged.
+    Repeating the call on a completed session returns it unchanged. New media
+    changes the inventory a prepared draft was drawn from, so it resets that
+    preparation in the same transaction.
 
     Args:
         session: Active database session.
+        actor: User completing the session.
         upload: Session being completed.
 
     Returns:
@@ -356,11 +361,16 @@ async def complete_session(
     await session.commit()
 
     try:
+        added_media = False
         for item in items:
             if item.disposition == UploadDisposition.rejected:
                 continue
             content = await _content_object_for(session, upload, item)
-            await _ensure_media(session, upload, content, item.relative_path)
+            if await _ensure_media(session, upload, content, item.relative_path):
+                added_media = True
+        if added_media:
+            project = await session.get(Project, upload.project_id)
+            await datasets.reset_if_prepared(session, actor, project, "media_changed")
     except ApiError as error:
         await session.rollback()
         upload.status = UploadStatus.failed
@@ -449,22 +459,28 @@ async def _ensure_media(
     upload: UploadSession,
     content: ContentObject,
     relative_path: str,
-) -> None:
-    """Record the content's appearance at a path unless it is already recorded."""
+) -> bool:
+    """Record the content's appearance at a path unless it is already recorded.
+
+    Returns:
+        True when a new media row was added.
+    """
     existing = await session.scalar(
         select(Media).where(
             Media.project_id == upload.project_id,
             Media.relative_path == relative_path,
         )
     )
-    if existing is None:
-        session.add(
-            Media(
-                project_id=upload.project_id,
-                content_object_id=content.id,
-                relative_path=relative_path,
-            )
+    if existing is not None:
+        return False
+    session.add(
+        Media(
+            project_id=upload.project_id,
+            content_object_id=content.id,
+            relative_path=relative_path,
         )
+    )
+    return True
 
 
 async def cancel_session(session: AsyncSession, upload: UploadSession) -> None:
@@ -511,6 +527,32 @@ async def count_media(session: AsyncSession, project: Project) -> int:
         )
         or 0
     )
+
+
+async def get_media_content(
+    session: AsyncSession,
+    media_id: str,
+) -> ContentObject:
+    """Return the verified content behind one media item.
+
+    Args:
+        session: Active database session.
+        media_id: Media item being served.
+
+    Returns:
+        The content object holding the item's bytes and type.
+
+    Raises:
+        ApiError: 404 when the media item does not exist.
+    """
+    content = await session.scalar(
+        select(ContentObject)
+        .join(Media, Media.content_object_id == ContentObject.id)
+        .where(Media.id == media_id)
+    )
+    if content is None:
+        raise ApiError(404, "not_found", "The media item does not exist.")
+    return content
 
 
 async def list_media(

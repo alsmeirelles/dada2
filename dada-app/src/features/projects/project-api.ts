@@ -1,8 +1,8 @@
 import { apiRequest } from '../../api/client'
 import { config } from '../../config/env'
-import type { LocalImage } from './ingest'
+import { prepareDataset } from './dataset-api'
+import { sha256Hex, type LocalImage } from './ingest'
 import {
-  clearSetup,
   confirmProjectCreated,
   loadSetup,
   pendingProjectCreateKey,
@@ -12,6 +12,7 @@ import {
   type SetupStage,
 } from './setup-recovery'
 import type {
+  AcquisitionStrategy,
   AnnotationPolicy,
   Page,
   Project,
@@ -54,7 +55,7 @@ export function getProject(projectId: string, token: string) {
   return apiRequest<Project>(`/api/v1/projects/${projectId}`, { token })
 }
 
-export function updateProject(projectId: string, body: { name?: string; description?: string | null; version: number }, token: string) {
+export function updateProject(projectId: string, body: { name?: string; description?: string | null; acquisition_strategy?: AcquisitionStrategy; version: number }, token: string) {
   return apiRequest<Project>(`/api/v1/projects/${projectId}`, { method: 'PATCH', token, headers: idempotencyHeaders(), body })
 }
 
@@ -182,11 +183,22 @@ export function resolveDraftSplitSize(
   return unit === 'percentage' ? Math.ceil(totalMedia * value / 100) : value
 }
 
+/** The first training batch size the API will use for a split project. */
+export function resolvedFirstTrainingSize(draft: ProjectDraft) {
+  return draft.initialTrainingSize ?? draft.iterationBatchSize
+}
+
 export function buildProjectCreateBody(draft: ProjectDraft) {
-  return {
+  const basics = {
     name: draft.name.trim(),
     description: draft.description.trim() || null,
     task_type: draft.taskType,
+    acquisition_strategy: draft.acquisitionStrategy,
+    dataset_layout: draft.datasetLayout,
+  }
+  if (draft.datasetLayout === 'single_batch') return basics
+  return {
+    ...basics,
     initial_training_size: draft.initialTrainingSize,
     ...splitSizeBody('test', draft.testSetSize, draft.testSetUnit),
     ...splitSizeBody(
@@ -198,6 +210,10 @@ export function buildProjectCreateBody(draft: ProjectDraft) {
   }
 }
 
+/**
+ * Creates or resumes a draft up to a prepared dataset. Activation is a separate
+ * step, taken after the owner reviews any label import.
+ */
 export async function createProjectWithDataset(
   draft: ProjectDraft,
   images: LocalImage[],
@@ -323,14 +339,13 @@ export async function createProjectWithDataset(
   await waitForUploadProcessing(upload.id, token, (message) => onProgress(96, message))
   complete('uploaded')
 
-  onProgress(98, 'Activating project…')
-  const activated = await apiRequest<Project>(`/api/v1/projects/${project.id}/activate`, {
-    method: 'POST', token, headers: { 'Idempotency-Key': setupKey(loadSetup(), 'activate') }, body: {},
-  })
-  complete('activated')
-  clearSetup()
-  onProgress(100, 'Project ready')
-  return activated
+  onProgress(98, 'Preparing dataset…')
+  if (!(await getProject(project.id, token)).dataset_prepared_at) {
+    await prepareDataset(project.id, token)
+  }
+  complete('prepared')
+  onProgress(100, 'Dataset prepared')
+  return getProject(project.id, token)
 }
 
 async function waitForUploadProcessing(
@@ -363,7 +378,7 @@ async function uploadFile(
   while (offset < image.file.size) {
     const chunk = image.file.slice(offset, Math.min(offset + chunkSize, image.file.size))
     const end = offset + chunk.size
-    const checksum = await sha256(chunk)
+    const checksum = await sha256Hex(chunk)
     const acknowledgement = await apiRequest<UploadChunk>(
       `/api/v1/uploads/${uploadId}/files/${encodeURIComponent(image.clientFileId)}`,
       {
@@ -379,13 +394,6 @@ async function uploadFile(
     offset = acknowledgement.received_bytes
     onProgress(offset / image.file.size)
   }
-}
-
-async function sha256(blob: Blob) {
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
 }
 
 function idempotencyHeaders() {

@@ -5,12 +5,15 @@ import { Link, useParams } from 'react-router-dom'
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
+import { BatchAssignmentsPanel } from './BatchAssignmentsPanel'
 import { listBatches, startBatch, updateBatchPolicy } from './batch-api'
-import { getAnnotationPolicy, getProject, listMembers } from './project-api'
+import { getDatasetLayout } from './dataset-api'
+import { getAnnotationPolicy, getProject, listMembers, type ProjectMember } from './project-api'
 import type { AnnotationBatch, AnnotationPolicy, BatchPurpose } from './types'
 
 const purposeLabels: Record<BatchPurpose, string> = {
-  initial_training: 'Train',
+  initial_annotation: 'All images',
+  initial_training: 'First training',
   validation: 'Validation',
   test: 'Test',
   acquisition: 'Acquisition',
@@ -33,6 +36,11 @@ export function ProjectBatchesPage() {
   const batches = useQuery({
     queryKey: ['project-batches', projectId],
     queryFn: () => listBatches(projectId, token!),
+    enabled: Boolean(projectId && token),
+  })
+  const layout = useQuery({
+    queryKey: ['dataset-layout', projectId],
+    queryFn: () => getDatasetLayout(projectId, token!),
     enabled: Boolean(projectId && token),
   })
   const self = members.data?.items.find((member) => member.user_id === user?.id)
@@ -65,15 +73,20 @@ export function ProjectBatchesPage() {
   if (project.isLoading || members.isLoading || batches.isLoading) {
     return <main className="page-container"><div className="panel status-panel">Loading annotation batches…</div></main>
   }
+  if (batches.error instanceof ApiError && batches.error.status === 403) {
+    return <main className="page-container"><div className="panel status-panel">Annotation batches are a manager view. <Link to={`/projects/${projectId}/annotate`}>Open my assignments</Link>.</div></main>
+  }
   if (project.isError || members.isError || batches.isError) {
     return <main className="page-container"><div className="panel error-panel" role="alert">Annotation batches could not be loaded.</div></main>
   }
 
   return <main className="page-container batch-page">
     <div className="page-heading">
-      <div><Link className="back-link back-link--flow" to="/projects"><ArrowLeft size={17} /> Projects</Link><p className="eyebrow">{project.data?.name}</p><h1>Annotation batches</h1><p className="muted">Train, validation, and test are fixed at activation. Every initial assignment must be submitted before the first acquisition round.</p></div>
+      <div><Link className="back-link back-link--flow" to="/projects"><ArrowLeft size={17} /> Projects</Link><p className="eyebrow">{project.data?.name}</p><h1>Annotation batches</h1><p className="muted">{project.data?.dataset_layout === 'single_batch'
+        ? 'One static batch covers every image. There is no training or acquisition loop.'
+        : `Validation and test are annotated in full, together with the first training batch. The first acquisition waits until every initial image has an accepted resolution.${layout.data ? ` ${layout.data.training_pool_size} training images remain in the unlabeled pool.` : ''}`}</p></div>
       <div className="batch-actions">
-        {hasStartedBatch && <Link className="button button--primary" to={`/projects/${projectId}/annotate`}>Open annotation workspace</Link>}
+        {hasStartedBatch && <Link className="button button--primary" to={`/projects/${projectId}/annotate`}>Open my assignments</Link>}
         {canManage && <Link className="button button--secondary" to={`/projects/${projectId}/settings`}>Default policy settings</Link>}
       </div>
     </div>
@@ -81,7 +94,9 @@ export function ProjectBatchesPage() {
     <section className="batch-grid" aria-label="Annotation batches">
       {(batches.data?.items ?? []).map((batch) => <BatchCard
         key={batch.id}
+        projectId={projectId}
         batch={batch}
+        members={members.data?.items ?? []}
         canManage={canManage}
         annotatorNames={batch.annotator_ids.map((id) => memberNames.get(id) ?? id)}
         defaultPolicy={defaultPolicy.data}
@@ -93,8 +108,10 @@ export function ProjectBatchesPage() {
   </main>
 }
 
-function BatchCard({ batch, canManage, annotatorNames, defaultPolicy, pending, onApplyDefault, onStart }: {
+function BatchCard({ projectId, batch, members, canManage, annotatorNames, defaultPolicy, pending, onApplyDefault, onStart }: {
+  projectId: string
   batch: AnnotationBatch
+  members: ProjectMember[]
   canManage: boolean
   annotatorNames: string[]
   defaultPolicy?: AnnotationPolicy
@@ -108,15 +125,19 @@ function BatchCard({ batch, canManage, annotatorNames, defaultPolicy, pending, o
   return <article className="batch-card">
     <header><span className={`status-badge status-badge--${batch.status}`}>{batch.status.replace('_', ' ')}</span><span className="batch-purpose"><Layers3 size={16} />{purposeLabels[batch.purpose]}</span></header>
     <h2>{purposeLabels[batch.purpose]} annotations</h2>
-    <div className="batch-counts"><span><strong>{batch.total_items}</strong> selected images</span><span><strong>{batch.total_assignments || expectedAssignments}</strong> {batch.total_assignments ? 'generated' : 'assignments after start'}</span><span><strong>{batch.submitted_assignments}</strong> submitted</span></div>
+    <div className="batch-counts"><span><strong>{batch.total_items}</strong> selected images</span><span><strong>{batch.resolved_items}</strong> resolved images</span><span><strong>{batch.total_assignments || expectedAssignments}</strong> {batch.total_assignments ? 'assignments' : 'assignments after start'}</span><span><strong>{batch.submitted_assignments}</strong> submitted</span></div>
+    {batch.status !== 'preparing' && <p className="muted">{batch.available_assignments} available · {batch.in_progress_assignments} in progress · {batch.awaiting_resolution_items} images awaiting resolution{batch.cancelled_items ? ` · ${batch.cancelled_items} cancelled` : ''}</p>}
     <div className="batch-policy"><span><Users size={16} /><strong>{batch.mode === 'consensus' ? `Consensus · ${batch.annotator_ids.length} annotators` : 'Single annotation'}</strong></span><small>Policy snapshot v{batch.source_policy_version}. Changes to project defaults do not alter this batch.</small>{batch.resolver && <small>Resolver: {batch.resolver}{batch.resolver_version ? ` v${batch.resolver_version}` : ''}</small>}</div>
     {canManage && <details className="batch-details"><summary>Snapshot and selection details</summary><dl>
-      <div><dt>Annotators</dt><dd>{annotatorNames.join(', ') || 'Any eligible annotator'}</dd></div>
+      <div><dt>Annotators</dt><dd>{annotatorNames.join(', ') || 'Every member allowed to annotate, in turn'}</dd></div>
       <div><dt>Parameters</dt><dd>{formatRecord(batch.parameters)}</dd></div>
       <div><dt>Review thresholds</dt><dd>{formatRecord(batch.review_thresholds)}</dd></div>
       <div><dt>Selection</dt><dd>{batch.selection_strategy} · seed {batch.selection_seed}</dd></div>
+      <div><dt>Requested / selected</dt><dd>{batch.requested_size} / {batch.total_items + batch.cancelled_items} images</dd></div>
+      <div><dt>Selected at</dt><dd>{new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(batch.created_at))}</dd></div>
       <div><dt>Input fingerprint</dt><dd><code>{batch.selection_input_fingerprint}</code></dd></div>
     </dl></details>}
+    {canManage && batch.status !== 'preparing' && <BatchAssignmentsPanel projectId={projectId} batch={batch} members={members} />}
     {canManage && batch.status === 'preparing' && <div className="batch-actions">
       <Button variant="secondary" onClick={onApplyDefault} disabled={pending || !defaultPolicy}><RefreshCcw size={16} />Apply current default</Button>
       <Button onClick={onStart} disabled={pending}><Play size={16} />Start batch</Button>

@@ -6,7 +6,6 @@ import {
   ChevronRight,
   CircleHelp,
   Hand,
-  Lock,
   MousePointer2,
   Pentagon,
   PanelRightClose,
@@ -20,41 +19,64 @@ import {
   Radio,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
 
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
+import type { BatchPurpose } from '../projects/types'
 import {
-  acquireLease,
-  closeIteration,
-  completeAnnotation,
-  getQueue,
+  getAssignment,
   getWorkspaceBootstrap,
+  listAssignments,
   predictSegmentation,
-  releaseLease,
-  renewLease,
-  saveAnnotationDraft,
+  saveDraft,
+  submitAssignment,
 } from './annotation-api'
+import {
+  AUTOSAVE_MS,
+  STATUS_LABELS,
+  filterAssignments,
+  isEditable,
+  neighbor,
+  openWork,
+  validateDocument,
+} from './assignment-view'
 import { ImageStage } from './ImageStage'
-import { clearRecovery, loadRecovery, saveRecovery } from './recovery'
+import { clearRecovery, loadRecovery, saveRecovery, type RecoverySnapshot } from './recovery'
 import { useProjectEvents } from './useProjectEvents'
-import type { AnnotationDocument, AnnotationObject, AnnotationTool, Lease, QueueItem } from './types'
+import type {
+  AnnotationDocument,
+  AnnotationObject,
+  AnnotationTool,
+  AssignmentDetail,
+  AssignmentQueueItem,
+  QueueState,
+} from './types'
 import './annotation.css'
 
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
 
+const PURPOSE_LABELS: Record<BatchPurpose, string> = {
+  initial_annotation: 'Static batch',
+  initial_training: 'First training',
+  validation: 'Validation',
+  test: 'Test',
+  acquisition: 'Acquisition',
+}
+
 export function AnnotationWorkspacePage() {
   const { projectId = '' } = useParams()
   const { token } = useAuth()
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [lease, setLease] = useState<Lease | null>(null)
+  const [assignment, setAssignment] = useState<AssignmentDetail | null>(null)
   const [document, setDocument] = useState<AnnotationDocument | null>(null)
   const documentRef = useRef<AnnotationDocument | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
-  const [leaseLost, setLeaseLost] = useState(false)
+  const [conflict, setConflict] = useState<RecoverySnapshot | null>(null)
+  const [purposeFilter, setPurposeFilter] = useState<BatchPurpose | 'all'>('all')
+  const [stateFilter, setStateFilter] = useState<QueueState | 'all'>('all')
   const [tool, setTool] = useState<AnnotationTool>('select')
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null)
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
@@ -64,60 +86,35 @@ export function AnnotationWorkspacePage() {
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const classPanelRef = useRef<HTMLElement>(null)
-  const closeAttemptRef = useRef<string | null>(null)
 
   const bootstrap = useQuery({
     queryKey: ['annotation-workspace', projectId],
     queryFn: () => getWorkspaceBootstrap(projectId, token!),
     enabled: Boolean(projectId && token),
   })
-  const iterationId = bootstrap.data?.iteration?.id
   const queue = useQuery({
-    queryKey: ['annotation-queue', projectId, iterationId],
-    queryFn: () => getQueue(projectId, iterationId!, token!),
-    enabled: Boolean(iterationId && token),
-    refetchInterval: lease ? 15_000 : 5_000,
+    queryKey: ['annotation-queue', projectId],
+    queryFn: () => listAssignments(projectId, token!),
+    enabled: Boolean(projectId && token),
+    refetchInterval: 30_000,
   })
 
   const handleProjectEvent = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['annotation-queue', projectId] })
     void queryClient.invalidateQueries({ queryKey: ['annotation-workspace', projectId] })
-    void queryClient.invalidateQueries({ queryKey: ['project-activity', projectId] })
   }, [projectId, queryClient])
   const realtimeStatus = useProjectEvents(projectId, token, handleProjectEvent)
 
-  const closeCurrentIteration = useMutation({
-    mutationFn: () => closeIteration(projectId, iterationId!, token!),
-    onSuccess: () => navigate(`/projects/${projectId}/activity`, { replace: true }),
-    onError: (error) => {
-      if (error instanceof ApiError && error.code === 'iteration_incomplete') {
-        void queue.refetch()
-        window.setTimeout(() => {
-          closeAttemptRef.current = null
-          void queue.refetch()
-        }, 5_000)
-      } else {
-        setNotice(error instanceof Error ? error.message : 'The iteration could not be closed.')
-      }
-    },
-  })
-
-  useEffect(() => {
-    const current = queue.data
-    if (!iterationId || !current || closeCurrentIteration.isPending) return
-    const total = current.total_count ?? current.available_count + current.leased_count + current.completed_count
-    const resolved = current.resolved_count ?? current.completed_count
-    const signature = `${iterationId}:${current.available_count}:${current.leased_count}:${resolved}`
-    if (total > 0 && resolved === total && closeAttemptRef.current !== signature) {
-      closeAttemptRef.current = signature
-      closeCurrentIteration.mutate()
-    }
-  }, [closeCurrentIteration, iterationId, queue.data, queue.dataUpdatedAt])
+  const editable = Boolean(assignment && isEditable(assignment.status) && !conflict)
 
   const setCurrentDocument = useCallback((value: AnnotationDocument | null) => {
     documentRef.current = value
     setDocument(value)
   }, [])
+
+  const remember = useCallback((value: AnnotationDocument) => {
+    if (assignment) saveRecovery(projectId, assignment.id, value.version, value)
+  }, [assignment, projectId])
 
   const changeDocument = useCallback((value: AnnotationDocument) => {
     const current = documentRef.current
@@ -125,29 +122,33 @@ export function AnnotationWorkspacePage() {
     if (undoStack.current.length > 100) undoStack.current.shift()
     redoStack.current = []
     setCurrentDocument(value)
-    if (lease) saveRecovery(projectId, currentAssignmentId(lease), value)
+    remember(value)
     setSaveState('dirty')
-  }, [lease, projectId, setCurrentDocument])
+  }, [remember, setCurrentDocument])
 
   const undo = useCallback(() => {
     const previous = undoStack.current.pop()
     const current = documentRef.current
     if (!previous || !current) return
     redoStack.current.push(current)
-    setCurrentDocument({ ...previous, version: current.version })
+    const value = { ...previous, version: current.version }
+    setCurrentDocument(value)
+    remember(value)
     setSelectedObjectId(null)
     setSaveState('dirty')
-  }, [setCurrentDocument])
+  }, [remember, setCurrentDocument])
 
   const redo = useCallback(() => {
     const next = redoStack.current.pop()
     const current = documentRef.current
     if (!next || !current) return
     undoStack.current.push(current)
-    setCurrentDocument({ ...next, version: current.version })
+    const value = { ...next, version: current.version }
+    setCurrentDocument(value)
+    remember(value)
     setSelectedObjectId(null)
     setSaveState('dirty')
-  }, [setCurrentDocument])
+  }, [remember, setCurrentDocument])
 
   const removeSelected = useCallback(() => {
     const current = documentRef.current
@@ -156,82 +157,80 @@ export function AnnotationWorkspacePage() {
     setSelectedObjectId(null)
   }, [changeDocument, selectedObjectId])
 
+  const show = useCallback((detail: AssignmentDetail, message?: string) => {
+    const opened = openWork(detail, loadRecovery(projectId, detail.id, detail.media.id))
+    setAssignment(detail)
+    setCurrentDocument(opened.document)
+    setConflict(opened.conflict)
+    undoStack.current = []
+    redoStack.current = []
+    setSelectedObjectId(null)
+    setSelectedClassId(opened.document.objects[0]?.class_id ?? bootstrap.data?.classes[0]?.id ?? null)
+    setTool(defaultTool(opened.document.task_type))
+    setSaveState(opened.dirty ? 'dirty' : 'idle')
+    setNotice(message ?? opened.notice)
+  }, [bootstrap.data?.classes, projectId, setCurrentDocument])
+
+  const opening = useMutation({
+    mutationFn: (assignmentId: string) => getAssignment(projectId, assignmentId, token!),
+    onSuccess: (detail) => show(detail),
+    onError: (error) => setNotice(error instanceof Error ? error.message : 'The image could not be opened.'),
+  })
+
+  const refresh = useCallback(async (message: string) => {
+    if (!assignment) return
+    const detail = await getAssignment(projectId, assignment.id, token!)
+    if (detail.status === 'submitted') clearRecovery(projectId, detail.id)
+    show(detail, message)
+    void queue.refetch()
+  }, [assignment, projectId, queue, show, token])
+
+  const handleWriteError = useCallback(async (error: unknown) => {
+    const code = error instanceof ApiError ? error.code : undefined
+    if (code === 'version_conflict' || code === 'idempotency_conflict') {
+      await refresh('This image changed on the server. Your work was kept in this browser; choose which version to keep.')
+    } else if (code === 'assignment_already_submitted') {
+      await refresh('This image was already submitted. The server copy is shown.')
+    } else if (code === 'assignment_not_active' || code === 'assignment_not_owned') {
+      await refresh('A manager changed this assignment. Your unsaved work stays in this browser.')
+    } else {
+      setNotice(error instanceof Error ? error.message : 'The annotation could not be saved.')
+    }
+  }, [refresh])
+
   const saveNow = useCallback(async () => {
     const current = documentRef.current
-    if (!lease || !current || leaseLost || saveState === 'saving') return current
+    if (!assignment || !current || !editable || saveState === 'saving') return
     setSaveState('saving')
     try {
-      const saved = await saveAnnotationDraft(lease.lease_id, current, token!)
-      const latest = documentRef.current
+      const saved = await saveDraft(projectId, assignment.id, current.version, current.objects, token!)
+      const latest = documentRef.current ?? current
+      setCurrentDocument({ ...latest, version: saved.version })
+      setAssignment((value) => value && { ...value, status: saved.status, version: saved.version, draft_saved_at: saved.draft_saved_at })
       if (latest === current) {
-        setCurrentDocument(saved)
+        clearRecovery(projectId, assignment.id)
         setSaveState('saved')
-        clearRecovery(projectId, currentAssignmentId(lease))
-      } else if (latest) {
-        setCurrentDocument({ ...latest, version: saved.version })
+      } else {
+        saveRecovery(projectId, assignment.id, saved.version, { ...latest, version: saved.version })
         setSaveState('dirty')
       }
-      return saved
     } catch (error) {
       setSaveState('error')
-      if (isLeaseConflict(error)) setLeaseLost(true)
-      else if (error instanceof ApiError && error.status === 409) {
-        setNotice('This annotation changed on the server. Your local recovery snapshot was retained; reopen the image to reconcile it.')
-      }
+      await handleWriteError(error)
       throw error
     }
-  }, [lease, leaseLost, projectId, saveState, setCurrentDocument, token])
+  }, [assignment, editable, handleWriteError, projectId, saveState, setCurrentDocument, token])
 
   useEffect(() => {
-    if (saveState !== 'dirty' || !lease || leaseLost) return
-    const current = documentRef.current
-    if (current) saveRecovery(projectId, currentAssignmentId(lease), current)
-    const timer = window.setTimeout(() => void saveNow().catch(() => undefined), 1_500)
+    if (saveState !== 'dirty' || !editable) return
+    const timer = window.setTimeout(() => void saveNow().catch(() => undefined), AUTOSAVE_MS)
     return () => window.clearTimeout(timer)
-  }, [lease, leaseLost, projectId, saveNow, saveState])
-
-  useEffect(() => {
-    if (!lease || leaseLost) return
-    const delay = Math.max(5, lease.renew_after) * 1_000
-    const timer = window.setInterval(async () => {
-      try {
-        const renewed = await renewLease(lease.lease_id, token!)
-        setLease((current) => current ? { ...current, ...renewed } : null)
-      } catch (error) {
-        if (isLeaseConflict(error)) setLeaseLost(true)
-        else setNotice('The lease could not be renewed. Retrying shortly…')
-      }
-    }, delay)
-    return () => window.clearInterval(timer)
-  }, [lease, leaseLost, token])
-
-  const acquire = useMutation({
-    mutationFn: (assignmentId: string | null) => acquireLease(projectId, iterationId!, assignmentId, token!),
-    onSuccess: (nextLease) => {
-      const recovered = loadRecovery(projectId, currentAssignmentId(nextLease), nextLease.media.id)
-      const usingRecovery = Boolean(recovered && recovered.version >= nextLease.annotation.version)
-      const recoveredDocument = usingRecovery && recovered
-        ? { ...recovered, version: nextLease.annotation.version }
-        : nextLease.annotation
-      setLease(nextLease)
-      setCurrentDocument(recoveredDocument)
-      undoStack.current = []
-      redoStack.current = []
-      setSelectedObjectId(null)
-      setSelectedClassId(recoveredDocument.objects[0]?.class_id ?? bootstrap.data?.classes[0]?.id ?? null)
-      setTool(defaultTool(recoveredDocument.task_type))
-      setSaveState(usingRecovery ? 'dirty' : 'idle')
-      setLeaseLost(false)
-      setNotice(usingRecovery ? 'Recovered unsaved annotations from this browser tab.' : null)
-      void queryClient.invalidateQueries({ queryKey: ['annotation-queue', projectId] })
-    },
-    onError: (error) => setNotice(error instanceof Error ? error.message : 'The image is no longer available.'),
-  })
+  }, [editable, saveNow, saveState])
 
   const sam = useMutation({
     mutationFn: (point: { x: number; y: number }) => predictSegmentation(
       projectId,
-      lease!,
+      assignment!,
       [{ type: 'point', coordinates: [point.x, point.y], label: 'foreground' }],
       token!,
     ),
@@ -258,7 +257,7 @@ export function AnnotationWorkspacePage() {
   const selectClass = useCallback((classId: string) => {
     setSelectedClassId(classId)
     const current = documentRef.current
-    if (!current) return
+    if (!current || !editable) return
     if (current.task_type !== 'classification') {
       if (!selectedObjectId) return
       changeDocument({
@@ -274,63 +273,68 @@ export function AnnotationWorkspacePage() {
       ? current.objects.filter((item) => item.id !== existing.id)
       : [...current.objects, { id: crypto.randomUUID(), class_id: classId, geometry: null, attributes: {} }]
     changeDocument({ ...current, objects })
-  }, [changeDocument, selectedObjectId])
+  }, [changeDocument, editable, selectedObjectId])
 
-  async function openItem(item: QueueItem) {
-    const itemAssignmentId = item.assignment_id ?? item.media_id
-    if (lease && currentAssignmentId(lease) === itemAssignmentId) return
+  async function openItem(item: AssignmentQueueItem) {
+    if (assignment?.id === item.id) return
     try {
       if (saveState === 'dirty') await saveNow()
-      if (lease && !leaseLost) await releaseLease(lease.lease_id, token!)
-      setLease(null)
-      setCurrentDocument(null)
-      setSelectedObjectId(null)
-      acquire.mutate(itemAssignmentId)
+      opening.mutate(item.id)
     } catch {
       setNotice('Save the current annotation before changing images.')
     }
   }
 
-  async function complete() {
-    if (!lease || !document) return
-    const validation = validateDocument(document)
-    if (validation) {
-      setNotice(validation)
-      return
-    }
+  function keepMine() {
+    if (!conflict || !assignment) return
+    const value = { ...conflict.document, version: assignment.version }
+    setConflict(null)
+    setCurrentDocument(value)
+    remember(value)
+    setSaveState('dirty')
+    setNotice('Your version is kept on top of the server copy. Save to store it.')
+  }
+
+  function takeServerVersion() {
+    if (!assignment) return
+    clearRecovery(projectId, assignment.id)
+    setConflict(null)
+    setNotice(null)
+  }
+
+  async function submit() {
+    if (!assignment || !document || !editable) return
+    const problem = validateDocument(document)
+    if (problem) return setNotice(problem)
+    if (!document.objects.length && !window.confirm('Submit this image as empty? This records that it contains no objects.')) return
     try {
       setSaveState('saving')
-      await completeAnnotation(lease.lease_id, document, token!)
-      clearRecovery(projectId, currentAssignmentId(lease))
-      setLease(null)
-      setCurrentDocument(null)
-      setSelectedObjectId(null)
-      setSaveState('idle')
-      await queue.refetch()
-      setNotice('Submission received. Resolution progress is updated by the API.')
+      await submitAssignment(projectId, assignment.id, document.version, document.objects, token!)
+      clearRecovery(projectId, assignment.id)
+      show(await getAssignment(projectId, assignment.id, token!), 'Submission received.')
+      void queue.refetch()
     } catch (error) {
       setSaveState('error')
-      if (isLeaseConflict(error)) setLeaseLost(true)
-      setNotice(error instanceof Error ? error.message : 'Annotation could not be completed.')
+      await handleWriteError(error)
     }
   }
 
+  const visible = useMemo(
+    () => filterAssignments(queue.data?.items ?? [], purposeFilter, stateFilter),
+    [purposeFilter, queue.data?.items, stateFilter],
+  )
   const navigateQueue = useCallback((direction: -1 | 1) => {
-    if (!queue.data?.items.length) return
-    const navigable = queue.data.items.filter((item) => item.status !== 'submitted' && item.status !== 'completed')
-    const currentIndex = navigable.findIndex((item) => (item.assignment_id ?? item.media_id) === (lease ? currentAssignmentId(lease) : ''))
-    const nextIndex = Math.min(navigable.length - 1, Math.max(0, currentIndex + direction))
-    const item = navigable[nextIndex]
+    const item = neighbor(visible, assignment?.id ?? null, direction)
     if (item) void openItem(item)
-    // openItem deliberately owns save/release sequencing.
+    // openItem deliberately owns the save-before-switch sequencing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lease, queue.data?.items])
+  }, [assignment?.id, visible])
 
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       if (isEditingText(event.target)) return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
-        event.preventDefault(); void saveNow(); return
+        event.preventDefault(); void saveNow().catch(() => undefined); return
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault(); if (event.shiftKey) redo(); else undo(); return
@@ -340,7 +344,7 @@ export function AnnotationWorkspacePage() {
       }
       if (event.key === 'ArrowLeft') navigateQueue(-1)
       if (event.key === 'ArrowRight') navigateQueue(1)
-      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedObjectId) {
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedObjectId && editable) {
         event.preventDefault(); removeSelected()
       }
       if (event.key.toLowerCase() === 'v') setTool('select')
@@ -348,7 +352,7 @@ export function AnnotationWorkspacePage() {
       if (event.key.toLowerCase() === 'b' && bootstrap.data?.project.task_type === 'detection') setTool('box')
       if (event.key.toLowerCase() === 'p' && bootstrap.data?.project.task_type === 'segmentation') setTool('polygon')
       if (event.key.toLowerCase() === 'm' && bootstrap.data?.project.task_type === 'segmentation') setTool('sam-point')
-      if (event.key.toLowerCase() === 'n' && lease && !leaseLost && bootstrap.data?.project.task_type !== 'classification') {
+      if (event.key.toLowerCase() === 'n' && editable && bootstrap.data?.project.task_type !== 'classification') {
         setTool(bootstrap.data?.project.task_type === 'detection' ? 'box' : 'polygon')
       }
       if (event.key.toLowerCase() === 'c') {
@@ -362,38 +366,53 @@ export function AnnotationWorkspacePage() {
     }
     window.addEventListener('keydown', keyboard)
     return () => window.removeEventListener('keydown', keyboard)
-  }, [bootstrap.data, lease, leaseLost, navigateQueue, redo, removeSelected, saveNow, selectClass, selectedObjectId, undo])
+  }, [bootstrap.data, editable, navigateQueue, redo, removeSelected, saveNow, selectClass, selectedObjectId, undo])
 
   if (bootstrap.isLoading) return <div className="centered-status">Loading annotation workspace…</div>
   if (bootstrap.isError) return <WorkspaceError error={bootstrap.error} />
-  if (!bootstrap.data?.iteration) return <NoIteration projectName={bootstrap.data?.project.name ?? 'Project'} />
+  if (!bootstrap.data) return null
 
-  const available = queue.data?.items.filter((item) => item.status === 'available') ?? []
-  const visibleQueueItems = queue.data?.items ?? []
-  const resolvedCount = queue.data?.resolved_count ?? queue.data?.completed_count ?? 0
+  const counts = queue.data?.counts ?? { pending: 0, in_progress: 0, submitted: 0 }
+  const total = counts.pending + counts.in_progress + counts.submitted
+  const purposes = [...new Set((queue.data?.items ?? []).map((item) => item.batch_purpose))]
 
   return (
     <main className={`annotation-workspace ${showClasses ? '' : 'annotation-workspace--classes-hidden'}`}>
       <header className="annotation-header">
         <Link to="/projects" aria-label="Back to projects"><ArrowLeft size={19} /></Link>
-        <div><strong>{bootstrap.data.project.name}</strong><span>Iteration {bootstrap.data.iteration.number}</span></div>
-        <div className="iteration-progress"><span>{resolvedCount} of {bootstrap.data.iteration.total_count} images resolved</span><progress max={bootstrap.data.iteration.total_count || 1} value={resolvedCount} /></div>
+        <div><strong>{bootstrap.data.project.name}</strong><span>My assignments</span></div>
+        <div className="iteration-progress"><span>{counts.submitted} of {total} submitted</span><progress max={total || 1} value={counts.submitted} /></div>
         <SaveIndicator state={saveState} />
-        <span className={`realtime-indicator realtime-indicator--${realtimeStatus}`} title={realtimeStatus === 'live' ? 'Live collaboration connected' : 'Polling for collaboration updates'}><Radio size={13} />{realtimeStatus === 'live' ? 'Live' : 'Polling'}</span>
+        <span className={`realtime-indicator realtime-indicator--${realtimeStatus}`} title={realtimeStatus === 'live' ? 'Live updates connected' : 'Polling for updates'}><Radio size={13} />{realtimeStatus === 'live' ? 'Live' : 'Polling'}</span>
         <Button variant="ghost" onClick={() => setShowShortcuts((value) => !value)} aria-label="Keyboard shortcuts"><CircleHelp size={19} /></Button>
-        <Button onClick={complete} disabled={!lease || leaseLost || saveState === 'saving'}><Check size={17} /> Complete</Button>
+        <div className="annotation-actions">
+          <Button variant="secondary" onClick={() => void saveNow().catch(() => undefined)} disabled={!editable || saveState === 'saving'}><Save size={16} /> Save</Button>
+          <Button onClick={submit} disabled={!editable || saveState === 'saving'}><Check size={17} /> Submit</Button>
+        </div>
       </header>
 
-      <aside className="annotation-queue" aria-label="Annotation queue">
-        <div className="queue-heading"><strong>My assignments</strong><span>{available.length} available · {queue.data?.leased_count ?? 0} in progress</span></div>
+      <aside className="annotation-queue" aria-label="My assignments">
+        <div className="queue-heading"><strong>My assignments</strong><span>{counts.pending} available · {counts.in_progress} in progress · {counts.submitted} submitted</span></div>
+        <div className="queue-filters">
+          <label>Batch<select value={purposeFilter} onChange={(event) => setPurposeFilter(event.target.value as BatchPurpose | 'all')}>
+            <option value="all">All batches</option>
+            {purposes.map((purpose) => <option key={purpose} value={purpose}>{PURPOSE_LABELS[purpose]}</option>)}
+          </select></label>
+          <label>State<select value={stateFilter} onChange={(event) => setStateFilter(event.target.value as QueueState | 'all')}>
+            <option value="all">All states</option>
+            <option value="pending">Available</option>
+            <option value="in_progress">In progress</option>
+            <option value="submitted">Submitted</option>
+          </select></label>
+        </div>
         <div className="queue-list">
-          {queue.isLoading && <p className="queue-message">Loading queue…</p>}
-          {visibleQueueItems.map((item, index) => (
-            <button key={item.assignment_id ?? item.media_id} className={`queue-item queue-item--${item.status} ${lease && currentAssignmentId(lease) === (item.assignment_id ?? item.media_id) ? 'selected' : ''}`} onClick={() => void openItem(item)} disabled={item.status === 'submitted' || item.status === 'completed'}>
-              <span className="queue-thumb">{item.thumbnail_url ? <img src={item.thumbnail_url} alt="" /> : index + 1}</span>
-              <span><strong>{item.relative_path.split('/').at(-1)}</strong><small>{item.status === 'leased' ? 'In progress' : item.status}</small></span>
-              {item.status === 'leased' && <Lock size={13} />}
-              {(item.status === 'completed' || item.status === 'submitted') && <Check size={14} />}
+          {queue.isLoading && <p className="queue-message">Loading assignments…</p>}
+          {queue.data && !visible.length && <p className="queue-message">No assignments match these filters.</p>}
+          {visible.map((item, index) => (
+            <button key={item.id} className={`queue-item queue-item--${item.status} ${assignment?.id === item.id ? 'selected' : ''}`} onClick={() => void openItem(item)} aria-current={assignment?.id === item.id}>
+              <span className="queue-thumb">{index + 1}</span>
+              <span><strong>{item.relative_path.split('/').at(-1)}</strong><small>{PURPOSE_LABELS[item.batch_purpose]} · {STATUS_LABELS[item.status]}</small></span>
+              {item.status === 'submitted' && <Check size={14} />}
             </button>
           ))}
         </div>
@@ -404,26 +423,26 @@ export function AnnotationWorkspacePage() {
           <button className={tool === 'select' ? 'active' : ''} onClick={() => setTool('select')} title="Select (V)"><MousePointer2 size={19} /><span>Select</span></button>
           <button className={tool === 'pan' ? 'active' : ''} onClick={() => setTool('pan')} title="Pan (H or Space)"><Hand size={19} /><span>Pan</span></button>
           <span className="tool-divider" />
-          {bootstrap.data.project.task_type === 'detection' && <button className={tool === 'box' ? 'active' : ''} onClick={() => setTool('box')} disabled={!lease || leaseLost} title="Bounding box (B)"><Square size={19} /><span>Box</span></button>}
+          {bootstrap.data.project.task_type === 'detection' && <button className={tool === 'box' ? 'active' : ''} onClick={() => setTool('box')} disabled={!editable} title="Bounding box (B)"><Square size={19} /><span>Box</span></button>}
           {bootstrap.data.project.task_type === 'segmentation' && <>
-            <button className={tool === 'polygon' ? 'active' : ''} onClick={() => setTool('polygon')} disabled={!lease || leaseLost} title="Polygon (P)"><Pentagon size={19} /><span>Polygon</span></button>
-            <button className={tool === 'sam-point' ? 'active' : ''} onClick={() => setTool('sam-point')} disabled={!lease || leaseLost || sam.isPending} title="Assisted mask point (M)"><Sparkles size={19} /><span>Assist</span></button>
+            <button className={tool === 'polygon' ? 'active' : ''} onClick={() => setTool('polygon')} disabled={!editable} title="Polygon (P)"><Pentagon size={19} /><span>Polygon</span></button>
+            <button className={tool === 'sam-point' ? 'active' : ''} onClick={() => setTool('sam-point')} disabled={!editable || sam.isPending} title="Assisted mask point (M)"><Sparkles size={19} /><span>Assist</span></button>
           </>}
           <span className="tool-divider" />
-          <button onClick={undo} disabled={!undoStack.current.length || !lease || leaseLost} title="Undo (Ctrl Z)"><Undo2 size={18} /><span>Undo</span></button>
-          <button onClick={redo} disabled={!redoStack.current.length || !lease || leaseLost} title="Redo (Ctrl Y)"><Redo2 size={18} /><span>Redo</span></button>
-          <button onClick={removeSelected} disabled={!selectedObjectId || leaseLost} title="Delete selected"><Trash2 size={18} /><span>Delete</span></button>
+          <button onClick={undo} disabled={!undoStack.current.length || !editable} title="Undo (Ctrl Z)"><Undo2 size={18} /><span>Undo</span></button>
+          <button onClick={redo} disabled={!redoStack.current.length || !editable} title="Redo (Ctrl Y)"><Redo2 size={18} /><span>Redo</span></button>
+          <button onClick={removeSelected} disabled={!selectedObjectId || !editable} title="Delete selected"><Trash2 size={18} /><span>Delete</span></button>
           {!showClasses && <button onClick={() => setShowClasses(true)} title="Show classes (C)"><PanelRightOpen size={19} /><span>Classes</span></button>}
         </div>
-        {lease ? (
+        {assignment && document ? (
           <ImageStage
-            media={lease.media}
-            document={document!}
+            media={assignment.media}
+            document={document}
             classes={bootstrap.data.classes}
             tool={tool}
             selectedClassId={selectedClassId}
             selectedObjectId={selectedObjectId}
-            locked={leaseLost}
+            locked={!editable}
             samPending={sam.isPending}
             onChange={changeDocument}
             onSelectObject={setSelectedObjectId}
@@ -434,14 +453,21 @@ export function AnnotationWorkspacePage() {
           <div className="canvas-empty">
             <MousePointer2 size={38} />
             <h1>Select an image to begin</h1>
-            <p>{available.length ? 'Available images are listed on the left.' : 'There are no available images in this iteration.'}</p>
-            {available.length > 0 && <Button onClick={() => acquire.mutate(null)} disabled={acquire.isPending}>{acquire.isPending ? 'Claiming…' : 'Claim next image'}</Button>}
+            <p>{queue.data?.items.length ? 'Your assigned images are listed on the left.' : 'You have no assigned images in this project yet.'}</p>
           </div>
         )}
-        {notice && <div className="workspace-notice" role="status"><AlertTriangle size={17} /><span>{notice}</span><button onClick={() => setNotice(null)}>Dismiss</button></div>}
+        {conflict && (
+          <div className="workspace-notice workspace-notice--conflict" role="alert">
+            <AlertTriangle size={17} />
+            <span>This image changed on the server after your unsaved work from {new Date(conflict.savedAt).toLocaleTimeString()}.</span>
+            <button onClick={keepMine}>Keep my version</button>
+            <button onClick={takeServerVersion}>Use server version</button>
+          </div>
+        )}
+        {notice && !conflict && <div className="workspace-notice" role="status"><AlertTriangle size={17} /><span>{notice}</span><button onClick={() => setNotice(null)}>Dismiss</button></div>}
         <div className="image-navigation">
           <Button variant="ghost" onClick={() => navigateQueue(-1)} aria-label="Previous image"><ChevronLeft size={18} /></Button>
-          <span>{lease?.media.relative_path ?? 'No image selected'}</span>
+          <span>{assignment ? `${assignment.media.relative_path} · ${STATUS_LABELS[assignment.status]}` : 'No image selected'}</span>
           <Button variant="ghost" onClick={() => navigateQueue(1)} aria-label="Next image"><ChevronRight size={18} /></Button>
         </div>
       </section>
@@ -473,34 +499,17 @@ export function AnnotationWorkspacePage() {
   )
 }
 
-function currentAssignmentId(lease: Lease) {
-  return lease.assignment_id ?? lease.media.id
-}
-
 function SaveIndicator({ state }: { state: SaveState }) {
   const labels: Record<SaveState, string> = { idle: 'No changes', dirty: 'Unsaved', saving: 'Saving…', saved: 'Saved', error: 'Save failed' }
   return <span className={`save-indicator save-indicator--${state}`}><Save size={14} />{labels[state]}</span>
 }
 
 function WorkspaceError({ error }: { error: Error }) {
-  return <div className="centered-status"><div><AlertTriangle size={32} /><h1>Workspace unavailable</h1><p>{error instanceof ApiError && error.status === 404 ? 'The annotation API endpoints are not available yet.' : error.message}</p><Link to="/projects">Return to projects</Link></div></div>
-}
-
-function NoIteration({ projectName }: { projectName: string }) {
-  return <div className="centered-status"><div><h1>{projectName}</h1><p>No annotation iteration is currently available.</p><Link to="/projects">Return to projects</Link></div></div>
+  return <div className="centered-status"><div><AlertTriangle size={32} /><h1>Workspace unavailable</h1><p>{error.message}</p><Link to="/projects">Return to projects</Link></div></div>
 }
 
 function ShortcutPanel({ onClose }: { onClose: () => void }) {
   return <div className="shortcut-popover" role="dialog" aria-modal="false" aria-label="Keyboard shortcuts"><div><strong>Keyboard shortcuts</strong><button onClick={onClose}>×</button></div><dl><dt>N / Enter</dt><dd>Start or finish object</dd><dt>B / P / M</dt><dd>Box / polygon / assisted mask</dd><dt>V / H</dt><dd>Select / pan</dd><dt>1–9</dt><dd>Choose class</dd><dt>C</dt><dd>Focus classes</dd><dt>Delete</dt><dd>Remove selected object</dd><dt>Ctrl Z / Y</dt><dd>Undo / redo</dd><dt>← / →</dt><dd>Previous / next image</dd><dt>Space</dt><dd>Pan image</dd><dt>+ / −</dt><dd>Zoom</dd><dt>0</dt><dd>Fit image</dd><dt>Ctrl S</dt><dd>Save draft</dd></dl></div>
-}
-
-function validateDocument(document: AnnotationDocument) {
-  if (!document.objects.length) return 'Add at least one annotation before completing this image.'
-  if (document.objects.some((item) => !item.class_id)) return 'Every annotation needs a class.'
-  if (document.task_type === 'detection' && document.objects.some((item) => item.geometry?.type !== 'rectangle')) return 'Detection annotations must use bounding boxes.'
-  if (document.task_type === 'segmentation' && document.objects.some((item) => item.geometry?.type !== 'polygon')) return 'Segmentation annotations must use polygons or masks.'
-  if (document.task_type === 'classification' && document.objects.some((item) => item.geometry !== null)) return 'Classification labels cannot contain geometry.'
-  return ''
 }
 
 function defaultTool(taskType: AnnotationDocument['task_type']): AnnotationTool {
@@ -509,12 +518,6 @@ function defaultTool(taskType: AnnotationDocument['task_type']): AnnotationTool 
   return 'select'
 }
 
-function isLeaseConflict(error: unknown) {
-  return error instanceof ApiError && [
-    'lease_expired', 'lease_conflict', 'lease_not_owned', 'lease_revoked',
-  ].includes(error.code ?? '')
-}
-
 function isEditingText(target: EventTarget | null) {
-  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)
 }

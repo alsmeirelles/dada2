@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field
 
 from dada_api.schemas.annotation_policy import AnnotationModeName
 
-BatchPurposeName = Literal["initial_training", "validation", "test", "acquisition"]
+BatchPurposeName = Literal[
+    "initial_annotation", "initial_training", "validation", "test", "acquisition"
+]
 BatchStatusName = Literal[
     "preparing",
     "annotating",
@@ -40,7 +42,9 @@ class BatchResponse(BaseModel):
 
     Image counts and assignment counts are reported separately because one
     image carries one assignment per configured annotator, so the two never
-    coincide in consensus mode.
+    coincide in consensus mode. Submitted assignments never imply resolved
+    images: an image is resolved only by its canonical resolution. Cancelled
+    images and reassigned or cancelled assignments are outside the totals.
     """
 
     id: UUID
@@ -59,7 +63,12 @@ class BatchResponse(BaseModel):
     selection_input_fingerprint: str
     requested_size: int
     total_items: int
+    resolved_items: int
+    awaiting_resolution_items: int
+    cancelled_items: int
     total_assignments: int
+    available_assignments: int
+    in_progress_assignments: int
     submitted_assignments: int
     started_at: datetime | None
     created_at: datetime

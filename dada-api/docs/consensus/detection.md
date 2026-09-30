@@ -3,7 +3,7 @@
 > **Phase 6 gate:** This document is a normative task annex to the
 > [Consensus Engine Requirements](../consensus-engine-requirements.md). Do not
 > implement it until that specification is **Approved** and decisions
-> `P6-01`–`P6-07` are documented in `docs/phases/phase_6.md`.
+> `P6-01`–`P6-08` are documented in `docs/phases/phase_6.md`.
 
 ## Scope
 
@@ -13,7 +13,9 @@ then can it refine box coordinates. Directly averaging every box of one class
 is unsafe because it turns class disagreement, duplicate boxes, and nearby
 objects into corrupted geometry.
 
-The API worker resolves a batch item from immutable raw submissions. It stores
+The API worker resolves an image-level batch item from immutable raw
+submissions. It may derive object-level resolution work items only for manual
+review or adjudication. It stores
 both stages' diagnostics and creates an accepted canonical document only after
 all configured quality gates pass.
 

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dada_api.core.errors import ApiError
 from dada_api.core.security import decode_access_token
 from dada_api.db.session import get_session
+from dada_api.models.label_import import AnnotationImport
 from dada_api.models.project import Project
 from dada_api.models.upload import UploadSession
 from dada_api.models.user import User
@@ -127,5 +128,35 @@ def require_upload_action(
             raise ApiError(404, "not_found", "The upload session does not exist.")
         await authorize_project_action(session, user, upload.project_id, action)
         return upload
+
+    return dependency
+
+
+def require_import_action(
+    action: ProjectAction,
+) -> Callable[..., Coroutine[Any, Any, AnnotationImport]]:
+    """Build a dependency authorizing an action through an import's project.
+
+    Import routes are addressed by import rather than by project, so the
+    project is resolved from the import before the central matrix decides.
+
+    Args:
+        action: Operation the route performs.
+
+    Returns:
+        A dependency returning the authorized label import.
+    """
+
+    async def dependency(
+        import_id: str,
+        user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session),
+    ) -> AnnotationImport:
+        """Return the import when the caller may perform the action."""
+        label_import = await session.get(AnnotationImport, import_id)
+        if label_import is None:
+            raise ApiError(404, "not_found", "The label import does not exist.")
+        await authorize_project_action(session, user, label_import.project_id, action)
+        return label_import
 
     return dependency

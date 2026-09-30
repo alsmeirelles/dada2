@@ -5,6 +5,7 @@ import {
   buildProjectCreateBody,
   resolveAnnotatorIds,
   resolveDraftSplitSize,
+  resolvedFirstTrainingSize,
   type ProjectMember,
 } from './project-api'
 import type { ProjectDraft } from './types'
@@ -20,6 +21,8 @@ const baseDraft: ProjectDraft = {
   description: '',
   taskType: 'detection',
   classes: [],
+  acquisitionStrategy: 'random',
+  datasetLayout: 'split',
   initialTrainingSize: 10,
   testSetSize: 5,
   testSetUnit: 'count',
@@ -62,6 +65,40 @@ describe('split sizing', () => {
   it('rounds percentage sizes up like the API', () => {
     expect(resolveDraftSplitSize(12, 20, 'percentage')).toBe(3)
     expect(resolveDraftSplitSize(12, 4, 'count')).toBe(4)
+  })
+})
+
+describe('dataset layout', () => {
+  it('sends a null first batch so the API uses the iteration size', () => {
+    const draft: ProjectDraft = { ...baseDraft, initialTrainingSize: null }
+
+    expect(buildProjectCreateBody(draft)).toMatchObject({
+      dataset_layout: 'split',
+      initial_training_size: null,
+      iteration_batch_size: 5,
+    })
+    expect(resolvedFirstTrainingSize(draft)).toBe(5)
+    expect(resolvedFirstTrainingSize(baseDraft)).toBe(10)
+  })
+
+  it('sends no size fields for a static single batch', () => {
+    expect(buildProjectCreateBody({ ...baseDraft, datasetLayout: 'single_batch' })).toEqual({
+      name: 'Road defects',
+      description: null,
+      task_type: 'detection',
+      acquisition_strategy: 'random',
+      dataset_layout: 'single_batch',
+    })
+  })
+})
+
+describe('acquisition strategy', () => {
+  it('persists the chosen strategy with the project', () => {
+    expect(buildProjectCreateBody(baseDraft)).toMatchObject({ acquisition_strategy: 'random' })
+    expect(buildProjectCreateBody({ ...baseDraft, acquisitionStrategy: 'active_learning' })).toMatchObject({
+      acquisition_strategy: 'active_learning',
+      dataset_layout: 'split',
+    })
   })
 })
 
