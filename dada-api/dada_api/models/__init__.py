@@ -1,5 +1,6 @@
 """Persistence models."""
 
+from dada_api.models.annotation import AnnotationSubmission, ResolvedAnnotation
 from dada_api.models.annotation_policy import (
     AnnotationMode,
     AnnotationPolicyAnnotator,
@@ -10,9 +11,11 @@ from dada_api.models.batch import (
     AnnotationAssignment,
     AnnotationBatch,
     AnnotationBatchAnnotator,
+    AssignmentStatus,
     BatchItem,
     BatchPurpose,
     BatchStatus,
+    ItemStatus,
 )
 from dada_api.models.bootstrap import BootstrapRecord
 from dada_api.models.dataset import DatasetSplit, SplitName
@@ -53,6 +56,8 @@ __all__ = [
     "AnnotationMode",
     "AnnotationPolicyAnnotator",
     "AnnotationPolicyDefault",
+    "AnnotationSubmission",
+    "AssignmentStatus",
     "AuditEntry",
     "BatchItem",
     "BatchPurpose",
@@ -65,12 +70,14 @@ __all__ = [
     "ImportFormat",
     "ImportStatus",
     "ImportedSeedDocument",
+    "ItemStatus",
     "Media",
     "Project",
     "ProjectClass",
     "ProjectMember",
     "ProjectRole",
     "RefreshSession",
+    "ResolvedAnnotation",
     "SplitName",
     "UploadChunk",
     "UploadDisposition",

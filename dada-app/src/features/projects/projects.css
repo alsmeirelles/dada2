@@ -90,7 +90,15 @@ progress { width: 100%; height: 8px; border: 0; border-radius: 10px; overflow: h
 .project-card dl div { display: grid; gap: .2rem; }
 .project-card dt { color: var(--muted); font-size: .7rem; }
 .project-card dd { margin: 0; font-weight: 700; }
-.project-card__action { margin-top: .75rem; display: inline-flex; align-items: center; gap: .35rem; }
+.project-card__actions { margin-top: 1rem; display: grid; justify-items: start; gap: .5rem; }
+.project-card__action { display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem; font-weight: 600; line-height: 1.2; text-decoration: none; }
+.project-card__action:hover { text-decoration: underline; }
+.project-card__action svg { flex: none; }
+.assignment-table { width: 100%; margin-top: .75rem; border-collapse: collapse; font-size: .78rem; }
+.assignment-table th, .assignment-table td { padding: .4rem .3rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+.assignment-table td:first-child { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.assignment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
+.assignment-actions select { max-width: 130px; font-size: .75rem; }
 .back-link--flow { position: static; margin-bottom: 1rem; }
 .batch-page .page-heading { align-items: end; }
 .batch-grid { margin-top: 2rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
@@ -99,7 +107,7 @@ progress { width: 100%; height: 8px; border: 0; border-radius: 10px; overflow: h
 .batch-purpose, .batch-policy span, .batch-started { display: inline-flex; align-items: center; gap: .4rem; }
 .batch-purpose { color: var(--muted); font-size: .8rem; font-weight: 700; }
 .batch-card h2 { margin: 0; font-size: 1.15rem; }
-.batch-counts { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.batch-counts { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
 .batch-counts span { padding: .75rem; display: grid; gap: .25rem; border-right: 1px solid var(--line); color: var(--muted); font-size: .72rem; }
 .batch-counts span:last-child { border: 0; }.batch-counts strong { color: var(--ink); font-size: 1.05rem; }
 .batch-policy { display: grid; gap: .35rem; padding: .85rem; border-radius: 9px; background: #f8fafc; }
@@ -117,10 +125,13 @@ progress { width: 100%; height: 8px; border: 0; border-radius: 10px; overflow: h
 .status-badge--failed { color: var(--danger); background: #fef3f2; }
 .task-label { color: var(--muted); font-size: .72rem; text-transform: capitalize; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.wizard-cancel { position: absolute; right: 0; top: -.6rem; }
+.selection-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; }
 
 @media (max-width: 760px) {
   .wizard-page { width: min(100% - 1rem, 980px); padding-top: 1.5rem; }
   .back-link { position: static; margin-bottom: 2rem; }
+  .wizard-cancel { position: static; margin-bottom: 1rem; }
   .stepper li { font-size: 0; }
   .task-picker, .number-grid, .review-grid, .project-grid { grid-template-columns: 1fr; }
   .scan-summary { grid-template-columns: 1fr 1fr; }

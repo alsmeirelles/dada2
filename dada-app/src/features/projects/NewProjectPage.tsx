@@ -6,6 +6,7 @@ import {
   Plus,
   Trash2,
   Users,
+  X,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useRef, useState, type ChangeEvent } from 'react'
@@ -18,14 +19,16 @@ import { useAuth } from '../auth/auth-context'
 import { DatasetPreparationPanel } from './DatasetPreparationPanel'
 import {
   createProjectWithDataset,
+  deleteProject,
   resolveDraftSplitSize,
   resolvedFirstTrainingSize,
 } from './project-api'
 import { resolverLabel } from './resolver-label'
-import { loadSetup } from './setup-recovery'
+import { clearSetup, loadSetup } from './setup-recovery'
 import {
   findDuplicateGroups,
   hashImages,
+  mergeSelections,
   scanImageFiles,
   type LocalImage,
   type RejectedLocalFile,
@@ -40,10 +43,13 @@ const taskOptions: Array<{ value: TaskType; title: string; description: string }
   { value: 'segmentation', title: 'Segmentation', description: 'Trace precise object polygons and masks.' },
 ]
 const defaultColors = ['#6558D3', '#E5484D', '#16A085', '#E67E22', '#2980B9']
+const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp'
+const RANDOM_ACQUISITION = 'Randomly selected from the remaining eligible training images.'
 
 const initialDraft: ProjectDraft = {
   name: '', description: '', taskType: 'detection',
   classes: [{ id: crypto.randomUUID(), name: '', color: defaultColors[0]! }],
+  acquisitionStrategy: 'random',
   datasetLayout: 'split',
   initialTrainingSize: null,
   testSetSize: 10,
@@ -58,7 +64,9 @@ const initialDraft: ProjectDraft = {
 export function NewProjectPage() {
   const { token, user } = useAuth()
   const navigate = useNavigate()
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
+  const filesInputRef = useRef<HTMLInputElement>(null)
+  const [serverProjectId, setServerProjectId] = useState<string | null>(null)
   const [step, setStep] = useState(0)
   const [draft, setDraft] = useState(initialDraft)
   const [collaboratorInput, setCollaboratorInput] = useState('')
@@ -97,46 +105,73 @@ export function NewProjectPage() {
   }
 
   async function handleFiles(event: ChangeEvent<HTMLInputElement>) {
-    const files = event.target.files
-    if (!files?.length) return
+    // The browser's FileList is live: copy it before clearing the input so the same folder can be picked again.
+    const files = [...(event.currentTarget.files ?? [])]
+    event.currentTarget.value = ''
+    if (!files.length) return
     setError(null)
     const scan = scanImageFiles(files)
-    setRejected(scan.rejected)
     setHashProgress(0)
     try {
       const hashed = await hashImages(scan.images, (done, total) => {
         setHashProgress(Math.round((done / total) * 100))
       })
-      setImages(hashed)
+      const merged = mergeSelections(images, hashed)
+      setImages(merged.images)
+      setRejected([...rejected, ...scan.rejected, ...merged.rejected])
     } catch {
-      setImages([])
-      setError('The selected images could not be read. Please choose the folder again.')
+      setError('The selected images could not be read. Please choose them again.')
     } finally {
       setHashProgress(null)
     }
+  }
+
+  function clearSelection() {
+    setImages([])
+    setRejected([])
   }
 
   async function submit() {
     if (!token || validateAll(draft, images)) return
     setIsSubmitting(true)
     setError(null)
+    const before = loadSetup()?.projectId
     try {
-      setCreated(await createProjectWithDataset(draft, images, token, (progress, message) => {
+      const project = await createProjectWithDataset(draft, images, token, (progress, message) => {
         setSubmitProgress(progress)
         setSubmitMessage(message)
-      }))
+      }, serverProjectId ?? undefined)
+      setServerProjectId(project.id)
+      setCreated(project)
       setStep(PREPARE_STEP)
     } catch (reason) {
+      const saved = loadSetup()?.projectId
+      const draftId = saved && saved !== before ? saved : serverProjectId
+      setServerProjectId(draftId)
       const detail = reason instanceof ApiError
         ? `${reason.message}${reason.traceId ? ` (trace ${reason.traceId})` : ''}`
         : reason instanceof Error ? reason.message : 'Project creation failed.'
       setError(
-        loadSetup()
-          ? `${detail} The project was saved as a draft — try again to resume where it stopped.`
+        draftId
+          ? `${detail} The project was saved as a draft — try again to resume where it stopped, or cancel it.`
           : detail,
       )
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  async function cancelCreation() {
+    const message = serverProjectId
+      ? 'Cancel this project? The draft and everything already uploaded will be permanently deleted.'
+      : 'Cancel this project? Everything entered so far will be discarded.'
+    if (!window.confirm(message)) return
+    try {
+      if (serverProjectId && token) await deleteProject(serverProjectId, token)
+      if (serverProjectId && loadSetup()?.projectId === serverProjectId) clearSetup()
+      navigate('/projects', { replace: true })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The project could not be cancelled.')
     }
   }
 
@@ -146,6 +181,7 @@ export function NewProjectPage() {
         <Link to="/projects" className="back-link"><ArrowLeft size={17} /> Projects</Link>
         <p className="eyebrow">New project</p>
         <h1>Set up an annotation project</h1>
+        <Button variant="ghost" className="wizard-cancel" onClick={cancelCreation} disabled={isSubmitting}><X size={17} /> Cancel project creation</Button>
       </div>
 
       <ol className="stepper" aria-label="Project setup progress">
@@ -199,15 +235,25 @@ export function NewProjectPage() {
 
         {step === 2 && (
           <div className="wizard-section">
-            <div><p className="eyebrow">Step 3</p><h2 id="step-2-title">Dataset layout and sizes</h2><p className="muted">Later training batches are random selections from the remaining unlabeled training images.</p></div>
+            <div><p className="eyebrow">Step 3</p><h2 id="step-2-title">Acquisition, layout, and sizes</h2><p className="muted">The acquisition strategy only decides how later training batches are chosen. It never changes the fixed validation and test sets or the initial annotation batches.</p></div>
+            <fieldset className="task-picker"><legend>Acquisition strategy</legend>
+              <label aria-label="Random acquisition" htmlFor="acquisition-random" className={draft.acquisitionStrategy === 'random' ? 'task-option selected' : 'task-option'}>
+                <input id="acquisition-random" type="radio" name="acquisition-strategy" checked={draft.acquisitionStrategy === 'random'} onChange={() => updateDraft({ acquisitionStrategy: 'random' })} />
+                <span><strong>Random acquisition</strong><small>{RANDOM_ACQUISITION}</small></span>
+              </label>
+              <label aria-label="Active learning" htmlFor="acquisition-active-learning" className={draft.acquisitionStrategy === 'active_learning' ? 'task-option selected' : 'task-option'}>
+                <input id="acquisition-active-learning" type="radio" name="acquisition-strategy" checked={draft.acquisitionStrategy === 'active_learning'} onChange={() => updateDraft({ acquisitionStrategy: 'active_learning', datasetLayout: 'split' })} />
+                <span><strong>Active learning</strong><small>A learning model chooses later training batches once the learning adapter is available.</small></span>
+              </label>
+            </fieldset>
             <fieldset className="task-picker"><legend>Dataset layout</legend>
               <label aria-label="Split dataset" htmlFor="layout-split" className={draft.datasetLayout === 'split' ? 'task-option selected' : 'task-option'}>
                 <input id="layout-split" type="radio" name="dataset-layout" checked={draft.datasetLayout === 'split'} onChange={() => updateDraft({ datasetLayout: 'split' })} />
                 <span><strong>Split dataset</strong><small>Fixed validation and test sets, a first training batch, then acquisition batches.</small></span>
               </label>
               <label aria-label="One static annotation batch" htmlFor="layout-single-batch" className={draft.datasetLayout === 'single_batch' ? 'task-option selected' : 'task-option'}>
-                <input id="layout-single-batch" type="radio" name="dataset-layout" checked={draft.datasetLayout === 'single_batch'} onChange={() => updateDraft({ datasetLayout: 'single_batch' })} />
-                <span><strong>One static annotation batch</strong><small>Every image is annotated once. No training, evaluation, or acquisition loop.</small></span>
+                <input id="layout-single-batch" type="radio" name="dataset-layout" disabled={draft.acquisitionStrategy === 'active_learning'} checked={draft.datasetLayout === 'single_batch'} onChange={() => updateDraft({ datasetLayout: 'single_batch' })} />
+                <span><strong>One static annotation batch</strong><small>{draft.acquisitionStrategy === 'active_learning' ? 'Only available with random acquisition.' : 'Every image is annotated once. No training, evaluation, or acquisition loop.'}</small></span>
               </label>
             </fieldset>
             {draft.datasetLayout === 'split' ? <>
@@ -217,7 +263,7 @@ export function NewProjectPage() {
                 <NumberField label="Images per iteration" help="Size of each later acquisition batch." value={draft.iterationBatchSize} onChange={(value) => updateDraft({ iterationBatchSize: value })} />
                 <OptionalNumberField label="First training batch" help={`Optional. Leave empty to use the images-per-iteration size (${draft.iterationBatchSize}).`} value={draft.initialTrainingSize} onChange={(value) => updateDraft({ initialTrainingSize: value })} />
               </div>
-              <p className="notice">Preparation annotates every validation and test image plus the first training batch. The other training images stay in the unlabeled pool until acquisition, which starts only after every initial image has an accepted resolution.</p>
+              <p className="notice">Preparation annotates every validation and test image plus the first training batch. The other training images stay in the unlabeled pool until acquisition, which starts only after every initial image has an accepted resolution. Validation and test images are never eligible, and a final batch may be smaller than the images-per-iteration size.</p>
             </> : <p className="notice">Single or consensus annotation still applies. The project closes when its one batch is resolved.</p>}
           </div>
         )}
@@ -264,13 +310,18 @@ export function NewProjectPage() {
 
         {step === 4 && (
           <div className="wizard-section">
-            <div><p className="eyebrow">Step 5</p><h2 id="step-4-title">Select image folder</h2><p className="muted">Subfolders are scanned recursively. Relative paths are preserved; the local root path is never uploaded.</p></div>
-            <input ref={(node) => { fileInputRef.current = node; node?.setAttribute('webkitdirectory', '') }} className="sr-only" type="file" multiple accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={handleFiles} />
-            <button className="folder-drop" type="button" onClick={() => fileInputRef.current?.click()} disabled={hashProgress !== null}>
+            <div><p className="eyebrow">Step 5</p><h2 id="step-4-title">Select images</h2><p className="muted">Add one or more folders, or individual files. Subfolders are scanned recursively. Relative paths are preserved; the local root path is never uploaded.</p></div>
+            <input ref={(node) => { folderInputRef.current = node; node?.setAttribute('webkitdirectory', '') }} className="sr-only" type="file" multiple accept={IMAGE_ACCEPT} onChange={handleFiles} aria-label="Image folder" />
+            <input ref={filesInputRef} className="sr-only" type="file" multiple accept={IMAGE_ACCEPT} onChange={handleFiles} aria-label="Image files" />
+            <button className="folder-drop" type="button" onClick={() => folderInputRef.current?.click()} disabled={hashProgress !== null}>
               <FolderUp size={34} aria-hidden="true" />
-              <strong>{images.length ? 'Choose a different folder' : 'Choose a folder'}</strong>
+              <strong>{images.length ? 'Add another folder' : 'Choose a folder'}</strong>
               <span>JPEG, PNG, and WebP · nested folders included</span>
             </button>
+            <div className="selection-actions">
+              <Button variant="secondary" onClick={() => filesInputRef.current?.click()} disabled={hashProgress !== null}><Plus size={17} /> {images.length ? 'Add more files' : 'Choose files'}</Button>
+              {images.length > 0 && <Button variant="ghost" onClick={clearSelection} disabled={hashProgress !== null}><Trash2 size={17} /> Clear selection</Button>}
+            </div>
             {hashProgress !== null && <Progress value={hashProgress} label={`Checking images… ${hashProgress}%`} />}
             {images.length > 0 && (
               <div className="scan-summary">
@@ -280,7 +331,7 @@ export function NewProjectPage() {
                 <SummaryStat value={duplicateGroups.length} label="Duplicate groups" />
               </div>
             )}
-            {rejected.length > 0 && <p className="notice">Skipped {rejected.length} hidden, empty, or unsupported file(s).</p>}
+            {rejected.length > 0 && <p className="notice">Skipped {rejected.length} hidden, empty, unsupported, or already-selected file(s).</p>}
           </div>
         )}
 
@@ -294,8 +345,9 @@ export function NewProjectPage() {
               <ReviewItem label="Team" value={`${draft.collaborators.length} collaborator${draft.collaborators.length === 1 ? '' : 's'}`} detail={draft.collaborators.join(', ') || 'Owner only'} />
               {draft.datasetLayout === 'split' ? <>
                 <ReviewItem label="Validation / test / first training" value={splitSummary(draft, images.length)} detail="fixed when the dataset is prepared" />
-                <ReviewItem label="Unlabeled training pool" value={`${trainingPoolSize(draft, images.length)} images`} detail={`later batches of ${draft.iterationBatchSize}, selected at random`} />
-              </> : <ReviewItem label="Dataset layout" value="One static batch" detail="every image annotated once" />}
+                <ReviewItem label="Unlabeled training pool" value={`${trainingPoolSize(draft, images.length)} images`} detail={`later batches of ${draft.iterationBatchSize}`} />
+                <ReviewItem label="Acquisition" value={draft.acquisitionStrategy === 'random' ? 'Random acquisition' : 'Active learning'} detail={draft.acquisitionStrategy === 'random' ? 'Randomly selected from the eligible unlabeled training pool after the preceding image batch has an accepted canonical resolution' : 'Chosen by the learning adapter once it is available'} />
+              </> : <ReviewItem label="Dataset layout" value="One static batch" detail="every image annotated once; random acquisition, no later batches" />}
               <ReviewItem label="Strategy" value={draft.annotationPolicy.mode === 'single' ? 'Single annotation' : 'Consensus'} detail={strategySummary(draft, images.length)} />
               {draft.annotationPolicy.mode === 'consensus' && <>
                 <ReviewItem label="Resolver" value={resolverLabel(draft.annotationPolicy.resolver)} detail="Provisional API catalog entry" />
@@ -304,9 +356,10 @@ export function NewProjectPage() {
             </div>
             {duplicateGroups.length > 0 && <p className="notice">{duplicateGroups.length} duplicate content group(s) will be reported to the API for deduplication.</p>}
             {isSubmitting && <Progress value={submitProgress} label={submitMessage} />}
-            {error && <div className="form-error" role="alert">{error}<small>The project may have been saved as a draft. Return to Projects before retrying if creation reached the API.</small></div>}
           </div>
         )}
+
+        {error && <div className="form-error" role="alert">{error}</div>}
 
         {step === PREPARE_STEP && created && (
           <DatasetPreparationPanel project={created} onActivated={() => navigate('/projects', { replace: true })} />
@@ -380,11 +433,11 @@ function validateStep(step: number, draft: ProjectDraft, images: LocalImage[]) {
     if (!draft.annotationPolicy.resolver) return 'Choose a resolution method offered by the API.'
   }
   if (step === 4) {
-    if (!images.length) return 'Select a folder containing supported images.'
+    if (!images.length) return 'Select a folder or files containing supported images.'
     if (draft.datasetLayout === 'split') {
       const { validation, test, firstTraining } = initialSizes(draft, images.length)
       const required = validation + test + firstTraining
-      if (required > images.length) return `The validation, test, and first training sets need ${required} images; this folder has ${images.length}.`
+      if (required > images.length) return `The validation, test, and first training sets need ${required} images; ${images.length} are selected. Add another folder or more files.`
     }
   }
   return ''

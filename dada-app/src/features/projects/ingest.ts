@@ -17,7 +17,7 @@ export type LocalImage = {
 
 export type RejectedLocalFile = {
   relativePath: string
-  reason: 'hidden' | 'unsupported' | 'empty' | 'invalid_path'
+  reason: 'hidden' | 'unsupported' | 'empty' | 'invalid_path' | 'duplicate_path'
 }
 
 export type ScanResult = {
@@ -76,6 +76,28 @@ export function scanImageFiles(files: Iterable<File>): ScanResult {
   }
 
   return { images, rejected, totalBytes }
+}
+
+/**
+ * Adds another folder or file selection to the images already chosen.
+ *
+ * Each selection is relative to its own root, so two folders can both hold
+ * `0001.jpg`. The API refuses two images at one path, so a later image whose
+ * path is already taken is skipped and reported instead.
+ */
+export function mergeSelections(current: LocalImage[], added: LocalImage[]) {
+  const taken = new Set(current.map((image) => image.relativePath))
+  const images = [...current]
+  const rejected: RejectedLocalFile[] = []
+  for (const image of added) {
+    if (taken.has(image.relativePath)) {
+      rejected.push({ relativePath: image.relativePath, reason: 'duplicate_path' })
+    } else {
+      taken.add(image.relativePath)
+      images.push(image)
+    }
+  }
+  return { images, rejected }
 }
 
 export async function hashImages(

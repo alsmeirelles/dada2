@@ -10,10 +10,10 @@ from dada_api.core.cursors import decode_cursor, encode_cursor
 from dada_api.core.errors import ApiError
 from dada_api.models.annotation_policy import AnnotationMode, AnnotationPolicyDefault
 from dada_api.models.label_import import AnnotationImport, ImportStatus
-from dada_api.models.project import Project, ProjectMember, ProjectRole
+from dada_api.models.project import DatasetLayout, Project, ProjectMember, ProjectRole
 from dada_api.models.user import User
 from dada_api.schemas.project import ProjectCreate, ProjectUpdate
-from dada_api.services import datasets, storage
+from dada_api.services import audit, datasets, storage
 
 logger = logging.getLogger(__name__)
 
@@ -119,13 +119,19 @@ async def list_projects(
 
 async def update_project(
     session: AsyncSession,
+    actor: User,
     project: Project,
     request: ProjectUpdate,
 ) -> Project:
     """Apply a versioned update to a project.
 
+    A static ``single_batch`` project never acquires, so it keeps the random
+    strategy. A strategy change is audited because it decides how every later
+    training batch will be chosen.
+
     Args:
         session: Active database session.
+        actor: User performing the change.
         project: Authorized project.
         request: Validated update request carrying the expected version.
 
@@ -133,7 +139,8 @@ async def update_project(
         The updated project.
 
     Raises:
-        ApiError: 409 when the supplied version is not the current one.
+        ApiError: 409 when the supplied version is not the current one; 422
+            when a static project is asked to use active learning.
     """
     if request.version != project.version:
         raise ApiError(
@@ -144,6 +151,25 @@ async def update_project(
         )
 
     fields = request.model_dump(exclude_unset=True, exclude={"version"})
+    strategy = fields.pop("acquisition_strategy", None)
+    if strategy is not None and strategy != project.acquisition_strategy:
+        if project.dataset_layout == DatasetLayout.single_batch:
+            raise ApiError(
+                422,
+                "acquisition_strategy_not_allowed",
+                "A single_batch project always uses random acquisition.",
+            )
+        audit.record(
+            session,
+            actor,
+            project.id,
+            "project.acquisition_strategy_changed",
+            "project",
+            project.id,
+            before={"acquisition_strategy": project.acquisition_strategy},
+            after={"acquisition_strategy": strategy},
+        )
+        project.acquisition_strategy = strategy
     for name, value in fields.items():
         setattr(project, name, value)
     project.version += 1

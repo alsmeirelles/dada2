@@ -3,16 +3,16 @@
 from datetime import UTC, datetime
 from math import ceil
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dada_api.core.errors import ApiError
 from dada_api.models.batch import (
-    ITEM_RESOLVED,
     AnnotationBatch,
     BatchItem,
     BatchPurpose,
     BatchStatus,
+    ItemStatus,
 )
 from dada_api.models.dataset import DatasetSplit, SplitName
 from dada_api.models.label_import import AnnotationImport
@@ -356,9 +356,9 @@ async def eligible_training_pool(
     """Return the train-split media a later training batch may select.
 
     A train image leaves the pool while a live training batch holds it and for
-    good once its item is resolved. An item left unresolved in a closed or
-    failed batch returns to the pool. Validation and test media are never in
-    it because they are not in the train split.
+    good once its item is resolved. A cancelled item, or one left unresolved in
+    a closed or failed batch, returns its image to the pool. Validation and
+    test media are never in it because they are not in the train split.
 
     Args:
         session: Active database session.
@@ -374,8 +374,11 @@ async def eligible_training_pool(
             AnnotationBatch.project_id == project.id,
             AnnotationBatch.purpose.in_(TRAINING_PURPOSES),
             or_(
-                BatchItem.status == ITEM_RESOLVED,
-                AnnotationBatch.status.not_in(FINISHED_BATCH_STATUSES),
+                BatchItem.status == ItemStatus.resolved,
+                and_(
+                    AnnotationBatch.status.not_in(FINISHED_BATCH_STATUSES),
+                    BatchItem.status != ItemStatus.cancelled,
+                ),
             ),
         )
     )
@@ -401,8 +404,9 @@ async def first_acquisition_ready(
 
     Submitted assignments are not enough: an image counts only once its item
     is resolved, which single mode does from its submission and consensus mode
-    does through consensus or adjudication. A ``single_batch`` project never
-    acquires, so it is never ready.
+    does through consensus or adjudication. A cancelled training image went
+    back to the pool, so it no longer holds the first acquisition back. A
+    ``single_batch`` project never acquires, so it is never ready.
     """
     if project.dataset_layout != DatasetLayout.split:
         return False
@@ -425,7 +429,7 @@ async def first_acquisition_ready(
         .where(
             AnnotationBatch.project_id == project.id,
             AnnotationBatch.purpose.in_(INITIAL_SPLIT_PURPOSES),
-            BatchItem.status != ITEM_RESOLVED,
+            BatchItem.status.not_in((ItemStatus.resolved, ItemStatus.cancelled)),
         )
     )
     return unresolved == 0

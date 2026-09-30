@@ -341,8 +341,9 @@ project, matching the existing treatment of `activate_project`.
 
 ## Current placeholders
 
-Existing prototype queue and inference routes remain so later phases can evolve
-them without losing behavior.
+The assisted-segmentation inference route remains a `501` placeholder until
+Phase 7. The prototype `/api/v1/queue` routes were removed in Phase 5; see
+[Image assignments](#image-assignments-phase-5).
 
 `GET /api/v1/capabilities` is served from validated settings and now advertises
 `upload_session_ttl_hours` alongside the existing upload limits, which this
@@ -398,8 +399,9 @@ parse error — unsafe or unmatched path, ambiguous or duplicate image, unknown
 class index, malformed line, out-of-bounds or self-intersecting geometry, or a
 run-length encoded mask — rejects the whole import; it is then discarded and
 started again. Activation reports `label_import` while an import is not
-accepted. Starting a batch links every assignment of a seeded image to its
-seed; the seed is never a submission, vote, or resolution.
+accepted. Starting a batch copies each seeded image's objects into the draft
+of every assignment on it and keeps the link as provenance; the seed is never
+a submission, vote, or resolution.
 
 ## Development data reset
 
@@ -423,3 +425,64 @@ and must never be run against production.
    ```
 
 4. Recreate the projects through the App from their source folders.
+
+Migration `20260930_0008` (Phase 5) requires every assignment to name its
+annotator. It fails on a database that still holds a single-mode batch started
+before Phase 5, so run this reset before upgrading such a database.
+
+## Image assignments (Phase 5)
+
+Annotation work is a direct, complete-image assignment: one annotator, one
+image. Opening an assignment claims nothing, so every annotator in a consensus
+group works the same image independently. Decisions are recorded in
+[phase_5.md](phases/phase_5.md#decisões).
+
+| Method | Endpoint | Who | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/assignments` | assignee | The caller's own queue, with `purpose`/`state` filters and own counts |
+| `GET` | `/api/v1/projects/{project_id}/assignments/{assignment_id}` | assignee | Image metadata, a signed image URL, and the current objects |
+| `PUT` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/draft` | assignee | Save the draft; `version` must be current |
+| `POST` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/submit` | assignee | Immutable submission; send an `Idempotency-Key` |
+| `GET` | `/api/v1/media/{media_id}/content` | signed link | Image bytes; the signature and expiry are the authorization |
+| `GET` | `/api/v1/projects/{project_id}/batches/{batch_id}/assignments` | owner, manager | Every assignment of a batch, without content |
+| `POST` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/reopen` | owner, manager | Give submitted work back as a new revision |
+| `POST` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/reassign` | owner, manager | Move the image to another annotator |
+| `POST` | `/api/v1/projects/{project_id}/batch-items/{item_id}/cancel` | owner, manager | Return an unresolved training image to the pool |
+
+**Starting a batch.** A single-mode batch deals its images in turn to the
+policy group, or to every owner, manager, and annotator when the group is
+empty. A consensus batch gives every group member every image.
+
+**Assignment lifecycle.** An assignment is `pending`, then `in_progress` after
+its first draft save, then `submitted`. `reassigned` and `cancelled` are
+terminal. A stale `version` returns `409 version_conflict`. A repeated submit
+returns `409 assignment_already_submitted`, or the original response when it
+reuses its `Idempotency-Key`. Only the assignee may read or write an
+assignment; everyone else gets `403 assignment_not_owned`.
+
+**Validation.** Drafts are checked for structure only. Submissions must also
+meet the task and geometry rules, and a failure returns `422 invalid_document`
+with one `{object_id, code}` per problem. Detection and segmentation may be
+submitted empty; classification needs at least one class.
+
+**Resolution.**
+
+- In single mode the submission becomes version 1 of the image's
+  `resolved_annotations` in the same transaction, and a batch whose every
+  remaining image is resolved moves to `resolved`.
+- In consensus mode the image becomes `awaiting_resolution` once every active
+  assignment has submitted. The resolution itself is Phase 6.
+
+**Blindness.** Batch routes are a manager view (`manage_annotation_policy`):
+they name the group and count everyone's submissions. Annotators use their own
+queue, which carries no peer information.
+
+**Image links.** Each assignment detail carries a path to
+`/api/v1/media/{media_id}/content`. The path is signed with
+`DADA_JWT_SECRET_KEY` and valid for one hour; a tampered or expired link
+returns `403 invalid_media_url`.
+
+**Acquisition strategy.** `PATCH /api/v1/projects/{project_id}` accepts
+`acquisition_strategy` on `split` projects, and records the change in the
+audit log. A `single_batch` project returns
+`422 acquisition_strategy_not_allowed`.

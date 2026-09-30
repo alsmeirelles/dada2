@@ -21,6 +21,7 @@ const baseDraft: ProjectDraft = {
   description: '',
   taskType: 'detection',
   classes: [],
+  acquisitionStrategy: 'random',
   datasetLayout: 'split',
   initialTrainingSize: 10,
   testSetSize: 5,
@@ -85,7 +86,18 @@ describe('dataset layout', () => {
       name: 'Road defects',
       description: null,
       task_type: 'detection',
+      acquisition_strategy: 'random',
       dataset_layout: 'single_batch',
+    })
+  })
+})
+
+describe('acquisition strategy', () => {
+  it('persists the chosen strategy with the project', () => {
+    expect(buildProjectCreateBody(baseDraft)).toMatchObject({ acquisition_strategy: 'random' })
+    expect(buildProjectCreateBody({ ...baseDraft, acquisitionStrategy: 'active_learning' })).toMatchObject({
+      acquisition_strategy: 'active_learning',
+      dataset_layout: 'split',
     })
   })
 })

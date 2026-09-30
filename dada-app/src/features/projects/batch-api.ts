@@ -1,4 +1,5 @@
 import { apiRequest } from '../../api/client'
+import type { BatchAssignment } from '../annotation/types'
 import type { AnnotationBatch, AnnotationPolicy, Page } from './types'
 
 export function listBatches(projectId: string, token: string, cursor?: string) {
@@ -41,6 +42,41 @@ export function updateBatchPolicy(
 export function startBatch(projectId: string, batchId: string, token: string) {
   return apiRequest<AnnotationBatch>(
     `/api/v1/projects/${projectId}/batches/${batchId}/start`,
+    { method: 'POST', token, body: {} },
+  )
+}
+
+export async function listBatchAssignments(projectId: string, batchId: string, token: string) {
+  const items: BatchAssignment[] = []
+  let page: Page<BatchAssignment> | null = null
+  do {
+    const query: string = page?.next_cursor ? `?cursor=${encodeURIComponent(page.next_cursor)}` : ''
+    page = await apiRequest<Page<BatchAssignment>>(
+      `/api/v1/projects/${projectId}/batches/${batchId}/assignments${query}`,
+      { token },
+    )
+    items.push(...page.items)
+  } while (page.next_cursor)
+  return items
+}
+
+export function reopenAssignment(projectId: string, assignmentId: string, token: string) {
+  return apiRequest<BatchAssignment>(
+    `/api/v1/projects/${projectId}/assignments/${assignmentId}/reopen`,
+    { method: 'POST', token, body: {} },
+  )
+}
+
+export function reassignAssignment(projectId: string, assignmentId: string, annotatorId: string, token: string) {
+  return apiRequest<BatchAssignment>(
+    `/api/v1/projects/${projectId}/assignments/${assignmentId}/reassign`,
+    { method: 'POST', token, body: { annotator_id: annotatorId } },
+  )
+}
+
+export function cancelBatchItem(projectId: string, batchItemId: string, token: string) {
+  return apiRequest<void>(
+    `/api/v1/projects/${projectId}/batch-items/${batchItemId}/cancel`,
     { method: 'POST', token, body: {} },
   )
 }

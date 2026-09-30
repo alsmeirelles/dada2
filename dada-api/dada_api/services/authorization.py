@@ -25,7 +25,7 @@ class ProjectAction(StrEnum):
     manage_classes = "manage_classes"
     manage_members = "manage_members"
     annotate = "annotate"
-    revoke_lease = "revoke_lease"
+    manage_assignments = "manage_assignments"
     manage_annotation_policy = "manage_annotation_policy"
     read_annotation_evidence = "read_annotation_evidence"
     run_resolution = "run_resolution"
@@ -42,7 +42,7 @@ ROLE_ACTIONS: dict[ProjectRole, frozenset[ProjectAction]] = {
             ProjectAction.manage_classes,
             ProjectAction.manage_members,
             ProjectAction.annotate,
-            ProjectAction.revoke_lease,
+            ProjectAction.manage_assignments,
             ProjectAction.manage_annotation_policy,
             ProjectAction.read_annotation_evidence,
             ProjectAction.run_resolution,

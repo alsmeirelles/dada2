@@ -12,18 +12,19 @@ from sqlalchemy import delete, func, select
 from dada_api.core.security import hash_password
 from dada_api.db.session import async_session_factory
 from dada_api.main import app
+from dada_api.models.annotation import AnnotationSubmission, ResolvedAnnotation
 from dada_api.models.annotation_policy import (
     AnnotationPolicyAnnotator,
     AnnotationPolicyDefault,
 )
 from dada_api.models.audit import AuditEntry
 from dada_api.models.batch import (
-    ASSIGNMENT_PENDING,
-    ITEM_RESOLVED,
     AnnotationAssignment,
     AnnotationBatch,
     AnnotationBatchAnnotator,
+    AssignmentStatus,
     BatchItem,
+    ItemStatus,
 )
 from dada_api.models.dataset import DatasetSplit
 from dada_api.models.idempotency import IdempotencyRecord
@@ -332,7 +333,7 @@ async def test_an_accepted_import_seeds_every_assignment_without_submitting(
         resolved = await session.scalar(
             select(func.count())
             .select_from(BatchItem)
-            .where(BatchItem.status == ITEM_RESOLVED)
+            .where(BatchItem.status == ItemStatus.resolved)
         )
         stored = await session.get(Project, project["id"])
         assert stored is not None
@@ -342,7 +343,8 @@ async def test_an_accepted_import_seeds_every_assignment_without_submitting(
     assert rows
     for assignment, media_id in rows:
         assert assignment.seed_document_id == seeds[media_id].id
-        assert assignment.status == ASSIGNMENT_PENDING
+        assert assignment.draft == seeds[media_id].document["objects"]
+        assert assignment.status == AssignmentStatus.pending
     assert {assignment.annotator_id for assignment, _ in rows} == set(annotator_ids)
     assert resolved == 0
     assert ready is False
@@ -631,10 +633,10 @@ async def test_an_accepted_import_is_final_until_the_dataset_is_reset(
             assert await session.scalar(select(func.count()).select_from(model)) == 0
 
 
-async def test_project_deletion_removes_imports_and_seeded_assignments(
+async def test_a_seeded_submission_is_the_annotators_and_deletion_removes_it(
     database: None,
 ) -> None:
-    await _create_user("owner")
+    owner_id = (await _create_user("owner")).id
     token = await _token("owner")
 
     async with _client() as client:
@@ -655,10 +657,40 @@ async def test_project_deletion_removes_imports_and_seeded_assignments(
                 f"/api/v1/projects/{project['id']}/batches/{batch['id']}/start",
                 headers=_auth(token),
             )
+        queue = await client.get(
+            f"/api/v1/projects/{project['id']}/assignments", headers=_auth(token)
+        )
+        first = queue.json()["items"][0]
+        opened = await client.get(
+            f"/api/v1/projects/{project['id']}/assignments/{first['id']}",
+            headers=_auth(token),
+        )
+        submitted = await client.post(
+            f"/api/v1/projects/{project['id']}/assignments/{first['id']}/submit",
+            headers=_auth(token),
+            json={"version": 1, "objects": opened.json()["objects"]},
+        )
+
+        async with async_session_factory() as session:
+            seed = await session.scalar(
+                select(ImportedSeedDocument).where(
+                    ImportedSeedDocument.media_id == first["media_id"]
+                )
+            )
+            submission = await session.get(
+                AnnotationSubmission, submitted.json()["submission_id"]
+            )
+
         deleted = await client.delete(
             f"/api/v1/projects/{project['id']}", headers=_auth(token)
         )
 
+    assert first["seeded_from_import"] is True
+    assert opened.json()["objects"] == seed.document["objects"]
+    assert submitted.status_code == 200, submitted.text
+    assert submission.seed_document_id == seed.id
+    assert submission.submitted_by == owner_id
+    assert submission.objects == seed.document["objects"]
     assert deleted.status_code == 204, deleted.text
 
     async with async_session_factory() as session:
@@ -667,6 +699,8 @@ async def test_project_deletion_removes_imports_and_seeded_assignments(
             AnnotationImportFile,
             ImportedSeedDocument,
             AnnotationAssignment,
+            AnnotationSubmission,
+            ResolvedAnnotation,
             BatchItem,
         ):
             assert await session.scalar(select(func.count()).select_from(model)) == 0

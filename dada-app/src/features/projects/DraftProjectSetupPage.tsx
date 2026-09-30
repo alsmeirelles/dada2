@@ -7,11 +7,12 @@ import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
 import { DatasetPreparationPanel } from './DatasetPreparationPanel'
-import { hashImages, scanImageFiles, type LocalImage } from './ingest'
+import { hashImages, mergeSelections, scanImageFiles, type LocalImage } from './ingest'
 import {
   createClass,
   createProjectWithDataset,
   cancelUpload,
+  deleteProject,
   getAnnotationPolicy,
   getProject,
   listClasses,
@@ -20,7 +21,7 @@ import {
   updateClass,
   updateProject,
 } from './project-api'
-import { loadSetup, saveSetup } from './setup-recovery'
+import { clearSetup, loadSetup, saveSetup } from './setup-recovery'
 import type { ProjectClass, ProjectDraft } from './types'
 
 export function DraftProjectSetupPage() {
@@ -29,6 +30,7 @@ export function DraftProjectSetupPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const fileInput = useRef<HTMLInputElement>(null)
+  const filesInput = useRef<HTMLInputElement>(null)
   const [images, setImages] = useState<LocalImage[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const project = useQuery({ queryKey: ['project', projectId], queryFn: () => getProject(projectId, token!), enabled: Boolean(token && projectId) })
@@ -54,6 +56,14 @@ export function DraftProjectSetupPage() {
     mutationFn: () => cancelUpload(activeUploadId!, token!),
     onSuccess: () => { saveSetup({ projectId, stage: 'policy' }); setMessage('The upload was cancelled and its temporary files were permanently purged.') },
   })
+  const discard = useMutation({
+    mutationFn: () => deleteProject(projectId, token!),
+    onSuccess: () => {
+      if (loadSetup()?.projectId === projectId) clearSetup()
+      queryClient.removeQueries({ queryKey: ['projects'] })
+      navigate('/projects', { replace: true })
+    },
+  })
 
   function buildDraft(): ProjectDraft {
     const current = project.data!
@@ -61,6 +71,7 @@ export function DraftProjectSetupPage() {
     return {
       name: current.name, description: current.description ?? '', taskType: current.task_type,
       classes: (classes.data?.items ?? []).map(({ id, name, color }) => ({ id, name, color })),
+      acquisitionStrategy: current.acquisition_strategy,
       datasetLayout: current.dataset_layout,
       initialTrainingSize: current.initial_training_size,
       testSetSize: current.test_set_percentage ?? current.test_set_size ?? 1,
@@ -73,13 +84,15 @@ export function DraftProjectSetupPage() {
     }
   }
   async function selectFiles(event: ChangeEvent<HTMLInputElement>) {
-    const files = event.currentTarget.files
-    if (!files?.length) return
+    const files = [...(event.currentTarget.files ?? [])]
+    event.currentTarget.value = ''
+    if (!files.length) return
     setMessage('Checking selected images…')
     try {
-      setImages(await hashImages(scanImageFiles(files).images, () => {}))
-      setMessage(null)
-    } catch { setMessage('The selected images could not be read. Choose the folder again.') }
+      const merged = mergeSelections(images, await hashImages(scanImageFiles(files).images, () => {}))
+      setImages(merged.images)
+      setMessage(merged.rejected.length ? `${merged.rejected.length} already-selected path(s) were skipped.` : null)
+    } catch { setMessage('The selected images could not be read. Choose them again.') }
   }
   function changeClass(entry: ProjectClass, patch: Partial<ProjectClass>) { saveClass.mutate({ ...entry, ...patch }) }
 
@@ -87,13 +100,13 @@ export function DraftProjectSetupPage() {
   if (project.isError || classes.isError || members.isError || policy.isError) return <main className="page-container"><div className="panel error-panel" role="alert">This draft could not be loaded.</div></main>
   if (project.data?.status !== 'draft' && project.data?.status !== 'ingesting') return <main className="page-container"><div className="panel status-panel">This project no longer needs setup. <Link to="/projects">Return to projects</Link>.</div></main>
 
-  return <main className="wizard-page"><div className="wizard-heading"><Link className="back-link" to="/projects">Projects</Link><p className="eyebrow">Draft project</p><h1>Resume setup</h1><p className="muted">These fields come from the saved project. Changes are saved before uploading.</p></div>
+  return <main className="wizard-page"><div className="wizard-heading"><Link className="back-link" to="/projects">Projects</Link><p className="eyebrow">Draft project</p><h1>Resume setup</h1><p className="muted">These fields come from the saved project. Changes are saved before uploading.</p><Button variant="ghost" className="wizard-cancel" disabled={discard.isPending} onClick={() => { if (window.confirm('Cancel this project? The draft and everything already uploaded will be permanently deleted.')) discard.mutate() }}>{discard.isPending ? 'Cancelling…' : 'Cancel project creation'}</Button></div>
     <section className="wizard-card"><div className="wizard-section">
       <form className="field-grid" onSubmit={(event) => { event.preventDefault(); editProject.mutate(event.currentTarget) }}><label className="field">Project name<input name="name" key={project.data!.version} defaultValue={project.data!.name} /></label><label className="field">Description<input name="description" key={project.data!.updated_at} defaultValue={project.data!.description ?? ''} /></label><Button disabled={editProject.isPending}>{editProject.isPending ? 'Saving…' : 'Save project details'}</Button></form>
       <div><h2>Classes</h2><div className="class-list">{classes.data!.items.map((entry) => <div className="class-row" key={entry.id}><span className="class-index">{entry.display_order + 1}</span><label className="color-control" aria-label={`Color for ${entry.name}`}><input type="color" defaultValue={entry.color} onChange={(event) => changeClass(entry, { color: event.target.value.toUpperCase() })} /></label><input aria-label={`Name for ${entry.name}`} defaultValue={entry.name} onBlur={(event) => { const name = event.target.value.trim(); if (name && name !== entry.name) changeClass(entry, { name }) }} /><Button variant="ghost" aria-label={`Remove ${entry.name}`} title={`Remove ${entry.name}`} onClick={() => deleteClass.mutate(entry.id)} disabled={classes.data!.items.length <= 1}><Trash2 size={18} aria-hidden="true" /></Button></div>)}</div><div className="class-actions"><Button variant="secondary" onClick={() => addClass.mutate()} disabled={addClass.isPending}>Add class</Button></div></div>
       <div><h2>Team and strategy</h2><p className="muted">Manage members and the annotation policy before resuming the dataset upload.</p><Link className="button button--secondary" to={`/projects/${projectId}/settings`}>Open project settings</Link></div>
-      <div><h2>Dataset</h2><input ref={(node) => { fileInput.current = node; node?.setAttribute('webkitdirectory', '') }} className="sr-only" type="file" multiple accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={selectFiles} /><Button variant="secondary" onClick={() => fileInput.current?.click()}>Choose image folder</Button>{activeUploadId && <Button variant="ghost" disabled={cancel.isPending} onClick={() => { if (window.confirm('Cancel this upload? Its temporary files will be permanently purged.')) cancel.mutate() }}>{cancel.isPending ? 'Cancelling…' : 'Cancel interrupted upload'}</Button>}{images.length > 0 && <p className="notice">{images.length} images ready. Upload resumes from the server-confirmed byte offset.</p>}</div>
-      {(message || resume.isError || editProject.isError || saveClass.isError || deleteClass.isError) && <p className="form-error" role="alert">{message ?? errorText(resume.error ?? editProject.error ?? saveClass.error ?? deleteClass.error)}</p>}
+      <div><h2>Dataset</h2><input ref={(node) => { fileInput.current = node; node?.setAttribute('webkitdirectory', '') }} className="sr-only" type="file" multiple accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={selectFiles} aria-label="Image folder" /><input ref={filesInput} className="sr-only" type="file" multiple accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={selectFiles} aria-label="Image files" /><Button variant="secondary" onClick={() => fileInput.current?.click()}>{images.length ? 'Add another folder' : 'Choose image folder'}</Button><Button variant="secondary" onClick={() => filesInput.current?.click()}>{images.length ? 'Add more files' : 'Choose image files'}</Button>{images.length > 0 && <Button variant="ghost" onClick={() => setImages([])}>Clear selection</Button>}{activeUploadId && <Button variant="ghost" disabled={cancel.isPending} onClick={() => { if (window.confirm('Cancel this upload? Its temporary files will be permanently purged.')) cancel.mutate() }}>{cancel.isPending ? 'Cancelling…' : 'Cancel interrupted upload'}</Button>}{images.length > 0 && <p className="notice">{images.length} images ready. Upload resumes from the server-confirmed byte offset.</p>}</div>
+      {(message || resume.isError || editProject.isError || saveClass.isError || deleteClass.isError || discard.isError) && <p className="form-error" role="alert">{message ?? errorText(resume.error ?? editProject.error ?? saveClass.error ?? deleteClass.error ?? discard.error)}</p>}
       {project.data!.dataset_prepared_at && <p className="notice">The dataset is prepared. Adding or removing classes, reordering them, or uploading new images resets the preparation and discards imported labels.</p>}
       {images.length > 0 && <Button onClick={() => { saveSetup({ projectId, stage: 'policy' }); resume.mutate() }} disabled={resume.isPending}>{resume.isPending ? 'Resuming…' : 'Resume upload and prepare'}</Button>}
     </div></section>

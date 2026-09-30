@@ -826,7 +826,9 @@ are contract-tested, not just status codes.
 
 ### Pending decision register for Phases 5–9
 
-Every entry below is **PENDING**. “Document before start” means the decision
+Every entry below is **PENDING** except `P5-01`–`P5-06`, which were decided
+on 2026-09-30 in [Phase 5](phases/phase_5.md#decisões), subject to review.
+“Document before start” means the decision
 must be resolved in the matching `docs/phases/phase_N.md` under the mandatory
 gate above. A phase cannot be declared started while one of its entries remains
 pending. App-specific decisions are listed separately in the

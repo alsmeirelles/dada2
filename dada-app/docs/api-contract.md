@@ -513,3 +513,102 @@ codes: `preparation_incomplete`, `dataset_already_prepared`,
 `invalid_relative_path`, `unmatched_path`, `ambiguous_media_match`,
 `duplicate_source_label`, `unknown_class_index`, `malformed_label`,
 `invalid_geometry`, and `unsupported_geometry`.
+
+## Phase 5 implemented shapes
+
+These complement "Image annotation assignments — Phase 5 target". Decisions are
+recorded in `dada-api/docs/phases/phase_5.md`.
+
+The global `/api/v1/queue/*` placeholders are removed.
+
+```ts
+type AssignmentStatus = 'pending' | 'in_progress' | 'submitted' | 'reassigned' | 'cancelled'
+
+// GET /api/v1/projects/{project_id}/assignments?purpose=&state=&cursor=
+type AssignmentQueuePage = {
+  items: {
+    id: string; batch_id: string; batch_purpose: BatchPurpose
+    media_id: string; relative_path: string; width: number; height: number
+    status: AssignmentStatus; version: number; seeded_from_import: boolean; updated_at: string
+  }[]
+  next_cursor: string | null
+  counts: { pending: number; in_progress: number; submitted: number } // the caller's own
+}
+
+// GET /api/v1/projects/{project_id}/assignments/{assignment_id}
+type AssignmentDetail = {
+  id: string; project_id: string; batch_id: string; batch_purpose: BatchPurpose
+  task_type: TaskType; status: AssignmentStatus; version: number
+  media: { id: string; relative_path: string; width: number; height: number; image_url: string }
+  objects: AnnotationObject[]           // draft while open, latest submission once submitted
+  seeded_from_import: boolean
+  draft_saved_at: string | null; revision: number | null; submitted_at: string | null
+}
+
+// PUT .../draft and POST .../submit share one body
+type DocumentWrite = { version: number; objects: AnnotationObject[] }
+type DraftSaved = { id: string; status: AssignmentStatus; version: number; draft_saved_at: string }
+type SubmissionReceived = {
+  id: string; status: AssignmentStatus; version: number
+  submission_id: string; revision: number; submitted_at: string
+  image_resolved: boolean               // true only in single mode
+}
+```
+
+**Image URL.** `image_url` is a path relative to the API origin:
+`/api/v1/media/{media_id}/content?expires=…&signature=…`. It is valid for one
+hour and needs no bearer, so it works in an `<img>` or SVG `<image>`. The App
+prefixes it with `VITE_API_BASE_URL`.
+
+**Submitting.** Send `Idempotency-Key: submit:{assignment_id}:{version}`, so a
+retry after a lost response replays the original result.
+
+**Errors on these routes.**
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `version_conflict` | 409 | The assignment changed since it was read |
+| `assignment_already_submitted` | 409 | Already submitted |
+| `assignment_not_active` | 409 | Reassigned or cancelled by a manager |
+| `assignment_not_owned` | 403 | Someone else's assignment; this applies to managers and administrators too |
+| `invalid_document` | 422 | `details.errors: [{object_id, code}]` |
+| `invalid_media_url` | 403 | Tampered or expired image link |
+
+The `invalid_document` codes are `unknown_class`, `wrong_geometry`,
+`out_of_bounds`, `degenerate_geometry`, `self_intersecting`,
+`duplicate_object_id`, `duplicate_class`, and `empty_not_allowed`.
+
+**Manager routes** (`owner`, `manager`):
+
+| Method | Endpoint | Result |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/batches/{batch_id}/assignments` | `{items: BatchAssignment[], next_cursor}` |
+| `POST` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/reopen` | `BatchAssignment` |
+| `POST` | `/api/v1/projects/{project_id}/assignments/{assignment_id}/reassign` | `201 BatchAssignment`, the new assignment; body `{annotator_id}` |
+| `POST` | `/api/v1/projects/{project_id}/batch-items/{item_id}/cancel` | `204` |
+
+```ts
+type BatchAssignment = {
+  id: string; batch_item_id: string; item_status: string; media_id: string; relative_path: string
+  annotator_id: string; status: AssignmentStatus; version: number; updated_at: string
+}
+```
+
+Their errors are:
+
+- `item_closed`: the image is already resolved or cancelled;
+- `assignment_not_submitted`;
+- `already_assigned`;
+- `invalid_assignee` (422);
+- `cancel_not_allowed`: validation and test images cannot be cancelled.
+
+**Batches.**
+
+- `GET /batches` and `GET /batches/{batch_id}` are now owner/manager only.
+- `Batch` gains `resolved_items`, `awaiting_resolution_items`,
+  `cancelled_items`, `available_assignments`, and `in_progress_assignments`.
+- `submitted_assignments` now counts only submitted assignments.
+
+**Projects.** `PATCH /api/v1/projects/{project_id}` accepts
+`acquisition_strategy` on `split` projects. A `single_batch` project returns
+`422 acquisition_strategy_not_allowed`.

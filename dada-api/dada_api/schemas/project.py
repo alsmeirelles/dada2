@@ -84,10 +84,16 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
-    """Optimistically versioned editable project fields."""
+    """Optimistically versioned editable project fields.
+
+    ``acquisition_strategy`` may change on a ``split`` project, before or
+    after activation. It decides how later training acquisition batches are
+    chosen; it never alters the fixed splits or the initial batches.
+    """
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=4000)
+    acquisition_strategy: AcquisitionStrategyName | None = None
     version: int = Field(ge=1)
 
 

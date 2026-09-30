@@ -16,12 +16,12 @@ from dada_api.models.annotation_policy import (
 )
 from dada_api.models.audit import AuditEntry
 from dada_api.models.batch import (
-    ITEM_RESOLVED,
     AnnotationAssignment,
     AnnotationBatch,
     AnnotationBatchAnnotator,
     BatchItem,
     BatchStatus,
+    ItemStatus,
 )
 from dada_api.models.bootstrap import BootstrapRecord
 from dada_api.models.dataset import DatasetSplit, SplitName
@@ -460,7 +460,7 @@ async def test_the_training_pool_keeps_unselected_and_returned_train_media(
         await session.execute(
             update(BatchItem)
             .where(BatchItem.media_id == resolved)
-            .values(status=ITEM_RESOLVED)
+            .values(status=ItemStatus.resolved)
         )
         await session.execute(
             update(AnnotationBatch)
@@ -504,12 +504,12 @@ async def test_first_acquisition_waits_for_accepted_resolutions(
         await session.execute(
             update(BatchItem)
             .where(BatchItem.id != remaining)
-            .values(status=ITEM_RESOLVED)
+            .values(status=ItemStatus.resolved)
         )
         await session.commit()
         assert not await datasets.first_acquisition_ready(session, project)
 
-        await session.execute(update(BatchItem).values(status=ITEM_RESOLVED))
+        await session.execute(update(BatchItem).values(status=ItemStatus.resolved))
         await session.commit()
         assert await datasets.first_acquisition_ready(session, project)
 
@@ -559,17 +559,52 @@ async def test_activation_is_refused_twice_and_before_prerequisites(
     assert again.json()["error"]["code"] == "project_not_draft"
 
 
-async def test_single_mode_start_creates_one_unclaimed_assignment_per_item(
+async def _add_annotators(
+    client: httpx.AsyncClient, token: str, project_id: str, members: list[str]
+) -> list[str]:
+    """Add existing users as annotators and return their identifiers."""
+    annotator_ids = []
+    for username in members:
+        added = await client.post(
+            f"/api/v1/projects/{project_id}/members",
+            headers=_auth(token),
+            json={"username": username, "role": "annotator"},
+        )
+        assert added.status_code == 201, added.text
+        annotator_ids.append(added.json()["user_id"])
+    return annotator_ids
+
+
+async def _owners_in_media_order(batch_id: str) -> list[str]:
+    """Return the username owning each assignment, in media path order."""
+    async with async_session_factory() as session:
+        return list(
+            await session.scalars(
+                select(User.username)
+                .join(
+                    AnnotationAssignment, AnnotationAssignment.annotator_id == User.id
+                )
+                .join(BatchItem, BatchItem.id == AnnotationAssignment.batch_item_id)
+                .join(Media, Media.id == BatchItem.media_id)
+                .where(BatchItem.batch_id == batch_id)
+                .order_by(Media.relative_path)
+            )
+        )
+
+
+async def test_single_mode_deals_every_image_to_a_named_annotator(
     database: None,
 ) -> None:
     await _create_user("owner")
+    await _create_user("annie")
+    await _create_user("bob")
     token = await _token("owner")
 
     async with _client() as client:
         project = await _ready_project(client, token)
+        await _add_annotators(client, token, project["id"], ["annie", "bob"])
         await _activate(client, token, project["id"])
-        by_purpose = await _batches(client, token, project["id"])
-        batch = by_purpose["initial_training"]
+        batch = (await _batches(client, token, project["id"]))["initial_training"]
 
         started = await client.post(
             f"/api/v1/projects/{project['id']}/batches/{batch['id']}/start",
@@ -582,12 +617,54 @@ async def test_single_mode_start_creates_one_unclaimed_assignment_per_item(
     assert body["started_at"] is not None
     assert body["total_items"] == TRAINING_SIZE
     assert body["total_assignments"] == TRAINING_SIZE
+    assert body["available_assignments"] == TRAINING_SIZE
     assert body["submitted_assignments"] == 0
+    assert body["resolved_items"] == 0
+    assert await _owners_in_media_order(batch["id"]) == [
+        "annie",
+        "bob",
+        "owner",
+        "annie",
+        "bob",
+    ]
 
-    async with async_session_factory() as session:
-        owners = list(await session.scalars(select(AnnotationAssignment.annotator_id)))
 
-    assert owners == [None] * TRAINING_SIZE
+async def test_a_single_mode_group_restricts_who_receives_the_images(
+    database: None,
+) -> None:
+    await _create_user("owner")
+    await _create_user("annie")
+    await _create_user("bob")
+    token = await _token("owner")
+
+    async with _client() as client:
+        project = await _ready_project(client, token)
+        annie_id, _ = await _add_annotators(
+            client, token, project["id"], ["annie", "bob"]
+        )
+        saved = await client.put(
+            f"/api/v1/projects/{project['id']}/annotation-policy",
+            headers=_auth(token),
+            json={
+                "mode": "single",
+                "annotator_ids": [annie_id],
+                "resolver": None,
+                "parameters": {},
+                "review_thresholds": {},
+                "version": 1,
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        await _activate(client, token, project["id"])
+        batch = (await _batches(client, token, project["id"]))["initial_training"]
+
+        started = await client.post(
+            f"/api/v1/projects/{project['id']}/batches/{batch['id']}/start",
+            headers=_auth(token),
+        )
+
+    assert started.status_code == 200, started.text
+    assert await _owners_in_media_order(batch["id"]) == ["annie"] * TRAINING_SIZE
 
 
 async def _consensus_project(
@@ -595,15 +672,7 @@ async def _consensus_project(
 ) -> dict:
     """Create an activated project whose default policy is consensus."""
     project = await _ready_project(client, token)
-    annotator_ids = []
-    for username in members:
-        added = await client.post(
-            f"/api/v1/projects/{project['id']}/members",
-            headers=_auth(token),
-            json={"username": username, "role": "annotator"},
-        )
-        assert added.status_code == 201, added.text
-        annotator_ids.append(added.json()["user_id"])
+    annotator_ids = await _add_annotators(client, token, project["id"], members)
 
     saved = await client.put(
         f"/api/v1/projects/{project['id']}/annotation-policy",
@@ -794,9 +863,10 @@ async def test_editing_the_project_default_leaves_a_snapshot_untouched(
     assert after["source_policy_version"] == 2
 
 
-async def test_batch_routes_enforce_the_project_role_matrix(database: None) -> None:
+async def test_batch_routes_are_a_manager_view(database: None) -> None:
     await _create_user("owner")
     await _create_user("viv")
+    await _create_user("annie")
     token = await _token("owner")
 
     async with _client() as client:
@@ -810,12 +880,18 @@ async def test_batch_routes_enforce_the_project_role_matrix(database: None) -> N
             json={"username": "viv", "role": "viewer"},
         )
         assert added.status_code == 201, added.text
+        await _add_annotators(client, token, project["id"], ["annie"])
         viewer_token = await _token("viv")
+        annotator_token = await _token("annie")
 
-        readable = await client.get(
-            f"/api/v1/projects/{project['id']}/batches/{batch['id']}",
-            headers=_auth(viewer_token),
-        )
+        refused_reads = [
+            await client.get(url, headers=_auth(caller))
+            for caller in (viewer_token, annotator_token)
+            for url in (
+                f"/api/v1/projects/{project['id']}/batches",
+                f"/api/v1/projects/{project['id']}/batches/{batch['id']}",
+            )
+        ]
         start_refused = await client.post(
             f"/api/v1/projects/{project['id']}/batches/{batch['id']}/start",
             headers=_auth(viewer_token),
@@ -832,7 +908,7 @@ async def test_batch_routes_enforce_the_project_role_matrix(database: None) -> N
             },
         )
 
-    assert readable.status_code == 200
+    assert [response.status_code for response in refused_reads] == [403] * 4
     assert start_refused.status_code == 403
     assert patch_refused.status_code == 403
 
@@ -925,7 +1001,7 @@ async def test_a_single_batch_project_annotates_every_image_once(
         splits = await session.scalar(select(func.count()).select_from(DatasetSplit))
         stored = await session.get(Project, project["id"])
         assert stored is not None
-        await session.execute(update(BatchItem).values(status=ITEM_RESOLVED))
+        await session.execute(update(BatchItem).values(status=ItemStatus.resolved))
         await session.commit()
         ready = await datasets.first_acquisition_ready(session, stored)
 

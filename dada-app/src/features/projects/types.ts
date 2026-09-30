@@ -74,6 +74,8 @@ export type ProjectDraft = {
   description: string
   taskType: TaskType
   classes: ProjectClassInput[]
+  /** Decides how later training batches are chosen; `single_batch` is random only. */
+  acquisitionStrategy: AcquisitionStrategy
   datasetLayout: DatasetLayout
   /** Null means the first training batch uses `iterationBatchSize`. */
   initialTrainingSize: number | null
@@ -120,7 +122,12 @@ export type AnnotationBatch = {
   selection_input_fingerprint: string
   requested_size: number
   total_items: number
+  resolved_items: number
+  awaiting_resolution_items: number
+  cancelled_items: number
   total_assignments: number
+  available_assignments: number
+  in_progress_assignments: number
   submitted_assignments: number
   started_at: string | null
   created_at: string

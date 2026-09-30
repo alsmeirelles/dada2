@@ -529,6 +529,32 @@ async def count_media(session: AsyncSession, project: Project) -> int:
     )
 
 
+async def get_media_content(
+    session: AsyncSession,
+    media_id: str,
+) -> ContentObject:
+    """Return the verified content behind one media item.
+
+    Args:
+        session: Active database session.
+        media_id: Media item being served.
+
+    Returns:
+        The content object holding the item's bytes and type.
+
+    Raises:
+        ApiError: 404 when the media item does not exist.
+    """
+    content = await session.scalar(
+        select(ContentObject)
+        .join(Media, Media.content_object_id == ContentObject.id)
+        .where(Media.id == media_id)
+    )
+    if content is None:
+        raise ApiError(404, "not_found", "The media item does not exist.")
+    return content
+
+
 async def list_media(
     session: AsyncSession,
     project: Project,

@@ -1,5 +1,7 @@
 """Annotation batch listing, policy snapshot editing, and start routes."""
 
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,9 +23,7 @@ async def _represent(
 ) -> BatchResponse:
     """Build a batch response from its snapshot, group, and progress counts."""
     group = await batch_service.annotator_ids(session, batch)
-    total_items, total_assignments, submitted = await batch_service.counts(
-        session, batch
-    )
+    progress = await batch_service.counts(session, batch)
     return BatchResponse(
         id=batch.id,
         project_id=batch.project_id,
@@ -40,9 +40,7 @@ async def _represent(
         selection_seed=batch.selection_seed,
         selection_input_fingerprint=batch.selection_input_fingerprint,
         requested_size=batch.requested_size,
-        total_items=total_items,
-        total_assignments=total_assignments,
-        submitted_assignments=submitted,
+        **asdict(progress),
         started_at=batch.started_at,
         created_at=batch.created_at,
         updated_at=batch.updated_at,
@@ -52,10 +50,16 @@ async def _represent(
 @router.get("/projects/{project_id}/batches", response_model=BatchPage)
 async def list_batches(
     cursor: str | None = Query(default=None),
-    project: Project = Depends(require_project_action(ProjectAction.read_project)),
+    project: Project = Depends(
+        require_project_action(ProjectAction.manage_annotation_policy)
+    ),
     session: AsyncSession = Depends(get_session),
 ) -> BatchPage:
     """List a project's annotation batches.
+
+    Batches name the consensus group and count everyone's submissions, so
+    they are a manager view: annotators must not see peer identity or
+    progress before they submit, and use their own assignment queue instead.
 
     Args:
         cursor: Opaque cursor from a previous page.
@@ -75,10 +79,12 @@ async def list_batches(
 @router.get("/projects/{project_id}/batches/{batch_id}", response_model=BatchResponse)
 async def read_batch(
     batch_id: str,
-    project: Project = Depends(require_project_action(ProjectAction.read_project)),
+    project: Project = Depends(
+        require_project_action(ProjectAction.manage_annotation_policy)
+    ),
     session: AsyncSession = Depends(get_session),
 ) -> BatchResponse:
-    """Return one batch with its policy snapshot and progress.
+    """Return one batch with its policy snapshot and progress, for managers.
 
     Args:
         batch_id: Batch being read.

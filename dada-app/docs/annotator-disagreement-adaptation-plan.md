@@ -633,7 +633,9 @@ this document should be addressed.
 
 ## Pending decision register for Phases 5–9
 
-All entries below are **PENDING**. Shared API decisions `P5-01`–`P9-03` are
+All entries below are **PENDING** except `A5-01`–`A5-04`, which were decided
+on 2026-09-30 in [Phase 5](../../dada-api/docs/phases/phase_5.md#decisões),
+subject to review. Shared API decisions `P5-01`–`P9-03` are
 defined in the [API implementation plan](../../dada-api/docs/api-implementation-plan.md#pending-decision-register-for-phases-5-9)
 and also block the App phase that references them.
 

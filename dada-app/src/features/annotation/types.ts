@@ -1,4 +1,4 @@
-import type { Project, ProjectClassInput, TaskType } from '../projects/types'
+import type { BatchPurpose, Project, ProjectClassInput, TaskType } from '../projects/types'
 
 export type IterationStatus = 'preparing' | 'annotating' | 'consolidating' | 'closing' | 'training' | 'ready' | 'failed'
 
@@ -27,30 +27,81 @@ export type IterationList = {
   next_cursor: string | null
 }
 
-export type QueueItemStatus = 'available' | 'leased' | 'submitted' | 'completed'
+export type AssignmentStatus = 'pending' | 'in_progress' | 'submitted' | 'reassigned' | 'cancelled'
+export type QueueState = 'pending' | 'in_progress' | 'submitted'
 
-export type QueueItem = {
-  assignment_id?: string
+/** One of the caller's own assignments. It never carries peer information. */
+export type AssignmentQueueItem = {
+  id: string
+  batch_id: string
+  batch_purpose: BatchPurpose
   media_id: string
   relative_path: string
-  thumbnail_url?: string
-  status: QueueItemStatus
   width: number
   height: number
-  /** Present only for legacy, single-image queues. Consensus queues stay blind. */
-  leased_by?: { id: string; display_name: string }
+  status: AssignmentStatus
+  version: number
+  seeded_from_import: boolean
+  updated_at: string
 }
 
-export type AnnotationQueue = {
-  items: QueueItem[]
-  available_count: number
-  leased_count: number
-  completed_count: number
-  submitted_count?: number
-  resolved_count?: number
-  review_required_count?: number
-  total_count?: number
-  next_cursor: string | null
+export type AssignmentQueue = {
+  items: AssignmentQueueItem[]
+  counts: Record<QueueState, number>
+}
+
+export type AssignmentMedia = {
+  id: string
+  relative_path: string
+  width: number
+  height: number
+  image_url: string
+}
+
+export type AssignmentDetail = {
+  id: string
+  project_id: string
+  batch_id: string
+  batch_purpose: BatchPurpose
+  task_type: TaskType
+  status: AssignmentStatus
+  version: number
+  media: AssignmentMedia
+  objects: AnnotationObject[]
+  seeded_from_import: boolean
+  draft_saved_at: string | null
+  revision: number | null
+  submitted_at: string | null
+}
+
+export type DraftSaved = {
+  id: string
+  status: AssignmentStatus
+  version: number
+  draft_saved_at: string
+}
+
+export type SubmissionReceived = {
+  id: string
+  status: AssignmentStatus
+  version: number
+  submission_id: string
+  revision: number
+  submitted_at: string
+  image_resolved: boolean
+}
+
+/** A manager's view of one assignment, without its document content. */
+export type BatchAssignment = {
+  id: string
+  batch_item_id: string
+  item_status: string
+  media_id: string
+  relative_path: string
+  annotator_id: string
+  status: AssignmentStatus
+  version: number
+  updated_at: string
 }
 
 export type RectangleGeometry = {
@@ -91,25 +142,9 @@ export type SamPrediction = {
   embedding_cache_key?: string | null
 }
 
-export type Lease = {
-  lease_id: string
-  assignment_id?: string
-  expires_at: string
-  renew_after: number
-  media: {
-    id: string
-    image_url: string
-    relative_path: string
-    width: number
-    height: number
-  }
-  annotation: AnnotationDocument
-}
-
 export type WorkspaceBootstrap = {
   project: Project
   classes: ProjectClassInput[]
-  iteration: Iteration | null
 }
 
 export type ProjectStatistics = {

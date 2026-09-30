@@ -1,5 +1,6 @@
 """Batch creation, policy snapshots, and assignment generation."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, select
@@ -9,25 +10,46 @@ from dada_api.core.cursors import decode_cursor, encode_cursor
 from dada_api.core.errors import ApiError
 from dada_api.models.annotation_policy import AnnotationMode
 from dada_api.models.batch import (
-    ASSIGNMENT_PENDING,
+    ACTIVE_ASSIGNMENT_STATUSES,
     AnnotationAssignment,
     AnnotationBatch,
     AnnotationBatchAnnotator,
+    AssignmentStatus,
     BatchItem,
     BatchPurpose,
     BatchStatus,
+    ItemStatus,
 )
 from dada_api.models.label_import import (
     AnnotationImport,
     ImportedSeedDocument,
     ImportStatus,
 )
-from dada_api.models.project import Project
+from dada_api.models.media import Media
+from dada_api.models.project import ANNOTATION_ROLES, Project, ProjectMember
 from dada_api.models.user import User
 from dada_api.schemas.batch import BatchPolicyUpdate
 from dada_api.services import annotation_policy, audit, selection
 
 PAGE_SIZE = 50
+
+
+@dataclass(frozen=True)
+class BatchCounts:
+    """Image and assignment progress of one batch.
+
+    Cancelled images and terminal assignments are left out of the totals:
+    they are kept as evidence but are no longer work.
+    """
+
+    total_items: int
+    resolved_items: int
+    awaiting_resolution_items: int
+    cancelled_items: int
+    total_assignments: int
+    available_assignments: int
+    in_progress_assignments: int
+    submitted_assignments: int
 
 
 async def _snapshot_policy(
@@ -109,37 +131,100 @@ async def annotator_ids(session: AsyncSession, batch: AnnotationBatch) -> list[s
     )
 
 
-async def counts(session: AsyncSession, batch: AnnotationBatch) -> tuple[int, int, int]:
-    """Return a batch's item, assignment, and submitted-assignment counts.
+async def counts(session: AsyncSession, batch: AnnotationBatch) -> BatchCounts:
+    """Return a batch's image and assignment progress.
 
     Args:
         session: Active database session.
         batch: Batch being measured.
 
     Returns:
-        Total items, total assignments, and submitted assignments.
+        The batch's counts by image and assignment state.
     """
-    items = await session.scalar(
-        select(func.count())
-        .select_from(BatchItem)
-        .where(BatchItem.batch_id == batch.id)
+    items = dict(
+        (
+            await session.execute(
+                select(BatchItem.status, func.count())
+                .where(BatchItem.batch_id == batch.id)
+                .group_by(BatchItem.status)
+            )
+        ).all()
     )
-    assignments = await session.scalar(
-        select(func.count())
-        .select_from(AnnotationAssignment)
-        .join(BatchItem, BatchItem.id == AnnotationAssignment.batch_item_id)
-        .where(BatchItem.batch_id == batch.id)
+    assignments = dict(
+        (
+            await session.execute(
+                select(AnnotationAssignment.status, func.count())
+                .join(BatchItem, BatchItem.id == AnnotationAssignment.batch_item_id)
+                .where(BatchItem.batch_id == batch.id)
+                .group_by(AnnotationAssignment.status)
+            )
+        ).all()
     )
-    submitted = await session.scalar(
-        select(func.count())
-        .select_from(AnnotationAssignment)
-        .join(BatchItem, BatchItem.id == AnnotationAssignment.batch_item_id)
-        .where(
-            BatchItem.batch_id == batch.id,
-            AnnotationAssignment.status != ASSIGNMENT_PENDING,
+    cancelled = items.get(ItemStatus.cancelled, 0)
+    return BatchCounts(
+        total_items=sum(items.values()) - cancelled,
+        resolved_items=items.get(ItemStatus.resolved, 0),
+        awaiting_resolution_items=items.get(ItemStatus.awaiting_resolution, 0),
+        cancelled_items=cancelled,
+        total_assignments=sum(
+            assignments.get(status, 0) for status in ACTIVE_ASSIGNMENT_STATUSES
+        ),
+        available_assignments=assignments.get(AssignmentStatus.pending, 0),
+        in_progress_assignments=assignments.get(AssignmentStatus.in_progress, 0),
+        submitted_assignments=assignments.get(AssignmentStatus.submitted, 0),
+    )
+
+
+async def annotation_members(session: AsyncSession, project: Project) -> list[str]:
+    """Return the project members allowed to annotate, ordered by username.
+
+    Args:
+        session: Active database session.
+        project: Project being inspected.
+
+    Returns:
+        User identifiers of every owner, manager, and annotator.
+    """
+    return list(
+        await session.scalars(
+            select(ProjectMember.user_id)
+            .join(User, User.id == ProjectMember.user_id)
+            .where(
+                ProjectMember.project_id == project.id,
+                ProjectMember.role.in_(ANNOTATION_ROLES),
+            )
+            .order_by(User.username)
         )
     )
-    return items or 0, assignments or 0, submitted or 0
+
+
+async def accepted_seeds(
+    session: AsyncSession, project: Project
+) -> dict[str, ImportedSeedDocument]:
+    """Return the project's accepted imported seeds keyed by media identifier."""
+    seeds = await session.scalars(
+        select(ImportedSeedDocument)
+        .join(AnnotationImport, AnnotationImport.id == ImportedSeedDocument.import_id)
+        .where(
+            AnnotationImport.project_id == project.id,
+            AnnotationImport.status == ImportStatus.accepted,
+        )
+    )
+    return {seed.media_id: seed for seed in seeds}
+
+
+def seeded_assignment(
+    item_id: str,
+    annotator_id: str,
+    seed: ImportedSeedDocument | None,
+) -> AnnotationAssignment:
+    """Return a new assignment whose draft starts as a copy of the image's seed."""
+    return AnnotationAssignment(
+        batch_item_id=item_id,
+        annotator_id=annotator_id,
+        seed_document_id=seed.id if seed else None,
+        draft=list(seed.document["objects"]) if seed else None,
+    )
 
 
 async def list_batches(
@@ -309,13 +394,15 @@ async def start(
     """Freeze a batch's policy and generate its assignments atomically.
 
     A consensus batch produces one assignment per snapshotted annotator per
-    item. A single-mode batch produces one unclaimed assignment per item,
-    because the policy names no owner and any eligible annotator may take it.
+    item. A single-mode batch produces one assignment per item, dealt in turn
+    to the snapshotted group, or to every member allowed to annotate when the
+    group is empty. Every assignment therefore has an owner the moment it
+    exists, and nobody ever claims work.
 
     Only an active project distributes work. Activation is what closes the
     label-import review, so starting a prepared draft's batch would hand out
-    assignments before their seeds are settled. Every assignment whose image
-    has an accepted imported seed is linked to it.
+    assignments before their seeds are settled. Each assignment's draft starts
+    as a copy of its image's accepted imported seed.
 
     Validation happens before any assignment is created and everything commits
     together, so a refused start leaves no partial work behind.
@@ -357,38 +444,25 @@ async def start(
 
     items = (
         await session.execute(
-            select(BatchItem.id, BatchItem.media_id).where(
-                BatchItem.batch_id == batch.id
-            )
+            select(BatchItem.id, BatchItem.media_id)
+            .join(Media, Media.id == BatchItem.media_id)
+            .where(BatchItem.batch_id == batch.id)
+            .order_by(Media.relative_path, Media.id)
         )
     ).all()
-    seeds = dict(
-        (
-            await session.execute(
-                select(ImportedSeedDocument.media_id, ImportedSeedDocument.id)
-                .join(
-                    AnnotationImport,
-                    AnnotationImport.id == ImportedSeedDocument.import_id,
-                )
-                .where(
-                    AnnotationImport.project_id == project.id,
-                    AnnotationImport.status == ImportStatus.accepted,
-                )
-            )
-        ).all()
-    )
-    owners: list[str | None] = (
-        list(group) if mode is AnnotationMode.consensus else [None]
-    )
-    for item_id, media_id in items:
-        for owner in owners:
-            session.add(
-                AnnotationAssignment(
-                    batch_item_id=item_id,
-                    annotator_id=owner,
-                    seed_document_id=seeds.get(media_id),
-                )
-            )
+    seeds = await accepted_seeds(session, project)
+
+    dealers = group or await annotation_members(session, project)
+    assignments = 0
+    for position, (item_id, media_id) in enumerate(items):
+        owners = (
+            group
+            if mode is AnnotationMode.consensus
+            else [dealers[position % len(dealers)]]
+        )
+        for annotator_id in owners:
+            session.add(seeded_assignment(item_id, annotator_id, seeds.get(media_id)))
+        assignments += len(owners)
 
     batch.status = BatchStatus.annotating
     batch.started_at = datetime.now(UTC)
@@ -404,7 +478,7 @@ async def start(
             "mode": mode.value,
             "annotator_ids": group,
             "items": len(items),
-            "assignments": len(items) * len(owners),
+            "assignments": assignments,
             "seeded_items": sum(1 for _, media_id in items if media_id in seeds),
         },
     )

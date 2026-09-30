@@ -12,6 +12,7 @@ import {
   type SetupStage,
 } from './setup-recovery'
 import type {
+  AcquisitionStrategy,
   AnnotationPolicy,
   Page,
   Project,
@@ -54,7 +55,7 @@ export function getProject(projectId: string, token: string) {
   return apiRequest<Project>(`/api/v1/projects/${projectId}`, { token })
 }
 
-export function updateProject(projectId: string, body: { name?: string; description?: string | null; version: number }, token: string) {
+export function updateProject(projectId: string, body: { name?: string; description?: string | null; acquisition_strategy?: AcquisitionStrategy; version: number }, token: string) {
   return apiRequest<Project>(`/api/v1/projects/${projectId}`, { method: 'PATCH', token, headers: idempotencyHeaders(), body })
 }
 
@@ -192,6 +193,7 @@ export function buildProjectCreateBody(draft: ProjectDraft) {
     name: draft.name.trim(),
     description: draft.description.trim() || null,
     task_type: draft.taskType,
+    acquisition_strategy: draft.acquisitionStrategy,
     dataset_layout: draft.datasetLayout,
   }
   if (draft.datasetLayout === 'single_batch') return basics

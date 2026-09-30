@@ -82,6 +82,7 @@ async def read_project(
 async def update_project(
     request: ProjectUpdate,
     project: Project = Depends(require_project_action(ProjectAction.update_project)),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Project:
     """Apply a versioned update to a project.
@@ -89,12 +90,13 @@ async def update_project(
     Args:
         request: Validated update request carrying the expected version.
         project: Project resolved and authorized by the dependency.
+        user: Authenticated user recorded as the actor.
         session: Active database session.
 
     Returns:
         The updated project.
     """
-    return await project_service.update_project(session, project, request)
+    return await project_service.update_project(session, user, project, request)
 
 
 @router.post("/projects/{project_id}/activate", response_model=ProjectResponse)
