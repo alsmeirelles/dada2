@@ -8,6 +8,7 @@ endif
 
 DADA_API_HOST ?= 0.0.0.0
 DADA_API_PORT ?= 8000
+DADA_ENVIRONMENT ?= development
 UV_CACHE_DIR ?= .uv-cache
 export UV_CACHE_DIR
 
@@ -20,6 +21,7 @@ help:
 	  'sync-dev         Install locked runtime and development dependencies.' \
 	  'infra-up         Start PostgreSQL and Redis and wait for health.' \
 	  'infra-down       Stop local infrastructure without deleting volumes.' \
+	  'rebuild          Delete the local database volume, recreate it, and migrate.' \
 	  'migrate          Upgrade the database explicitly to the migration head.' \
 	  'migration-check  Fail if ORM metadata differs from migration head.' \
 	  'bootstrap-admin  Create the initial administrator. Safe to rerun.' \
@@ -36,12 +38,21 @@ sync:
 sync-dev:
 	uv sync --extra dev --frozen
 
-.PHONY: infra-up infra-down
+.PHONY: infra-up infra-down rebuild
 infra-up:
 	docker compose up -d --wait postgres redis
 
 infra-down:
 	docker compose down
+
+rebuild:
+	@if [[ '$(DADA_ENVIRONMENT)' != 'development' ]]; then \
+		printf '%s\n' 'Refusing to rebuild: DADA_ENVIRONMENT must be development.' >&2; \
+		exit 1; \
+	fi
+	docker compose down --volumes
+	$(MAKE) infra-up
+	$(MAKE) migrate
 
 .PHONY: migrate migration-check
 migrate:
