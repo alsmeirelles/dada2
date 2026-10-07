@@ -50,7 +50,7 @@ discarded just because they lack a group.
 ### Resolve object existence and class
 
 For every candidate object, construct a class-observation matrix over the
-configured annotator group. An annotator matched to the group supplies its
+frozen initial cohort. An annotator matched to the candidate supplies its
 chosen class. An annotator who submitted a valid image document but had no
 matching box supplies a `no_object` observation. Missing assignments remain
 missing values and block first-release resolution.

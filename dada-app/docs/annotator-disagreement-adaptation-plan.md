@@ -57,17 +57,20 @@ browser-only behavior.
 ### Consensus project
 
 1. The owner adds project members and chooses **Consensus annotation**.
-2. The owner selects at least two members authorized to annotate and reviews
-   the total assignment cost: selected images multiplied by group size.
-3. Each selected image appears independently in every configured annotator's
-   queue. One annotator working on it does not block another group member.
+2. The owner selects an eligible annotator pool, an initial per-image cohort
+   size, and a candidate-review count; the initial cohort size is at least two
+   and the pool must provide distinct reviewers.
+3. Each selected image appears independently only in its frozen initial
+   cohort's queues. One annotator working on it does not block another cohort
+   member.
 4. Annotators work blindly: they cannot see peer names, drafts, submissions,
-   agreement scores, or the proposed consensus in the ordinary workspace.
+   agreement scores, or a resolution proposal in the ordinary workspace.
 5. After the final required submission, the item enters automated resolution.
 6. A successful resolution advances image progress. An ambiguous result enters
    a manager review queue.
-7. An owner/manager compares evidence, accepts the proposed result, edits it,
-   or replaces it with an adjudicated canonical annotation.
+7. A low-quality detection/segmentation candidate receives a scoped review
+   assignment; only candidates that remain unresolved after that evidence reach
+   an owner/manager expert for adjudication.
 
 ## App architecture changes
 
@@ -102,7 +105,8 @@ Add these contract concepts:
 - Counts for images, resolved images, assignments, submitted assignments,
   available/in-progress assignments, pending resolutions, resolution work
   items, and review-required items.
-- Manager-only evidence, resolver diagnostics, proposed/accepted resolutions,
+- Manager-only evidence, resolver diagnostics, resolution proposals and
+  accepted resolutions,
   resolution history, and adjudication requests.
 
 Update `src/api/types.ts` at the same time to replace the stale current-user
@@ -191,8 +195,9 @@ project wizard:
 - Show an assignment estimate separately for initial training, validation,
   test, and one acquisition iteration, plus their total. Label this as work
   items rather than images.
-- Add policy mode, group size, resolver, and estimated work to the final review
-  screen.
+- Add policy mode, eligible-pool size, initial/review cohort counts, resolver,
+  and estimated work to the final review screen; Phase 5.1 defines the cohort
+  selection and review-escalation contract.
 - In Phase 5, add the active-learning choice and state plainly that disabling
   it makes future acquisition batches reproducible random selections from the
   eligible unlabeled pool.
@@ -268,7 +273,7 @@ endpoints. It must not show:
 - peer annotator names for the same image;
 - peer geometry or class choices;
 - current vote counts or agreement metrics;
-- proposed or accepted consensus before the caller submits; or
+- a resolution proposal or accepted consensus before the caller submits; or
 - events containing peer-specific evidence.
 
 Treat an accidental evidence field in an annotator response as a contract
@@ -357,7 +362,7 @@ item is opened.
 Reuse canvas primitives but add a review-specific read-only overlay model:
 
 - give each raw submission a stable, accessible color/pattern;
-- allow toggling individual submissions and the proposed resolution;
+- allow toggling individual submissions and the resolution proposal;
 - show side-by-side mode where overlays would become unreadable;
 - display classification vote distribution, detection match/support/IoU, or
   segmentation Dice/IoU/STAPLE diagnostics as appropriate;
@@ -373,8 +378,8 @@ remain intact.
 
 The manager can:
 
-1. accept the proposed resolution;
-2. start from the proposal, edit it with the existing tools, and submit an
+1. accept the resolution proposal;
+2. start from the resolution proposal, edit it with the existing tools, and submit an
    adjudicated canonical document;
 3. start from one raw submission and edit it;
 4. create a replacement annotation; or
@@ -578,7 +583,8 @@ addressed.
 
 ### Phase 6: resolution and adjudication
 
-**Start gate:** resolve shared decisions `P6-01`–`P6-08` and App decisions
+**Start gate:** complete and verify the [Phase 5.1 consensus cohort and
+review-assignment revision](../../dada-api/docs/phases/phase_5.1.md), resolve shared decisions `P6-01`–`P6-08` and App decisions
 `A6-01`–`A6-04` in `dada-api/docs/phases/phase_6.md`; approve the complete
 [Consensus Engine Requirements](../../dada-api/docs/consensus-engine-requirements.md)
 before implementing API or App consensus behavior.
@@ -633,22 +639,13 @@ this document should be addressed.
 
 ## Pending decision register for Phases 5–9
 
-All entries below are **PENDING** except `A5-01`–`A5-04`, which were decided
-on 2026-09-30 in [Phase 5](../../dada-api/docs/phases/phase_5.md#decisões),
+All entries below are **PENDING**,
 subject to review. Shared API decisions `P5-01`–`P9-03` are
-defined in the [API implementation plan](../../dada-api/docs/api-implementation-plan.md#pending-decision-register-for-phases-5-9)
+defined in the [API implementation plan](../../dada-api/docs/api-implementation-plan.md#Pending decision register for Phases 5–9)
 and also block the App phase that references them.
 
 | ID | Pending App decision | Required documented outcome |
 | --- | --- | --- |
-| `A5-01` | Acquisition-strategy and dataset-layout setup UX | Control placement and wording, Random default, split versus static-batch validation, review summary, draft recovery, settings visibility, and treatment when the API says the setting is locked |
-| `A5-02` | Random-acquisition presentation | Explanation of unlabeled-pool eligibility and reproducibility, manager visibility of seed/strategy provenance, empty/exhausted-pool messaging, and removal of model-guided language |
-| `A5-03` | Image-assignment queue UX | Direct assigned-image queue ordering/filtering, navigation, offline and stale-version recovery, manager reassignment messaging, accessibility behavior, and no annotation-lease controls |
-| `A5-04` | Submission, import seed, and recovery UX | Owner/manager import review/errors, seeded-draft provenance, reopen rules, success terminology, stale-draft reconciliation choices, recovery expiry/display, empty-annotation confirmation, and visibility after own submission |
-| `A6-01` | Review queue information design | Default filters/sort, row diagnostics, pagination, lazy image/evidence loading, reason vocabulary, and aggregate vs. named evidence visibility |
-| `A6-02` | Evidence comparison interaction | Overlay colors/patterns, side-by-side breakpoint, keyboard controls, task-specific metrics, large-object handling, and nonvisual equivalents |
-| `A6-03` | Adjudication editing and confirmation | Starting source, draft/recovery key, accept/edit/replace/retry confirmations, unsaved-navigation behavior, and stale-version reconciliation |
-| `A6-04` | Resolver configuration UX | Editable approved parameters, advanced-control disclosure, defaults/help text, threshold warnings, and provenance/history presentation |
 | `A7-01` | Learning and random-mode activity UX | Status vocabulary and progress for model-guided versus random acquisition, unavailable-adapter behavior, cancellation/retry actions, and ETA presentation |
 | `A7-02` | Quality and performance presentation | Charts/tables, filters, role visibility, minimum-sample suppression, export affordances, accessibility equivalents, and prohibition on annotator-facing rankings |
 | `A7-03` | Assisted-segmentation UX | Trigger/preview/accept/reject flow, latency/offline behavior, provenance display, keyboard behavior, and recovery interaction |
@@ -657,6 +654,12 @@ and also block the App phase that references them.
 | `A8-03` | Load and accessibility budgets | Page-size defaults, lazy-loading thresholds, canvas/evidence limits, 200% zoom layouts, reduced-motion behavior, and measurable performance budgets |
 | `A9-01` | Browser and end-to-end acceptance matrix | Exact browser/OS versions, roles, task types, single/consensus and active/random acquisition paths, accessibility tooling, and evidence capture |
 | `A9-02` | App release compatibility and rollout | API/OpenAPI compatibility check, feature-availability behavior, cache/storage migration, rollback behavior, telemetry acceptance, and release approvers |
+
+Phase 5 App decisions `A5-01`–`A5-04` and API decisions `P5-01`–`P5-06`
+are maintained in the canonical [Phase 5 decision record](../../dada-api/docs/phases/phase_5.md). Decided on 2026-09-30
+
+Phase 6 App decisions `A6-01`–`A6-04` and API decisions `P6-01`–`P6-08`
+are maintained in the canonical [Phase 6 decision record](../../dada-api/docs/phases/phase_6.md).
 
 ## Test plan
 
@@ -712,7 +715,7 @@ Detailed issues are in [Phase 5 issues](issues_before_phase5.md).
 
 #### Phase 6
 
-Not available yet.
+Detailed issues are in [Phase 6 issues](issues_before_phase6.md).
 
 #### Phase 7
 

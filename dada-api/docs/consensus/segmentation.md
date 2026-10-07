@@ -45,9 +45,10 @@ unmatched masks are diagnostics, not automatic canonical instances.
 
 ### Resolve existence and class
 
-For each instance candidate, build a class-observation matrix. Matched masks
-contribute their selected class; a valid submission with no matching instance
-contributes `no_object`; missing assignments remain missing. Resolve class and
+For each instance candidate, build a class-observation matrix from the frozen
+initial cohort. Matched masks contribute their selected class; a valid
+submission with no matching instance contributes `no_object`; missing
+assignments remain missing. Resolve class and
 existence with the user-selected registered Cleanlab adapter defined in
 [classification.md](classification.md).
 

@@ -1,6 +1,8 @@
 # Phase 4.1 annotation-sequence revision plan
 
-**Status:** Required before Phase 5 starts. This document records the accepted
+**Status:** Required before Phase 5 starts. [Phase 5.1](phases/phase_5.1.md)
+is additionally required before Phase 6 and supersedes the prior all-group
+consensus-assignment interpretation. This document records the accepted
 correction to Phase 4. It is an implementation plan, not evidence that the
 correction has been delivered.
 

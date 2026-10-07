@@ -45,11 +45,12 @@ selection, according to project configuration. The policy supports two modes:
 1. `single`: one eligible annotator submits one document for each selected
    image. That submission is promoted to the resolved annotation without a
    statistical consensus run.
-2. `consensus`: every selected image is independently annotated by the
-   configured group. When all required submissions arrive, the API measures
-   disagreement and runs the configured task-specific resolver. A low-quality
-   or ambiguous result enters manual review instead of silently becoming
-   training truth.
+2. `consensus`: every selected image is independently annotated by its frozen
+   per-image initial cohort. When all required submissions arrive, the API
+   measures disagreement and runs the configured task-specific resolver. A
+   low-quality or ambiguous candidate receives scoped review evidence before
+   expert adjudication, rather than silently becoming training truth. The
+   cohort/review contract is defined by [Phase 5.1](phases/phase_5.1.md).
 
 The project stores a versioned default policy. Each selected set stores a copy,
 so later membership, default-policy, threshold, or algorithm changes cannot
@@ -57,13 +58,11 @@ alter in-flight work or its provenance. Owners/managers may change the policy
 only while the set is `preparing`. Re-running a resolver creates a new
 resolution version; it never mutates raw submissions.
 
-For the first release, `consensus` means an explicit group of at least two
-project members authorized to annotate (`owner`, `manager`, or `annotator`)
-and one assignment per group member per image. The required submission count
-therefore equals the snapshotted
-group size. A later extension may support a larger pool with a smaller quorum,
-but it should not be included in the first schema or UI unless there is a
-concrete need.
+For the first release, `consensus` means an explicit eligible pool of project
+members authorized to annotate (`owner`, `manager`, or `annotator`) and a
+frozen, deterministic per-image cohort whose size is
+`required_consensus_annotations`. The pool may be larger than that cohort.
+Phase 5.1 defines selection, review escalation, provenance, and validation.
 
 ## Terminology and state model
 
@@ -89,8 +88,18 @@ concrete need.
 - **Imported seed document**: an immutable, audited label-import result copied
   into each assigned annotator's editable draft. It is neither a submission nor
   a canonical resolution.
+- **Model seed**: an optional, versioned starting annotation generated from a
+  completed Phase 7 model run for media selected into the next annotation
+  batch. It is copied into an annotator's draft during batch preparation and
+  records model-run, model/artifact, media, and generation provenance. It is
+  not a submission, consensus vote, resolution proposal, or canonical
+  resolution; only the annotator's later saved submission may enter consensus.
 - **Resolution**: the immutable canonical annotation derived from one or more
   submissions, including provenance and disagreement diagnostics.
+- **Resolution proposal**: the consensus worker's immutable output for a
+  completed evidence snapshot before, or atomically with, acceptance. It is
+  visible only through authorized review/evidence resources and is never an
+  annotator draft or model seed.
 - **Adjudication**: an authorized human decision that creates a resolution when
   automation requests review or its result is rejected.
 
@@ -201,8 +210,8 @@ The remaining migrations should introduce these records:
 | Operations | idempotency_records, outbox_events, worker_jobs, audit_entries | repeated keys return the original result for the same actor, route, and body |
 
 Persist all geometry in original-image pixel coordinates and retain original
-dimensions. Every configured annotator may independently annotate their direct
-assignment for the same image. A lease is considered only for a manual
+dimensions. Every member of an image's selected initial cohort may independently
+annotate their direct assignment. A lease is considered only for a manual
 resolution work item and never controls annotation access.
 
 Annotators must not receive peer drafts, submissions, identities, agreement
@@ -275,7 +284,7 @@ remain, with the following additions or semantic changes.
 | `GET` | `/api/v1/projects/{project_id}/batches/{batch_id}/resolutions` | List resolution/review status for managers |
 | `GET` | `/api/v1/projects/{project_id}/batch-items/{item_id}/evidence` | Manager view of raw submissions, metrics, and resolution history |
 | `POST` | `/api/v1/projects/{project_id}/batch-items/{item_id}/resolve` | Retry a resolver with a versioned configuration |
-| `POST` | `/api/v1/projects/{project_id}/resolution-work-items/{item_id}/adjudicate` | Submit an audited canonical document or accept a proposed result for an image case or derived object/instance |
+| `POST` | `/api/v1/projects/{project_id}/resolution-work-items/{item_id}/adjudicate` | Submit an audited canonical document or accept a resolution proposal for an image case or derived object/instance |
 | `GET` | `/api/v1/projects/{project_id}/annotator-performance` | Authorized project-scoped aggregate performance summaries and sample sizes |
 
 A policy representation includes `mode`, ordered `annotator_ids`,
@@ -406,8 +415,8 @@ The required changes are summarized here to make API dependencies explicit:
   from assignment submission progress, include `consolidating` and
   `review_required`, and link managers to unresolved items.
 - Add a manager-only consensus review feature and route. Reuse the image/canvas
-  rendering primitives to overlay color-coded submissions and the proposed
-  resolution, display task-specific agreement metrics, and allow accepting,
+  rendering primitives to overlay color-coded submissions and the resolution
+  proposal, display task-specific agreement metrics, and allow accepting,
   editing, or replacing the canonical document. Make provenance visible and
   every adjudication action explicit.
 - Update real-time invalidation handling for assignment/resolution events and
@@ -592,7 +601,7 @@ App work:
 
 Exit gate: the same input and seed reproduce selection; test media never enters
 acquisition; every consensus batch item has exactly one assignment per
-snapshotted annotator; failed starts roll back completely. Administrators can
+selected initial-cohort annotator; failed starts roll back completely. Administrators can
 create, update, reset, disable, and safely remove eligible users; all users can
 change their own password; no non-administrator can access global user actions.
 
@@ -670,16 +679,23 @@ App work:
   [Phase 5 image-assignment workspace work](../../dada-app/docs/annotator-disagreement-adaptation-plan.md#phase-5-image-assignment-workspace).
 
 Exit gate: project creation persists the acquisition strategy; direct image
-assignments permit every configured consensus annotator to independently
+assignments permit every selected initial-cohort annotator to independently
 annotate the same image; and stale drafts, duplicate completions, and
 cross-user access fail correctly. Acquisition production remains blocked until
 Phase 6 has accepted resolutions for the initial images and Phase 7 performs
 the random or model-guided selection.
 
+### Phase 5.1: consensus cohort and review-assignment revision
+
+**Gate:** complete and verify the [Phase 5.1 consensus cohort and
+review-assignment revision](phases/phase_5.1.md). It replaces the prior
+all-group-per-image assignment rule with frozen per-image initial cohorts and
+candidate-scoped review evidence.
+
 ### Phase 6: consensus engine, diagnostics, and adjudication
 
-**Start gate:** resolve API decisions `P6-01`–`P6-08` and App decisions
-`A6-01`–`A6-04` in `docs/phases/phase_6.md`, complete every blocking item in
+**Start gate:** complete Phase 5.1, resolve API decisions `P6-01`–`P6-08` and App decisions
+`A6-01`–`A6-04` in [Phase_6](phases/phase_6.md), complete every blocking item in
 [Consensus Engine Requirements](consensus-engine-requirements.md), and mark
 that document **Approved** before implementing the consensus engine.
 
@@ -692,7 +708,7 @@ that document **Approved** before implementing the consensus engine.
   in the [classification](consensus/classification.md),
   [detection](consensus/detection.md), and
   [segmentation](consensus/segmentation.md) strategy documents.
-- Persist disagreement diagnostics, proposed/accepted resolution versions, and
+- Persist disagreement diagnostics, resolution-proposal/accepted-resolution versions, and
   immutable provenance. Persist raw-to-canonical mappings and the task-specific
   annotator performance observations defined above. Enforce review thresholds
   and build manager evidence, retry, and adjudication endpoints.
@@ -728,6 +744,12 @@ plans.
   learning first trains and evaluates from the accepted initial resolutions.
 - Generate dataset manifests only from accepted resolution IDs and include
   resolution provenance in model-run lineage.
+- After a model-guided acquisition selection is finalized, optionally generate
+  a model seed for each selected next-batch image during batch preparation.
+  Record the model run, artifact/version, media version, generation parameters,
+  and seed hash; copy the seed into each selected annotator's independent draft.
+  A model seed remains optional assistance and never counts as a submission or
+  consensus vote.
 - Implement authorized assisted-segmentation dispatch/results. Its output is an
   annotator aid inside an assignment, not an independent consensus vote.
 - Add quality statistics such as review rate and inter-annotator agreement
@@ -826,8 +848,7 @@ are contract-tested, not just status codes.
 
 ### Pending decision register for Phases 5–9
 
-Every entry below is **PENDING** except `P5-01`–`P5-06`, which were decided
-on 2026-09-30 in [Phase 5](phases/phase_5.md#decisões), subject to review.
+Every entry below is **PENDING**.
 “Document before start” means the decision
 must be resolved in the matching `docs/phases/phase_N.md` under the mandatory
 gate above. A phase cannot be declared started while one of its entries remains
@@ -837,20 +858,6 @@ and share the same gate and decision record.
 
 | ID | Pending decision | Required documented outcome |
 | --- | --- | --- |
-| `P5-01` | Acquisition strategy and dataset-layout contract | Field names/enums, Random default, `split` versus random-only static `single_batch`, mutability before/after preparation/activation, version/audit behavior, development-reset treatment, and OpenAPI examples |
-| `P5-02` | Random acquisition semantics | Sampling algorithm/order, seed lifecycle, fingerprint, and provenance. The eligible pool, completed/cancelled/incomplete-item handling, final undersized-batch rule, and `iteration_batch_size` requested-size rule are fixed by the [Phase 4.1 revision plan](phase-4-annotation-sequence-revision-plan.md). |
-| `P5-03` | Image-assignment access | Direct assigned-image access without annotation leases or claims; queue ordering; disconnect and recovery behavior; manager reassignment; and concurrent visibility of the same image to the configured consensus group |
-| `P5-04` | Assignment reassignment and submission lifecycle | Reassignment authority and audit before submission; immutable full-image submission revisions; whether submitted work may reopen; duplicate-completion response; and return of cancelled/incomplete images to the eligible train pool |
-| `P5-05` | Full-image annotation and import contract | Versioned classification/detection/segmentation image-document schemas; YOLO detection and COCO segmentation import adapters; class-index mapping; imported-seed provenance; explicit single-label vs. multi-label configuration; object entries within detection/segmentation documents; coordinate precision; empty-annotation semantics; geometry limits; validation errors; and payload/complexity limits |
-| `P5-06` | Blindness and import-visibility boundary | Exactly what aggregate state an annotator may read before submission, after own submission, after item resolution, and after batch closure; imported-seed source visibility; and event redaction rules |
-| `P6-01` | Resolver/package catalog | Supported Cleanlab and crowd-kit versions, adapter versions, pipeline IDs, dependency isolation, compatibility policy, and capability fallback behavior |
-| `P6-02` | Resolver configuration and quality gates | Typed parameters, defaults/bounds, task-specific thresholds, calibration dataset and approval evidence, tie/ambiguity rules, and migration from provisional policy IDs |
-| `P6-03` | Segmentation refinement implementation | Maintained STAPLE dependency or approved internal implementation, supported crowd-kit strategies, rasterization/polygonization libraries, and reference fixtures |
-| `P6-04` | Adjudicator independence | Whether a contributor may adjudicate the same item, conflict disclosure, role restrictions, optional independent-adjudicator mode, and audit fields |
-| `P6-05` | Resolution job execution | Worker/queue topology, command/result envelopes, timeouts, retry/backoff limits, cancellation, stale/duplicate result handling, CPU/memory limits, and permanent-failure recovery |
-| `P6-06` | Resolution acceptance/versioning | Automatic acceptance criteria, proposal vs. accepted states, retry configuration/version conflicts, supersession, one-active-result invariant, and adjudication precedence |
-| `P6-07` | Evidence and performance policy | Raw evidence retention/access, raw-to-canonical mapping rules, observation eligibility, privacy/minimum-sample rules, and behavior when a resolution is superseded |
-| `P6-08` | Resolution work-item and lease policy | Image-case versus derived object/instance work-item identity; creation, closure, and provenance; which manual review actions require a resolution lease; lease duration/renewal/revocation; and concurrent-adjudication conflict handling |
 | `P7-01` | Learning and export protocol | Versioned command/result envelopes, manifest format, artifact storage, accepted-resolution lineage, transport-independent errors, and compatibility policy |
 | `P7-02` | Active-learning implementation | Initial model/training adapter, acquisition score and tie-breaking, cold-start behavior, reproducibility inputs, model/run retention, and behavior when the adapter is unavailable |
 | `P7-03` | Iteration and evaluation policy | Available user-selectable validation metrics and thresholds, comparison direction, training/evaluation cadence, interaction between the user-defined maximum acquisition-iteration count and metric threshold, retry/resume semantics, ETA/progress contract, and failure rollback. The initial training batch is excluded from the acquisition-iteration count; every acquisition follows accepted consensus resolutions; and test evaluation is final-only, as fixed by the [Phase 4.1 revision plan](phase-4-annotation-sequence-revision-plan.md). |
@@ -863,6 +870,13 @@ and share the same gate and decision record.
 | `P9-01` | Release compatibility freeze | Supported App/API/OpenAPI, migration head, resolver/package versions, browser matrix, and upgrade/downgrade compatibility window |
 | `P9-02` | Release and migration procedure | Deployment order, database migration/rollback rules, worker drain, feature flags if any, rollback limits, and backup checkpoint |
 | `P9-03` | Acceptance ownership | Canonical acceptance dataset, performance/accessibility/security thresholds, responsible approvers, evidence location, and release sign-off procedure |
+
+Phase 5 API decisions `P5-01`–`P6-06` and App decisions `A5-01`–`A5-04`
+are maintained in the canonical [Phase 5 decision record](phases/phase_5.md). COMPLETED on 2026-09-30.
+
+
+Phase 6 API decisions `P6-01`–`P6-08` and App decisions `A6-01`–`A6-04`
+are maintained in the canonical [Phase 6 decision record](phases/phase_6.md).
 
 ### Phase 3 storage and retention — settled
 

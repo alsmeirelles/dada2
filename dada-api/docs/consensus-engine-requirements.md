@@ -13,15 +13,17 @@ adjudication, provenance, and performance evidence.
 
 Phase 6 **must not start implementation** until:
 
-1. decisions `P6-01`–`P6-08` and App decisions `A6-01`–`A6-04` are resolved in
+1. the [Phase 5.1 consensus cohort and review-assignment revision](phases/phase_5.1.md)
+   is implemented and verified;
+2. decisions `P6-01`–`P6-08` and App decisions `A6-01`–`A6-04` are resolved in
    `docs/phases/phase_6.md` with rationale, alternatives, contract/data effects,
    approver, and date;
-2. every `[TO DECIDE]` item in this document is replaced by the approved
+3. every `[TO DECIDE]` item in this document is replaced by the approved
    outcome or a link to it;
-3. the document status is changed to **Approved** with approver and date;
-4. the classification, detection, and segmentation annexes are consistent
+4. the document status is changed to **Approved** with approver and date;
+5. the classification, detection, and segmentation annexes are consistent
    with the approved resolver catalog and parameter schemas; and
-5. the API plan and App plan link to the approved revision.
+6. the API plan and App plan link to the approved revision.
 
 Exploratory fixtures and dependency spikes may be used to decide an item. They
 must not become production resolver code before approval.
@@ -39,7 +41,7 @@ The engine includes:
 - readiness detection after all required assignments have submissions;
 - durable resolution-job scheduling and execution;
 - task-specific normalization, matching, aggregation, and quality gates;
-- proposed and accepted immutable resolution versions;
+- resolution-proposal and accepted immutable resolution versions;
 - disagreement diagnostics and raw-to-canonical evidence;
 - manager evidence, retry, acceptance, editing, replacement, and adjudication;
 - deterministic provenance and idempotent replay;
@@ -54,8 +56,8 @@ Phase 7 consumes only accepted resolutions produced under this contract.
 
 | Actor | Required behavior |
 | --- | --- |
-| Annotator | May submit only their own assignment. Before submission they receive no peer identity, document, vote, metric, proposal, or resolution detail. After submission visibility follows decision `P5-06`. |
-| Project owner/manager | May read evidence and history, retry an approved resolver configuration, accept a proposal, or adjudicate when authorized. Contributor/adjudicator conflicts follow `P6-04`. |
+| Annotator | May submit only their own assignment. Before submission they receive no peer identity, document, vote, metric, resolution proposal, or resolution detail. They may receive their own Phase 7 model seed as draft assistance; it is not peer or consensus evidence. After submission visibility follows decision `P5-06`. |
+| Project owner/manager | May read evidence and history, retry an approved resolver configuration, accept a resolution proposal, or adjudicate when authorized. Contributor/adjudicator conflicts follow `P6-04`. |
 | Global administrator | Has the same project-resource authority currently defined by the centralized authorization matrix; actions remain project-audited. |
 | Consensus worker | Uses a scoped internal identity and accepts only durable commands. It cannot call manager HTTP actions or bypass project/task/configuration validation. |
 
@@ -69,14 +71,15 @@ An item follows this resolution lifecycle:
 
 ```text
 awaiting_submissions -> resolution_queued -> resolving
-  -> proposed -> accepted
+  -> proposed (resolution proposal) -> accepted
   -> review_required -> accepted
   -> failed
 ```
 
 The approved Phase 6 decision may collapse `proposed` into an atomic automatic
 acceptance transition, but persistence and events must still distinguish the
-resolver output from the accepted canonical version.
+resolution proposal produced by the resolver from the accepted canonical
+version.
 
 Required invariants:
 
@@ -101,14 +104,14 @@ Required invariants:
 
 ### CE-F01 — readiness and scheduling
 
-- The final required submission transaction records item readiness and a
+- The final submission from an item's frozen initial cohort records item readiness and a
   transactional outbox entry exactly once.
 - Duplicate final-submission requests or outbox delivery cannot schedule
   duplicate active runs.
 - Single-annotation mode creates its canonical resolution transactionally in
   Phase 5 and does not invoke a statistical resolver.
 - Consensus mode snapshots submission IDs, document versions/content hashes,
-  policy version, ordered annotator IDs, task, class catalog version, media
+  policy version, selected initial cohort, task, class catalog version, media
   identity/dimensions, and resolver configuration before dispatch.
 - Imported seed documents are excluded from the input snapshot. They may be
   linked as provenance for a human-authored submission, but only submitted
@@ -157,8 +160,8 @@ Required invariants:
 - Ties, insufficient support, ambiguous matches, invalid/degenerate output,
   failed topology, or metrics below an approved threshold produce
   `review_required` rather than an arbitrary canonical result.
-- A successful run persists a proposed result and, where automatic acceptance
-  criteria permit, an accepted immutable canonical document.
+- A successful run persists a resolution proposal and, where automatic
+  acceptance criteria permit, an accepted immutable canonical document.
 - Threshold boundaries and floating-point comparison/rounding rules are
   explicit, versioned, and fixture-tested.
 
@@ -167,9 +170,9 @@ Required invariants:
 - Persist task-stage diagnostics, source-to-candidate and source-to-canonical
   mappings, unmatched reasons, vote/support distributions, geometry metrics,
   excluded outliers, and threshold outcomes.
-- Manager evidence returns raw submissions, proposal, accepted/superseded
-  history, diagnostics, and provenance through paginated/lazy resources where
-  necessary.
+- Manager evidence returns raw submissions, the resolution proposal,
+  accepted/superseded history, diagnostics, and provenance through paginated/
+  lazy resources where necessary.
 - Ordinary assignment/queue/event responses contain no raw peer evidence or
   named peer status.
 - Import audit remains visible only to authorized owners/managers. An ordinary
@@ -187,8 +190,8 @@ Required invariants:
 
 ### CE-F08 — acceptance and adjudication
 
-- An authorized manager may accept a valid proposal, edit from the proposal,
-  edit from a selected raw submission, or submit a replacement canonical
+- An authorized manager may accept a valid resolution proposal, edit from that
+  proposal or a selected raw submission, or submit a replacement canonical
   document.
 - Every action is versioned, idempotent, explicitly audited, and validates the
   resulting document against the project task/classes/media.
@@ -345,20 +348,13 @@ accepted versions, and performance observations remain correct and idempotent.
 
 ## Blocking decisions and approval record
 
-| ID | Status | Must resolve before approval |
-| --- | --- | --- |
-| `P6-01` Resolver/package catalog | **PENDING** | Versions, pipeline IDs, compatibility and unavailable behavior |
-| `P6-02` Configuration/quality gates | **PENDING** | Typed schemas, calibrated defaults/bounds, thresholds, ties, provisional-ID migration |
-| `P6-03` Segmentation implementation | **PENDING** | STAPLE choice, crowd-kit set, rasterization/polygonization stack and fixtures |
-| `P6-04` Adjudicator independence | **PENDING** | Contributor conflict policy, role restrictions and audit |
-| `P6-05` Job execution | **PENDING** | Protocol, topology, timeouts, retries, cancellation, limits and recovery |
-| `P6-06` Acceptance/versioning | **PENDING** | Proposal/acceptance transitions, retry conflicts, supersession and precedence |
-| `P6-07` Evidence/performance policy | **PENDING** | Retention, access, mapping, eligibility, suppression and supersession behavior |
+The pending Phase 6 API and App decisions, including their required outcomes,
+are maintained in the canonical [Phase 6 decision record](phases/phase_6.md).
 
 Approval metadata to complete after the decision record is accepted:
 
 - **Approved by:** `[TO DECIDE]`
 - **Approval date:** `[TO DECIDE]`
-- **Approved decision record:** `[TO DECIDE: link to docs/phases/phase_6.md]`
+- **Approved decision record:** [Phase 6 decision record](phases/phase_6.md)
 - **OpenAPI baseline:** `[TO DECIDE]`
 - **Resolver compatibility set:** `[TO DECIDE]`

@@ -412,8 +412,10 @@ and must never be run against production.
 
 1. Delete each existing project with `DELETE /api/v1/projects/{project_id}` as
    its owner or an administrator. This purges its rows and its media tree.
-2. Alternatively, for a throwaway local database, run `docker compose down -v`,
-   then `make infra-up`, `make migrate`, and `make bootstrap-admin`.
+2. Alternatively, for a throwaway local database, run `make rebuild`, then
+   `make bootstrap-admin`. `make rebuild` deletes the PostgreSQL Compose volume,
+   recreates the local services, and migrates the empty database. It refuses to
+   run unless `DADA_ENVIRONMENT=development`.
 3. Verify that the following returns zero in every column, and that no project
    directory remains under `DADA_MEDIA_ROOT`:
 
@@ -451,7 +453,9 @@ group works the same image independently. Decisions are recorded in
 
 **Starting a batch.** A single-mode batch deals its images in turn to the
 policy group, or to every owner, manager, and annotator when the group is
-empty. A consensus batch gives every group member every image.
+empty. The current all-group consensus assignment behavior is superseded before
+Phase 6 by the [Phase 5.1 cohort and review-assignment revision](phases/phase_5.1.md):
+a consensus batch selects and records an initial cohort for each image.
 
 **Assignment lifecycle.** An assignment is `pending`, then `in_progress` after
 its first draft save, then `submitted`. `reassigned` and `cancelled` are

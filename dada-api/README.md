@@ -31,6 +31,11 @@ make bootstrap-admin
 make run
 ```
 
+To discard an incompatible local development database and migrate a fresh one,
+run `make rebuild`, then rerun `make bootstrap-admin`. The rebuild command
+deletes the local PostgreSQL Compose volume and refuses to run unless
+`DADA_ENVIRONMENT=development`.
+
 The default API URL is `http://localhost:8000`; liveness and readiness are
 available at `/health` and `/ready`.
 

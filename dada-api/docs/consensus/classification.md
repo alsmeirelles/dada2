@@ -29,8 +29,9 @@ Build a rater-by-class observation matrix:
 - In multi-label mode, create one binary decision per class. A class absent
   from a valid submitted document is an explicit negative observation.
 - A missing assignment, expired draft, or waived assignment is **missing**,
-  not a negative class observation. First-release consensus batches do not run
-  until their full configured group has submitted.
+  not a negative class observation. Consensus does not run until the complete
+  frozen initial cohort defined by [Phase 5.1](../phases/phase_5.1.md) has
+  submitted.
 
 Record a stable `annotator_index`, class ordering, submission content hashes,
 and the exact matrix passed to the resolver. The index is internal provenance;

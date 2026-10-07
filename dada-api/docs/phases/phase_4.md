@@ -1,5 +1,11 @@
 # Fase 4: Ativação, Seleções Reprodutíveis, Lotes e Administração de Usuários
 
+> **Superseded assignment rule:** [Phase 5.1](phase_5.1.md), required before
+> Phase 6, replaces the all-group-per-image consensus-assignment rule recorded
+> here with immutable per-image initial cohorts and candidate-scoped review
+> assignments. The Phase 4 batch/policy snapshot remains the eligible-pool
+> provenance.
+
 Status: API concluída em 2026-09-08 e fluxo de splits ajustado em 2026-09-15.
 O trabalho do App não fez parte da entrega da API e foi concluído separadamente
 em 2026-09-15.

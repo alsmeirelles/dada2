@@ -1,5 +1,10 @@
 # Decisions for Phase 5 implementation
 
+> **Superseded assignment rule:** [Phase 5.1](phase_5.1.md), required before
+> Phase 6, replaces full-group consensus assignments with frozen per-image
+> initial cohorts and candidate-scoped review assignments. It preserves Phase
+> 5's full-image draft/submission and blindness rules.
+
 ## API decisions
 Phase 5 has the pending decisions below. Remarks are made for some of them and any other decisions during implementation
 should be registered.
