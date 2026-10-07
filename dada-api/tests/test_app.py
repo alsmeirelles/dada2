@@ -1,27 +1,40 @@
 """Phase 0 HTTP application contract tests."""
 
 import json
+from collections.abc import AsyncIterator
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from dada_api.core.errors import redact_validation_errors
 from dada_api.main import app
 from dada_api.schemas.project import ProjectCreate
 
-client = TestClient(app)
+
+@pytest.fixture
+async def client() -> AsyncIterator[httpx.AsyncClient]:
+    """Use the same non-blocking ASGI transport as the other HTTP tests."""
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as test_client:
+        yield test_client
 
 
-def test_health_is_dependency_free_and_traced() -> None:
-    response = client.get("/health", headers={"X-Trace-ID": "test-trace-1234"})
+async def test_health_is_dependency_free_and_traced(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/health", headers={"X-Trace-ID": "test-trace-1234"})
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "DADA API"}
     assert response.headers["x-trace-id"] == "test-trace-1234"
 
 
-def test_capabilities_match_frontend_contract() -> None:
-    response = client.get("/api/v1/capabilities")
+async def test_capabilities_match_frontend_contract(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/api/v1/capabilities")
     assert response.status_code == 200
     assert response.json() == {
         "supported_image_media_types": ["image/jpeg", "image/png", "image/webp"],
@@ -41,8 +54,10 @@ def test_capabilities_match_frontend_contract() -> None:
     }
 
 
-def test_framework_errors_use_common_envelope() -> None:
-    response = client.get("/missing")
+async def test_framework_errors_use_common_envelope(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/missing")
     assert response.status_code == 404
     body = response.json()["error"]
     assert body["code"] == "not_found"
@@ -51,8 +66,10 @@ def test_framework_errors_use_common_envelope() -> None:
     assert body["trace_id"] == response.headers["x-trace-id"]
 
 
-def test_invalid_idempotency_key_uses_common_envelope() -> None:
-    response = client.post(
+async def test_invalid_idempotency_key_uses_common_envelope(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.post(
         "/api/v1/projects",
         headers={"Idempotency-Key": "short"},
         json={},
@@ -61,8 +78,10 @@ def test_invalid_idempotency_key_uses_common_envelope() -> None:
     assert response.json()["error"]["code"] == "invalid_idempotency_key"
 
 
-def test_idempotency_short_circuit_still_carries_cors_headers() -> None:
-    response = client.post(
+async def test_idempotency_short_circuit_still_carries_cors_headers(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.post(
         "/api/v1/projects",
         headers={
             "Origin": "http://localhost:5173",
@@ -74,9 +93,11 @@ def test_idempotency_short_circuit_still_carries_cors_headers() -> None:
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
 
 
-def test_validation_errors_never_echo_the_submitted_value() -> None:
+async def test_validation_errors_never_echo_the_submitted_value(
+    client: httpx.AsyncClient,
+) -> None:
     secret = "Pa55wd!"
-    response = client.post(
+    response = await client.post(
         "/api/v1/auth/token",
         json={"username": "alice", "password": secret},
     )
@@ -103,8 +124,10 @@ def test_model_validator_errors_are_reported_by_message() -> None:
     assert "single_batch accepts no split or iteration sizes" in json.dumps(errors)
 
 
-def test_cors_allows_configured_app_origin_and_upload_headers() -> None:
-    response = client.options(
+async def test_cors_allows_configured_app_origin_and_upload_headers(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.options(
         "/api/v1/capabilities",
         headers={
             "Origin": "http://localhost:5173",
@@ -117,8 +140,10 @@ def test_cors_allows_configured_app_origin_and_upload_headers() -> None:
     assert "Upload-Offset" in response.headers["access-control-allow-headers"]
 
 
-def test_openapi_contains_capabilities_and_project_schemas() -> None:
-    document = client.get("/openapi.json").json()
+async def test_openapi_contains_capabilities_and_project_schemas(
+    client: httpx.AsyncClient,
+) -> None:
+    document = (await client.get("/openapi.json")).json()
     assert "/api/v1/capabilities" in document["paths"]
     assert "/api/v1/projects/{project_id}/annotation-policy" in document["paths"]
     schemas = document["components"]["schemas"]
@@ -131,7 +156,9 @@ def test_openapi_contains_capabilities_and_project_schemas() -> None:
     assert "AnnotationPolicyResponse" in schemas
 
 
-def test_project_routes_require_authentication() -> None:
-    response = client.get("/api/v1/projects")
+async def test_project_routes_require_authentication(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/api/v1/projects")
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "unauthenticated"

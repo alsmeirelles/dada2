@@ -2,8 +2,10 @@
 
 **Status:** Required before Phase 6 implementation.
 **Scope:** This plan revises the Phase 4/5 consensus-assignment contract. It
-does not implement a resolver; Phase 6 implements the worker and canonical
-resolution lifecycle that consume this contract.
+does not implement a resolver. It introduces the durable readiness event and
+the minimum input-snapshot, work-item, review-assignment, review-submission, and
+outbox foundation that Phase 6 consumes. Phase 6 implements worker execution,
+resolver output handling, proposals, canonical resolutions, and adjudication.
 
 ## Purpose
 
@@ -42,6 +44,13 @@ Consensus policy has an ordered **eligible pool** plus two positive integers:
 | `required_consensus_annotations` | Number of initial full-image assignments per image. Minimum 2; maximum the pool size. |
 | `required_consensus_reviewers` | Number of additional candidate-review assignments when automatic resolution requires review. Minimum 1. |
 
+Both count fields are nullable in persistence and on the wire. A `single`
+policy requires both fields to be absent or `null`. A `consensus` policy
+requires both values and applies the bounds above. The App initializes a policy
+being changed from `single` to `consensus` with two initial annotations and one
+reviewer; those defaults are not stored on a `single` policy. Database checks
+mirror the API rules.
+
 The initial image cohort and each review cohort must be immutable once created. A
 review cohort is selected from eligible pool members who are not in the initial
 cohort or an earlier review cohort for the same candidate. Therefore the
@@ -51,13 +60,21 @@ policy that permits automatic review escalation. The API rejects an invalid
 policy rather than reusing an earlier voter as an ostensibly independent
 reviewer.
 
-At batch start, select the initial cohort for every item by a deterministic
-round-robin over the ordered frozen pool. Persist the cohort position and its
-member IDs with the item assignments. This balances work, allows a pool larger
-than the required cohort, and makes the assignment selection auditable. The
-selection algorithm/version and ordered input pool are provenance, not client
-choices. Consider that the round-robin algorithm may be changed by another strategy in the future, so keep the selection
-modular.
+At batch start, `initial_round_robin_v1` selects each initial cohort from the
+ordered frozen pool. For zero-based item position `i`, it takes
+`required_consensus_annotations` consecutive distinct members beginning at
+`i mod pool_size`, wrapping at the end. Items use their existing deterministic
+media order. Persist the item position, selected member IDs, ordered input pool,
+and algorithm version with the assignments. This balances work, allows a pool
+larger than the required cohort, and makes selection auditable.
+
+When Phase 6 requests review evidence, `review_round_robin_v1` starts after the
+item's initial cohort, incorporates the candidate's stable ordinal, and walks
+the ordered pool while skipping every initial annotator and earlier reviewer
+for that candidate. It returns exactly `required_consensus_reviewers` distinct
+members. Persist the candidate key and stable ordinal, exclusions, selected
+members, ordered input pool, and algorithm version. Keep both selectors behind
+a modular interface so a later policy version can name a different strategy.
 
 Changing either required count, the eligible pool, resolver, parameters, or
 quality thresholds creates a later policy version and affects only batches
@@ -73,8 +90,20 @@ full-image document. Each consensus `batch_item` receives exactly
 `required_consensus_annotations` rows, not one row for every batch-pool member.
 The existing uniqueness constraint `(batch_item_id, annotator_id)` remains.
 When all active initial assignments are submitted, the item becomes
-`awaiting_resolution`; Phase 6 writes a transactional-outbox command for the
-first consensus run.
+`awaiting_resolution`. In the same transaction, Phase 5.1 writes exactly one
+`consensus.initial_evidence_ready.v1` domain event for that batch item and
+cohort generation. Its payload identifies the project, batch, batch item,
+policy version, cohort-selection provenance, and ordered assignment,
+submission, and content-hash inputs. Phase 6 consumes the event and creates its
+versioned worker job and immutable resolver input snapshot.
+
+The batch item stores an `initial_evidence_generation`. Reopening or reassigning
+submitted initial work after readiness increments that generation and returns
+the item to collection. The immutable earlier event remains audit evidence, but
+Phase 6 rejects it as stale by comparing its generation with the batch item.
+Completing the exact cohort again emits one event for the new generation. This
+preserves the Phase 5 manager-correction workflow without letting an obsolete
+snapshot enter consensus.
 
 An initial full-image submission provides positive evidence for matched
 candidates and an explicit `no_object` observation for candidates it does not
@@ -113,19 +142,25 @@ remains.
 
 - Add `required_consensus_annotations` and
   `required_consensus_reviewers` to `annotation_policy_defaults` and
-  `annotation_batches`, with database/API validation for consensus mode.
+  `annotation_batches` as nullable integers. Require `null` in single mode and
+  positive bounded values in consensus mode through database and API
+  validation.
 - Retain `annotation_batch_annotators` as the frozen eligible pool. Add either
   an `annotation_item_annotators` table or equivalent immutable cohort rows so
   the required initial cohort is queryable without inferring it from mutable
   membership.
-- Keep `annotation_assignments` for initial full-image assignments. Add
-  candidate review-assignment and review-submission records linked to
-  `resolution_work_items`; do not overload a full-image assignment with a
-  partial object document.
+- Keep `annotation_assignments` for initial full-image assignments. Add the
+  minimum `resolution_inputs`, `resolution_work_items`, candidate
+  review-assignment, review-submission, and `outbox_events` persistence needed
+  to freeze the Phase 6 boundary. Do not overload a full-image assignment with
+  a partial object document. Phase 6 populates work items from resolver output;
+  Phase 5.1 supplies and tests the invariant-preserving creation service and
+  reviewer workflow.
 - Record initial/review cohort selection, run number, source input IDs/hashes,
   and candidate mapping in durable provenance. Add constraints preventing a
   reviewer from appearing twice in the same candidate's evidence cohort.
-- Existing development batches must be reset/rebuilt. Do not reinterpret
+- Existing single policies migrate with both counts set to `null`. Existing
+  development consensus batches must be reset/rebuilt; do not reinterpret
   already-created all-group assignments as selected cohorts.
 
 ### API services and contract
@@ -140,19 +175,29 @@ remains.
   assignment for each selected cohort member. Preserve direct ownership,
   idempotent submission, draft recovery, and blindness.
 - On the final initial-cohort submission, lock the batch item, verify that the
-  exact cohort submitted, and create the Phase 6 resolution-job outbox entry
-  exactly once.
+  exact cohort submitted, and create the
+  `consensus.initial_evidence_ready.v1` outbox event exactly once. A database
+  uniqueness constraint on event type, batch item, and cohort generation is
+  the final duplicate barrier.
 - Define candidate-review assignment/review-submission schemas and authorized
-  endpoints. Only owners/managers can see raw evidence or dispatch/act on
-  review; review annotators receive only their scoped candidate context.
+  endpoints:
+  - `GET /api/v1/projects/{project_id}/review-assignments`;
+  - `GET /api/v1/projects/{project_id}/review-assignments/{assignment_id}`;
+  - `PUT /api/v1/projects/{project_id}/review-assignments/{assignment_id}/draft`;
+  - `POST /api/v1/projects/{project_id}/review-assignments/{assignment_id}/submit`.
+  Assigned reviewers may read, save, and submit only their scoped candidate
+  context. Owners/managers may inspect raw evidence through manager resources.
+  Only the Phase 6 resolution service creates and dispatches review assignments.
 - Batch and iteration closure continue to depend on accepted canonical image
   resolutions, never merely on a count of submissions or worker completions.
 
 ### App changes
 
-- In project setup, show the eligible annotator pool from system registered users, initial annotation count, review
-  count, total initial assignment estimate, and validation that the pool can
-  supply distinct review annotators.
+- In project setup, show the eligible annotator pool from system registered
+  users, initial annotation count, review count, exact total initial assignment
+  estimate, and validation that the pool can supply distinct review annotators.
+  Describe review work as the configured additional count per escalated
+  candidate because its total cannot be known before resolution.
 - Personal queues continue to show full-image initial assignments. Add a
   distinct candidate-review queue that opens the source image in contextual,
   candidate-scoped review mode and never exposes unrelated peer evidence.
@@ -168,15 +213,20 @@ remains.
   updates fail.
 - Deterministic cohort selection: the same frozen pool and items produce the
   same initial cohorts; rotations are balanced; every item has exactly the
-  required count.
+  required count; review selection uses the stable candidate ordinal and never
+  reuses an initial or earlier reviewer for that candidate.
 - Readiness: fewer than all initial-cohort submissions does not queue work;
-  the final one creates exactly one outbox event despite concurrent requests.
+  the final one creates exactly one outbox event despite concurrent requests;
+  reopen/reassignment advances the evidence generation and makes an earlier
+  event stale.
 - Evidence: omitted objects become `no_object`; a review submission is linked
   once to its candidate and second-run snapshot; no reviewer sees unrelated
   candidate evidence.
-- Resolution paths: initial automatic acceptance; initial review escalation;
-  second-run automatic acceptance; expert adjudication; stale/duplicate worker
-  results; cancellation; and batch closure only after every item resolves.
+- Foundation boundary: input snapshots, work items, review assignments,
+  immutable review submissions, and outbox rows enforce their uniqueness and
+  authorization rules without implementing a resolver. Phase 6 verifies
+  automatic acceptance, review escalation, second-run acceptance, expert
+  adjudication, and stale/duplicate worker-result paths.
 - Contract/App tests: setup validation and estimates, selected-cohort queue
   ownership, candidate-review blindness and recovery, and manager progress.
   Extend the existing `test_batches_http.py` and `test_assignments_http.py`
@@ -194,7 +244,10 @@ seed to a selected next-batch annotator's draft after model-guided acquisition;
 it remains separate from imported seeds, review evidence, submissions, and
 resolution proposals.
 
-Phase 6 cannot start until this plan is implemented and verified, the Phase 6
+Phase 6 consumes `consensus.initial_evidence_ready.v1`; it owns conversion of
+that domain event into a worker job, the command/result envelope, transport,
+retry and timeout behavior, and permanent-failure recovery. Phase 6 cannot
+start until this plan is implemented and verified, the Phase 6
 decision record is complete, and the Consensus Engine Requirements are
 approved. Phase 6 owns resolver packages, durable job execution, candidate
 matching/aggregation, review work-item resolution, and expert adjudication.

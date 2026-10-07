@@ -85,7 +85,9 @@ Add these contract concepts:
 
 - `AnnotationMode = 'single' | 'consensus'`.
 - A discriminated `AnnotationPolicy` with mode, version, selected annotator
-  IDs, resolver identity/version, parameters, and review thresholds.
+  IDs, nullable initial/review cohort counts, resolver identity/version,
+  parameters, and review thresholds. Single mode omits or returns `null` for
+  both counts; consensus mode requires both.
 - `AnnotationBatch` and `BatchPurpose` for static initial annotation, initial
   training, validation, test, and acquisition selections.
 - `DatasetLayout = 'split' | 'single_batch'`; `single_batch` is available only
@@ -120,6 +122,9 @@ Create API client functions for:
 - reading/updating/starting an annotation batch;
 - reading the caller's assigned images;
 - saving and completing the full-image document attached to an assignment;
+- listing and opening the caller's candidate-review assignments;
+- saving and submitting a candidate-review assignment independently from
+  full-image assignment recovery;
 - listing manager resolution work;
 - reading one item's evidence and resolution history;
 - retrying resolution with explicit configuration; and
@@ -139,6 +144,8 @@ projectPolicy(projectId)
 iterations(projectId)
 batch(projectId, batchId)
 assignmentQueue(projectId, iterationId, userId)
+candidateReviewQueue(projectId, userId)
+candidateReviewAssignment(projectId, reviewAssignmentId)
 resolutionQueue(projectId, batchId, filters)
 imageResolutionEvidence(projectId, batchItemId)
 resolutionWorkItem(projectId, resolutionWorkItemId)
@@ -162,6 +169,8 @@ type AnnotationPolicyDraft =
   | {
       mode: 'consensus'
       annotatorUsernames: string[]
+      requiredConsensusAnnotations: number
+      requiredConsensusReviewers: number
       resolver: string
       parameters: Record<string, number | string | boolean>
       reviewThresholds: Record<string, number>
@@ -187,14 +196,18 @@ project wizard:
 - In consensus mode, show a multi-select containing only members authorized to
   annotate. The owner and managers may be included because their roles have
   annotation authority.
-- Require at least two distinct selected users. Explain validation failures
-  inline and retain them when moving between wizard steps.
+- Initialize consensus mode with two initial annotators and one reviewer.
+  Require the selected pool to contain at least the sum of the two configured
+  counts. Explain validation failures inline and retain them when moving
+  between wizard steps.
 - Select a task-compatible resolver. Do not offer STAPLE for classification or
   detection. Present advanced parameters and thresholds in a collapsible
   section with server-provided/default values.
-- Show an assignment estimate separately for initial training, validation,
-  test, and one acquisition iteration, plus their total. Label this as work
-  items rather than images.
+- Show the exact initial-assignment estimate separately for initial training,
+  validation, test, and one acquisition iteration, plus their total. Label
+  this as initial work items rather than images. Show the reviewer count as
+  additional work per escalated candidate; do not imply that the total review
+  workload is known before resolution.
 - Add policy mode, eligible-pool size, initial/review cohort counts, resolver,
   and estimated work to the final review screen; Phase 5.1 defines the cohort
   selection and review-escalation contract.
@@ -327,6 +340,19 @@ manual work is outstanding.
 
 ## Consensus review and adjudication feature
 
+Candidate review and expert consensus management are separate App surfaces.
+Assigned annotators use reviewer routes containing only their scoped context:
+
+```text
+/projects/:projectId/reviews
+/projects/:projectId/reviews/:reviewAssignmentId
+```
+
+These pages use a dedicated personal queue and recovery key containing the
+project ID, review-assignment ID, and base version. They never request manager
+evidence resources. A stale update retains the local candidate-review draft
+while the App refetches authoritative state.
+
 Create a dedicated feature folder, for example:
 
 ```text
@@ -339,7 +365,7 @@ src/features/consensus/
   consensus.css
 ```
 
-Add manager-protected routes such as:
+Add separate manager-protected routes such as:
 
 ```text
 /projects/:projectId/consensus

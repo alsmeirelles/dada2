@@ -281,17 +281,24 @@ remain, with the following additions or semantic changes.
 | `GET/PUT` | `/api/v1/projects/{project_id}/annotation-policy` | Read or version-update the default policy |
 | `GET/PATCH` | `/api/v1/projects/{project_id}/batches/{batch_id}` | Read progress or update policy while `preparing` |
 | `POST` | `/api/v1/projects/{project_id}/batches/{batch_id}/start` | Snapshot policy, validate members, and create assignments atomically |
+| `GET` | `/api/v1/projects/{project_id}/review-assignments` | List the caller's candidate-review assignments without peer evidence |
+| `GET` | `/api/v1/projects/{project_id}/review-assignments/{assignment_id}` | Open the caller's scoped image-label or candidate review context |
+| `PUT` | `/api/v1/projects/{project_id}/review-assignments/{assignment_id}/draft` | Save an optimistic candidate-review draft |
+| `POST` | `/api/v1/projects/{project_id}/review-assignments/{assignment_id}/submit` | Submit immutable candidate-review evidence |
 | `GET` | `/api/v1/projects/{project_id}/batches/{batch_id}/resolutions` | List resolution/review status for managers |
 | `GET` | `/api/v1/projects/{project_id}/batch-items/{item_id}/evidence` | Manager view of raw submissions, metrics, and resolution history |
 | `POST` | `/api/v1/projects/{project_id}/batch-items/{item_id}/resolve` | Retry a resolver with a versioned configuration |
 | `POST` | `/api/v1/projects/{project_id}/resolution-work-items/{item_id}/adjudicate` | Submit an audited canonical document or accept a resolution proposal for an image case or derived object/instance |
 | `GET` | `/api/v1/projects/{project_id}/annotator-performance` | Authorized project-scoped aggregate performance summaries and sample sizes |
 
-A policy representation includes `mode`, ordered `annotator_ids`,
-`resolver`, `resolver_version`, task-specific `parameters`, review thresholds,
-and `version`. In `single` mode, `annotator_ids` may be empty to mean any
-eligible project annotator. In `consensus` mode the explicit snapshotted group
-is required.
+A policy representation includes `mode`, ordered `annotator_ids`, nullable
+`required_consensus_annotations` and `required_consensus_reviewers`, `resolver`,
+`resolver_version`, task-specific `parameters`, review thresholds, and
+`version`. In `single` mode, `annotator_ids` may be empty to mean any eligible
+project annotator and both counts must be absent or `null`. In `consensus` mode
+the explicit snapshotted pool and both counts are required; the initial count
+is at least two, the review count is at least one, and their sum cannot exceed
+the pool size.
 
 ### Image-assignment queues and annotation documents
 
@@ -306,6 +313,13 @@ Draft, completion, and assisted-segmentation routes use `assignment_id`.
 Completion returns the accepted submission and current image resolution status;
 it does not imply that the media is resolved. Recovery snapshots and optimistic
 versions are keyed by `assignment_id` plus the draft version, not by media alone.
+
+Candidate-review queues are separate from full-image assignment queues. A
+reviewer can read, save, and submit only an assignment made directly to them,
+and receives the source image plus the single image-label or candidate context.
+The response contains no unrelated candidates, peer evidence, vote counts, or
+resolver diagnostics. Owners/managers inspect those through manager evidence
+resources; only the Phase 6 resolution service creates review assignments.
 
 `GET /api/v1/media/{media_id}/annotations` must be replaced or narrowed because
 “current annotation” is ambiguous. Use explicit views:
@@ -328,10 +342,12 @@ Add stable conflict/error codes including `policy_locked`,
 `resolution_not_ready`, `resolution_config_conflict`, and
 `adjudication_required`.
 
-Add authorization actions `manage_annotation_policy`, `read_annotation_evidence`,
-`run_resolution`, `adjudicate`, and `read_annotator_performance`. Owners and
-managers receive these actions; annotators do not. Continue to centralize the complete matrix in
-`services/authorization.py`.
+Add authorization actions `manage_annotation_policy`, `work_candidate_review`,
+`read_annotation_evidence`, `run_resolution`, `adjudicate`, and
+`read_annotator_performance`. Any directly assigned authorized annotator may
+use `work_candidate_review` for that assignment only. Owners and managers
+receive the evidence, resolution, adjudication, and performance actions.
+Continue to centralize the complete matrix in `services/authorization.py`.
 
 Add events `assignment.updated`, `annotation.submitted`,
 `resolution.started`, `resolution.completed`,
@@ -373,9 +389,13 @@ peer evidence.
   dependency group when Phase 6 begins. The API process does not import either
   package at startup; a missing or incompatible optional dependency causes a
   capability to be unavailable, never a silent strategy substitution.
-- Use a transactional outbox to schedule resolution exactly after the last
-  required submission commits. Worker result ingestion must tolerate retries,
-  duplicate results, stale configuration, timeouts, and process restarts.
+- Phase 5.1 uses a transactional outbox to persist exactly one
+  `consensus.initial_evidence_ready.v1` domain event with the final required
+  submission for each batch-item evidence generation. Reopening or reassigning
+  submitted work advances that generation, and consumers reject events that no
+  longer match the batch item. Phase 6 consumes current events and owns
+  worker-job creation, transport, retries, duplicate/stale result handling,
+  timeouts, and process restarts.
 - Export only accepted resolved documents to training/evaluation. Record the
   exact resolution IDs in model-run dataset manifests.
 - Derive and persist project-scoped annotator performance observations when a
@@ -690,7 +710,10 @@ the random or model-guided selection.
 **Gate:** complete and verify the [Phase 5.1 consensus cohort and
 review-assignment revision](phases/phase_5.1.md). It replaces the prior
 all-group-per-image assignment rule with frozen per-image initial cohorts and
-candidate-scoped review evidence.
+candidate-scoped review evidence. Phase 5.1 also provides the minimum durable
+input-snapshot, work-item, review-assignment, review-submission, and outbox
+foundation. It emits `consensus.initial_evidence_ready.v1`; it does not create
+or execute a resolver worker job.
 
 ### Phase 6: consensus engine, diagnostics, and adjudication
 

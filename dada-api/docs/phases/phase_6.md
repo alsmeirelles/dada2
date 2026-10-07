@@ -50,18 +50,23 @@ can see the final annotations after consensus is reached.
 ### P6-05 pending suggestions
 
 The consensus dispatch sequence is decided. When all members of an image's
-frozen initial cohort submit, an idempotent worker command resolves every
-candidate in that image. If all automatic gates pass, the image resolves. If a
-classification result or detection/segmentation candidate falls short, create
+frozen initial cohort submit, Phase 5.1 atomically writes exactly one
+`consensus.initial_evidence_ready.v1` domain event for the batch item and cohort
+generation. Phase 6 consumes that event and creates an idempotent worker command
+that resolves every candidate in the image. If all automatic gates pass, the
+image resolves. If a classification result or detection/segmentation candidate
+falls short, create
 the configured number of independent scoped review assignments; after all
 review submissions arrive, dispatch a second worker command over the original
 and review evidence. Candidates still below threshold require expert
 adjudication. The batch resolves only after every non-cancelled image resolves.
 
-The execution mechanism remains pending: choose the queue/worker topology,
-versioned command/result envelopes, timeout and resource limits, retry/backoff
-policy, cancellation, stale/duplicate result rejection, and permanent-failure
-recovery. It must preserve the Phase 5.1 frozen cohorts and immutable evidence.
+The Phase 5.1 outbox event name, payload provenance, and uniqueness boundary
+are fixed. The Phase 6 execution mechanism remains pending: choose the
+queue/worker topology, versioned command/result envelopes, timeout and resource
+limits, retry/backoff policy, cancellation, stale/duplicate result rejection,
+and permanent-failure recovery. It must preserve the Phase 5.1 frozen cohorts
+and immutable evidence.
 
 ### P6-06 decision
 Automatic acceptance is the default when the relevant initial or review run
