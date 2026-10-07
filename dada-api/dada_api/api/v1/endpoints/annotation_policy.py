@@ -33,6 +33,8 @@ def _response(
     return AnnotationPolicyResponse(
         mode=policy.mode.value,
         annotator_ids=annotator_ids,
+        required_consensus_annotations=policy.required_consensus_annotations,
+        required_consensus_reviewers=policy.required_consensus_reviewers,
         resolver=policy.resolver,
         resolver_version=policy.resolver_version,
         parameters=policy.parameters,

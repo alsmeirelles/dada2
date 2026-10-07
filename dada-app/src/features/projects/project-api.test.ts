@@ -107,6 +107,8 @@ describe('buildPolicyBody', () => {
     expect(buildPolicyBody(baseDraft, members, 1)).toEqual({
       mode: 'single',
       annotator_ids: [],
+      required_consensus_annotations: null,
+      required_consensus_reviewers: null,
       resolver: null,
       parameters: {},
       review_thresholds: {},
@@ -120,6 +122,8 @@ describe('buildPolicyBody', () => {
       annotationPolicy: {
         mode: 'consensus',
         annotatorUsernames: ['ana', 'bruno'],
+        requiredAnnotations: 2,
+        requiredReviewers: 1,
         resolver: 'two_stage_box_fusion',
         reviewThreshold: 0.75,
       },
@@ -128,6 +132,8 @@ describe('buildPolicyBody', () => {
     expect(buildPolicyBody(draft, members, 3)).toEqual({
       mode: 'consensus',
       annotator_ids: ['id-ana', 'id-bruno'],
+      required_consensus_annotations: 2,
+      required_consensus_reviewers: 1,
       resolver: 'two_stage_box_fusion',
       parameters: {},
       review_thresholds: { agreement: 0.75 },

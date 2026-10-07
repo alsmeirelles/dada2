@@ -31,6 +31,8 @@ async def _represent(
         status=batch.status,
         mode=batch.mode,
         annotator_ids=group,
+        required_consensus_annotations=batch.required_consensus_annotations,
+        required_consensus_reviewers=batch.required_consensus_reviewers,
         resolver=batch.resolver,
         resolver_version=batch.resolver_version,
         parameters=batch.parameters,

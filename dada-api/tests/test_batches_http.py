@@ -673,6 +673,7 @@ async def _consensus_project(
     """Create an activated project whose default policy is consensus."""
     project = await _ready_project(client, token)
     annotator_ids = await _add_annotators(client, token, project["id"], members)
+    annotator_ids.append(project["owner_id"])
 
     saved = await client.put(
         f"/api/v1/projects/{project['id']}/annotation-policy",
@@ -680,6 +681,8 @@ async def _consensus_project(
         json={
             "mode": "consensus",
             "annotator_ids": annotator_ids,
+            "required_consensus_annotations": 2,
+            "required_consensus_reviewers": 1,
             "resolver": "two_stage_box_fusion",
             "parameters": {},
             "review_thresholds": {"agreement": 0.7},
@@ -966,12 +969,15 @@ async def test_a_single_batch_project_annotates_every_image_once(
                 json={"username": username, "role": "annotator"},
             )
             annotator_ids.append(added.json()["user_id"])
+        annotator_ids.append(project["owner_id"])
         saved = await client.put(
             f"/api/v1/projects/{project['id']}/annotation-policy",
             headers=_auth(token),
             json={
                 "mode": "consensus",
                 "annotator_ids": annotator_ids,
+                "required_consensus_annotations": 2,
+                "required_consensus_reviewers": 1,
                 "resolver": "two_stage_box_fusion",
                 "parameters": {},
                 "review_thresholds": {},

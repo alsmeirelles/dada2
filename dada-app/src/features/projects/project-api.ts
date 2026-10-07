@@ -146,6 +146,8 @@ export function buildPolicyBody(
     return {
       mode: 'single',
       annotator_ids: [],
+      required_consensus_annotations: null,
+      required_consensus_reviewers: null,
       resolver: null,
       parameters: {},
       review_thresholds: {},
@@ -158,6 +160,8 @@ export function buildPolicyBody(
       members,
       draft.annotationPolicy.annotatorUsernames,
     ),
+    required_consensus_annotations: draft.annotationPolicy.requiredAnnotations,
+    required_consensus_reviewers: draft.annotationPolicy.requiredReviewers,
     resolver: draft.annotationPolicy.resolver,
     parameters: {},
     review_thresholds: { agreement: draft.annotationPolicy.reviewThreshold },

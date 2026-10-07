@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -34,6 +35,15 @@ class AnnotationPolicyDefault(Base):
     """
 
     __tablename__ = "annotation_policy_defaults"
+    __table_args__ = (
+        CheckConstraint(
+            "(mode = 'single' AND required_consensus_annotations IS NULL "
+            "AND required_consensus_reviewers IS NULL) OR "
+            "(mode = 'consensus' AND required_consensus_annotations >= 2 "
+            "AND required_consensus_reviewers >= 1)",
+            name="ck_policy_consensus_counts",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36),
@@ -47,6 +57,12 @@ class AnnotationPolicyDefault(Base):
     mode: Mapped[AnnotationMode] = mapped_column(
         Enum(AnnotationMode, name="annotation_mode"),
         default=AnnotationMode.single,
+    )
+    required_consensus_annotations: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    required_consensus_reviewers: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
     )
     resolver: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolver_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -65,10 +81,10 @@ class AnnotationPolicyDefault(Base):
 
 
 class AnnotationPolicyAnnotator(Base):
-    """One annotator's place in a policy's ordered group.
+    """One annotator's place in a policy's ordered eligible pool.
 
-    The group is normalized rather than a JSON column because later phases
-    generate one assignment per member and must join on the user.
+    The pool is normalized rather than a JSON column because batch start
+    selects deterministic per-image cohorts and must join on the user.
     """
 
     __tablename__ = "annotation_policy_annotators"

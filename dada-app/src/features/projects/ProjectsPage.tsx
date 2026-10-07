@@ -64,6 +64,11 @@ export function ProjectsPage() {
               </dl>
               <nav className="project-card__actions" aria-label={`${project.name} actions`}>
                 {project.status === 'active' && (
+                  <Link className="project-card__action" to={`/projects/${project.id}/reviews`}>
+                    <Users size={16} aria-hidden="true" /> Open my candidate reviews
+                  </Link>
+                )}
+                {project.status === 'active' && (
                   <Link className="project-card__action" to={`/projects/${project.id}/annotate`}>
                     <PenLine size={16} aria-hidden="true" /> Open my assignments
                   </Link>

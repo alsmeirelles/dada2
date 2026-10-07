@@ -240,6 +240,28 @@
             "title": "Parameters",
             "type": "object"
           },
+          "required_consensus_annotations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Consensus Annotations"
+          },
+          "required_consensus_reviewers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Consensus Reviewers"
+          },
           "resolver": {
             "anyOf": [
               {
@@ -277,6 +299,8 @@
         "required": [
           "mode",
           "annotator_ids",
+          "required_consensus_annotations",
+          "required_consensus_reviewers",
           "resolver",
           "resolver_version",
           "parameters",
@@ -324,6 +348,30 @@
             },
             "title": "Parameters",
             "type": "object"
+          },
+          "required_consensus_annotations": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Consensus Annotations"
+          },
+          "required_consensus_reviewers": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Consensus Reviewers"
           },
           "resolver": {
             "anyOf": [
@@ -828,6 +876,30 @@
             "title": "Parameters",
             "type": "object"
           },
+          "required_consensus_annotations": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Consensus Annotations"
+          },
+          "required_consensus_reviewers": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Consensus Reviewers"
+          },
           "resolver": {
             "anyOf": [
               {
@@ -939,6 +1011,28 @@
             "title": "Requested Size",
             "type": "integer"
           },
+          "required_consensus_annotations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Consensus Annotations"
+          },
+          "required_consensus_reviewers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Consensus Reviewers"
+          },
           "resolved_items": {
             "title": "Resolved Items",
             "type": "integer"
@@ -1038,6 +1132,8 @@
           "status",
           "mode",
           "annotator_ids",
+          "required_consensus_annotations",
+          "required_consensus_reviewers",
           "resolver",
           "resolver_version",
           "parameters",
@@ -2366,6 +2462,330 @@
           "coordinates"
         ],
         "title": "RectangleGeometry",
+        "type": "object"
+      },
+      "ReviewAssignmentDetail": {
+        "properties": {
+          "candidate_context": {
+            "additionalProperties": true,
+            "title": "Candidate Context",
+            "type": "object"
+          },
+          "candidate_key": {
+            "title": "Candidate Key",
+            "type": "string"
+          },
+          "candidate_ordinal": {
+            "title": "Candidate Ordinal",
+            "type": "integer"
+          },
+          "draft_saved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Saved At"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "media": {
+            "$ref": "#/components/schemas/AssignmentMedia"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "image",
+              "candidate"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "source_input_id": {
+            "format": "uuid",
+            "title": "Source Input Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "in_progress",
+              "submitted",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "work_item_id": {
+            "format": "uuid",
+            "title": "Work Item Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "work_item_id",
+          "source_input_id",
+          "candidate_key",
+          "candidate_ordinal",
+          "scope",
+          "status",
+          "version",
+          "media",
+          "candidate_context",
+          "evidence",
+          "draft_saved_at",
+          "submitted_at"
+        ],
+        "title": "ReviewAssignmentDetail",
+        "type": "object"
+      },
+      "ReviewDraftSaved": {
+        "properties": {
+          "draft_saved_at": {
+            "format": "date-time",
+            "title": "Draft Saved At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "in_progress",
+              "submitted",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "version",
+          "draft_saved_at"
+        ],
+        "title": "ReviewDraftSaved",
+        "type": "object"
+      },
+      "ReviewEvidenceWrite": {
+        "description": "A complete private review draft or submission.",
+        "properties": {
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "evidence"
+        ],
+        "title": "ReviewEvidenceWrite",
+        "type": "object"
+      },
+      "ReviewQueueCounts": {
+        "properties": {
+          "in_progress": {
+            "title": "In Progress",
+            "type": "integer"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "submitted": {
+            "title": "Submitted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending",
+          "in_progress",
+          "submitted"
+        ],
+        "title": "ReviewQueueCounts",
+        "type": "object"
+      },
+      "ReviewQueueItem": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "media_id": {
+            "format": "uuid",
+            "title": "Media Id",
+            "type": "string"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "image",
+              "candidate"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "in_progress",
+              "submitted",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "work_item_id": {
+            "format": "uuid",
+            "title": "Work Item Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "work_item_id",
+          "media_id",
+          "relative_path",
+          "scope",
+          "status",
+          "version",
+          "updated_at"
+        ],
+        "title": "ReviewQueueItem",
+        "type": "object"
+      },
+      "ReviewQueuePage": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/ReviewQueueCounts"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewQueueItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "counts"
+        ],
+        "title": "ReviewQueuePage",
+        "type": "object"
+      },
+      "ReviewSubmissionReceived": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "in_progress",
+              "submitted",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "submission_id": {
+            "format": "uuid",
+            "title": "Submission Id",
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "version",
+          "submission_id",
+          "submitted_at"
+        ],
+        "title": "ReviewSubmissionReceived",
         "type": "object"
       },
       "SamPredictRequest": {
@@ -6814,6 +7234,398 @@
         "summary": "Change Member Role",
         "tags": [
           "members"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/review-assignments": {
+      "get": {
+        "operationId": "list_my_review_assignments_api_v1_projects__project_id__review_assignments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "submitted"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewQueuePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List My Review Assignments",
+        "tags": [
+          "review-assignments"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/review-assignments/{assignment_id}": {
+      "get": {
+        "operationId": "get_my_review_assignment_api_v1_projects__project_id__review_assignments__assignment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assignment_id",
+            "required": true,
+            "schema": {
+              "title": "Assignment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewAssignmentDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get My Review Assignment",
+        "tags": [
+          "review-assignments"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/review-assignments/{assignment_id}/draft": {
+      "put": {
+        "operationId": "save_review_draft_api_v1_projects__project_id__review_assignments__assignment_id__draft_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assignment_id",
+            "required": true,
+            "schema": {
+              "title": "Assignment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewEvidenceWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewDraftSaved"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save Review Draft",
+        "tags": [
+          "review-assignments"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/review-assignments/{assignment_id}/submit": {
+      "post": {
+        "operationId": "submit_review_assignment_api_v1_projects__project_id__review_assignments__assignment_id__submit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assignment_id",
+            "required": true,
+            "schema": {
+              "title": "Assignment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewEvidenceWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSubmissionReceived"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Review Assignment",
+        "tags": [
+          "review-assignments"
         ]
       }
     },

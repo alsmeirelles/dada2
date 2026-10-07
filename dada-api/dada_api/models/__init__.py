@@ -11,6 +11,7 @@ from dada_api.models.batch import (
     AnnotationAssignment,
     AnnotationBatch,
     AnnotationBatchAnnotator,
+    AnnotationItemAnnotator,
     AssignmentStatus,
     BatchItem,
     BatchPurpose,
@@ -18,6 +19,15 @@ from dada_api.models.batch import (
     ItemStatus,
 )
 from dada_api.models.bootstrap import BootstrapRecord
+from dada_api.models.consensus import (
+    OutboxEvent,
+    ResolutionInput,
+    ResolutionWorkItem,
+    ResolutionWorkStatus,
+    ReviewAssignment,
+    ReviewAssignmentStatus,
+    ReviewSubmission,
+)
 from dada_api.models.dataset import DatasetSplit, SplitName
 from dada_api.models.idempotency import IdempotencyRecord
 from dada_api.models.label_import import (
@@ -51,6 +61,7 @@ __all__ = [
     "AnnotationAssignment",
     "AnnotationBatch",
     "AnnotationBatchAnnotator",
+    "AnnotationItemAnnotator",
     "AnnotationImport",
     "AnnotationImportFile",
     "AnnotationMode",
@@ -71,13 +82,20 @@ __all__ = [
     "ImportStatus",
     "ImportedSeedDocument",
     "ItemStatus",
+    "OutboxEvent",
     "Media",
     "Project",
     "ProjectClass",
     "ProjectMember",
     "ProjectRole",
     "RefreshSession",
+    "ResolutionInput",
+    "ResolutionWorkItem",
+    "ResolutionWorkStatus",
     "ResolvedAnnotation",
+    "ReviewAssignment",
+    "ReviewAssignmentStatus",
+    "ReviewSubmission",
     "SplitName",
     "UploadChunk",
     "UploadDisposition",

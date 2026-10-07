@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -84,6 +85,15 @@ class AnnotationBatch(Base):
     """
 
     __tablename__ = "annotation_batches"
+    __table_args__ = (
+        CheckConstraint(
+            "(mode = 'single' AND required_consensus_annotations IS NULL "
+            "AND required_consensus_reviewers IS NULL) OR "
+            "(mode = 'consensus' AND required_consensus_annotations >= 2 "
+            "AND required_consensus_reviewers >= 1)",
+            name="ck_batch_consensus_counts",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36),
@@ -101,6 +111,12 @@ class AnnotationBatch(Base):
         index=True,
     )
     mode: Mapped[str] = mapped_column(String(16))
+    required_consensus_annotations: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    required_consensus_reviewers: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     resolver: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolver_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     parameters: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
@@ -127,10 +143,10 @@ class AnnotationBatch(Base):
 
 
 class AnnotationBatchAnnotator(Base):
-    """One annotator's place in a batch's frozen consensus group.
+    """One annotator's place in a batch's frozen eligible pool.
 
     ``ondelete="RESTRICT"`` because this row is provenance: it records who was
-    required to annotate. Removing the account would rewrite that history, so a
+    eligible for a cohort. Removing the account would rewrite that history, so a
     referenced user can only be deactivated.
     """
 
@@ -181,9 +197,52 @@ class BatchItem(Base):
         index=True,
     )
     status: Mapped[str] = mapped_column(String(32), default=ItemStatus.pending)
+    position: Mapped[int] = mapped_column(Integer)
+    initial_evidence_generation: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
+    )
+
+
+class AnnotationItemAnnotator(Base):
+    """One immutable member of an item's initial evidence cohort generation."""
+
+    __tablename__ = "annotation_item_annotators"
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_item_id",
+            "generation",
+            "annotator_id",
+            name="uq_item_cohort_annotator",
+        ),
+        UniqueConstraint(
+            "batch_item_id",
+            "generation",
+            "position",
+            name="uq_item_cohort_position",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    batch_item_id: Mapped[str] = mapped_column(
+        ForeignKey("batch_items.id", ondelete="CASCADE"), index=True
+    )
+    generation: Mapped[int] = mapped_column(Integer)
+    annotator_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    assignment_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_assignments.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    pool_position: Mapped[int] = mapped_column(Integer)
+    selection_algorithm: Mapped[str] = mapped_column(String(32))
+    ordered_pool: Mapped[list[str]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
 
@@ -191,9 +250,9 @@ class AnnotationAssignment(Base):
     """One annotator's obligation to annotate one complete image.
 
     Every assignment names its annotator, so it is directly available to them
-    without any claim. In ``consensus`` mode one row exists per snapshotted
-    group member, and the unique constraint is what makes an item's required
-    submission count enforceable.
+    without any claim. In ``consensus`` mode one row exists per selected
+    initial-cohort member, while ``annotation_item_annotators`` preserves the
+    cohort provenance.
 
     The annotator reference restricts deletion for the same reason the group
     snapshot does: an assignment is retained domain evidence.

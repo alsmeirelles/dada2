@@ -263,12 +263,15 @@ async def test_an_accepted_import_seeds_every_assignment_without_submitting(
                 json={"username": username, "role": "annotator"},
             )
             annotator_ids.append(added.json()["user_id"])
+        annotator_ids.append(project["owner_id"])
         await client.put(
             f"/api/v1/projects/{project['id']}/annotation-policy",
             headers=_auth(token),
             json={
                 "mode": "consensus",
                 "annotator_ids": annotator_ids,
+                "required_consensus_annotations": 2,
+                "required_consensus_reviewers": 1,
                 "resolver": "two_stage_box_fusion",
                 "parameters": {},
                 "review_thresholds": {},

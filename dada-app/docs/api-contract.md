@@ -269,6 +269,8 @@ type Batch = {
   status: BatchStatus
   mode: 'single' | 'consensus'
   annotator_ids: string[]
+  required_consensus_annotations: number | null
+  required_consensus_reviewers: number | null
   resolver: string | null
   resolver_version: string | null
   parameters: Record<string, number | string | boolean>
@@ -279,7 +281,7 @@ type Batch = {
   selection_input_fingerprint: string
   requested_size: number
   total_items: number         // images in the batch
-  total_assignments: number   // items x annotators, 0 before start
+  total_assignments: number   // items x required initial cohort, 0 before start
   submitted_assignments: number
   started_at: string | null
   created_at: string
@@ -295,8 +297,18 @@ returns `409 policy_locked` and a repeated start returns
 not an optimistic version, is what decides whether the policy may change.
 
 Show `total_items` and `total_assignments` as distinct numbers. In consensus
-mode one image carries one assignment per configured annotator, so they never
-coincide.
+mode the eligible pool may be larger than the per-image cohort; each image
+carries exactly `required_consensus_annotations` initial assignments.
+
+Candidate review work uses separate resources and never appears in the
+full-image assignment queue:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/review-assignments` | The caller's scoped review queue |
+| `GET` | `/api/v1/projects/{project_id}/review-assignments/{assignment_id}` | Source image and one frozen candidate context |
+| `PUT` | `/api/v1/projects/{project_id}/review-assignments/{assignment_id}/draft` | Optimistic private review recovery |
+| `POST` | `/api/v1/projects/{project_id}/review-assignments/{assignment_id}/submit` | Immutable additional evidence |
 
 Acquisition batches, iteration records, and the routes below arrive with later
 phases; `GET /iterations` and `GET /statistics` are not implemented yet.

@@ -339,6 +339,7 @@ async def test_consensus_policy_requires_a_valid_group(database: None) -> None:
     owner = await _create_user("owner")
     ana = await _create_user("ana")
     bruno = await _create_user("bruno")
+    carla = await _create_user("carla")
     outsider = await _create_user("outsider")
     token = await _token("owner")
 
@@ -352,6 +353,11 @@ async def test_consensus_policy_requires_a_valid_group(database: None) -> None:
         await client.post(
             members, headers=_auth(token), json={"username": "bruno", "role": "viewer"}
         )
+        await client.post(
+            members,
+            headers=_auth(token),
+            json={"username": "carla", "role": "annotator"},
+        )
 
         current = await client.get(policy_url, headers=_auth(token))
         version = current.json()["version"]
@@ -362,6 +368,8 @@ async def test_consensus_policy_requires_a_valid_group(database: None) -> None:
             json={
                 "mode": "consensus",
                 "annotator_ids": [ana.id],
+                "required_consensus_annotations": 2,
+                "required_consensus_reviewers": 1,
                 "resolver": "two_stage_box_fusion",
                 "version": version,
             },
@@ -372,6 +380,8 @@ async def test_consensus_policy_requires_a_valid_group(database: None) -> None:
             json={
                 "mode": "consensus",
                 "annotator_ids": [ana.id, outsider.id],
+                "required_consensus_annotations": 2,
+                "required_consensus_reviewers": 1,
                 "resolver": "two_stage_box_fusion",
                 "version": version,
             },
@@ -382,6 +392,8 @@ async def test_consensus_policy_requires_a_valid_group(database: None) -> None:
             json={
                 "mode": "consensus",
                 "annotator_ids": [ana.id, bruno.id],
+                "required_consensus_annotations": 2,
+                "required_consensus_reviewers": 1,
                 "resolver": "two_stage_box_fusion",
                 "version": version,
             },
@@ -391,7 +403,9 @@ async def test_consensus_policy_requires_a_valid_group(database: None) -> None:
             headers=_auth(token),
             json={
                 "mode": "consensus",
-                "annotator_ids": [owner.id, ana.id],
+                "annotator_ids": [owner.id, ana.id, carla.id],
+                "required_consensus_annotations": 2,
+                "required_consensus_reviewers": 1,
                 "resolver": "majority_vote",
                 "version": version,
             },
@@ -400,7 +414,7 @@ async def test_consensus_policy_requires_a_valid_group(database: None) -> None:
     assert current.status_code == 200
     assert current.json()["mode"] == "single"
     assert too_small.status_code == 422
-    assert too_small.json()["error"]["code"] == "invalid_consensus_group"
+    assert too_small.json()["error"]["code"] == "invalid_consensus_counts"
     assert non_member.status_code == 422
     assert non_member.json()["error"]["details"]["not_members"] == [outsider.id]
     assert viewer_member.status_code == 422
@@ -414,6 +428,7 @@ async def test_consensus_policy_saves_and_rejects_a_stale_version(
 ) -> None:
     owner = await _create_user("owner")
     ana = await _create_user("ana")
+    carla = await _create_user("carla")
     token = await _token("owner")
 
     async with _client() as client:
@@ -423,9 +438,16 @@ async def test_consensus_policy_saves_and_rejects_a_stale_version(
         await client.post(
             members, headers=_auth(token), json={"username": "ana", "role": "annotator"}
         )
+        await client.post(
+            members,
+            headers=_auth(token),
+            json={"username": "carla", "role": "annotator"},
+        )
         body = {
             "mode": "consensus",
-            "annotator_ids": [owner.id, ana.id],
+            "annotator_ids": [owner.id, ana.id, carla.id],
+            "required_consensus_annotations": 2,
+            "required_consensus_reviewers": 1,
             "resolver": "two_stage_box_fusion",
             "review_thresholds": {"agreement": 0.75},
             "version": 1,
@@ -436,7 +458,9 @@ async def test_consensus_policy_saves_and_rejects_a_stale_version(
 
     assert saved.status_code == 200
     assert saved.json()["mode"] == "consensus"
-    assert saved.json()["annotator_ids"] == [owner.id, ana.id]
+    assert saved.json()["annotator_ids"] == [owner.id, ana.id, carla.id]
+    assert saved.json()["required_consensus_annotations"] == 2
+    assert saved.json()["required_consensus_reviewers"] == 1
     assert saved.json()["version"] == 2
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "version_conflict"
@@ -448,7 +472,7 @@ async def test_consensus_policy_saves_and_rejects_a_stale_version(
         )
     assert entry is not None
     assert entry.before["mode"] == "single"
-    assert entry.after["annotator_ids"] == [owner.id, ana.id]
+    assert entry.after["annotator_ids"] == [owner.id, ana.id, carla.id]
 
 
 async def test_single_mode_refuses_a_resolver(database: None) -> None:

@@ -28,6 +28,7 @@ const submitted: BatchAssignment = {
 function batch(purpose: BatchPurpose): AnnotationBatch {
   return {
     id: 'batch-1', project_id: 'project-1', purpose, status: 'annotating', mode: 'single', annotator_ids: [],
+    required_consensus_annotations: null, required_consensus_reviewers: null,
     resolver: null, resolver_version: null, parameters: {}, review_thresholds: {}, source_policy_version: 1,
     selection_strategy: 'random', selection_seed: 1, selection_input_fingerprint: 'f', requested_size: 1,
     total_items: 1, resolved_items: 0, awaiting_resolution_items: 0, cancelled_items: 0, total_assignments: 1,

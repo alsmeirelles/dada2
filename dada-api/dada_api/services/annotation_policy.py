@@ -14,7 +14,7 @@ from dada_api.models.user import User
 from dada_api.schemas.annotation_policy import AnnotationPolicyUpdate
 from dada_api.services import audit, resolvers
 
-MINIMUM_CONSENSUS_GROUP = 2
+MINIMUM_CONSENSUS_ANNOTATIONS = 2
 
 
 async def get_policy(
@@ -145,6 +145,8 @@ async def validate_policy(
     mode: AnnotationMode,
     annotator_ids: list[str],
     resolver: str | None,
+    required_consensus_annotations: int | None,
+    required_consensus_reviewers: int | None,
 ) -> None:
     """Reject a policy a project cannot run.
 
@@ -161,18 +163,45 @@ async def validate_policy(
     Raises:
         ApiError: 422 when the group or the resolver is invalid.
     """
-    if (
-        mode is AnnotationMode.consensus
-        and len(annotator_ids) < MINIMUM_CONSENSUS_GROUP
+    if annotator_ids:
+        await _validate_group(session, project, annotator_ids)
+    if mode is AnnotationMode.single and (
+        required_consensus_annotations is not None
+        or required_consensus_reviewers is not None
     ):
         raise ApiError(
             422,
-            "invalid_consensus_group",
-            "Consensus annotation needs at least two distinct annotators.",
-            details={"minimum": MINIMUM_CONSENSUS_GROUP},
+            "invalid_consensus_counts",
+            "Single annotation does not accept consensus counts.",
         )
-    if annotator_ids:
-        await _validate_group(session, project, annotator_ids)
+    if mode is AnnotationMode.consensus:
+        if (
+            required_consensus_annotations is None
+            or required_consensus_reviewers is None
+        ):
+            raise ApiError(
+                422,
+                "invalid_consensus_counts",
+                "Consensus annotation requires initial and review counts.",
+            )
+        if required_consensus_annotations < MINIMUM_CONSENSUS_ANNOTATIONS:
+            raise ApiError(
+                422,
+                "invalid_consensus_counts",
+                "Consensus annotation needs at least two initial annotations.",
+                details={"minimum": MINIMUM_CONSENSUS_ANNOTATIONS},
+            )
+        required_pool = required_consensus_annotations + required_consensus_reviewers
+        if required_consensus_reviewers < 1 or required_pool > len(annotator_ids):
+            raise ApiError(
+                422,
+                "invalid_consensus_counts",
+                "The eligible pool must fit distinct initial and review cohorts.",
+                details={
+                    "required_pool_size": required_pool,
+                    "pool_size": len(annotator_ids),
+                },
+            )
     _validate_resolver(project, mode, resolver)
 
 
@@ -207,12 +236,22 @@ async def update_policy(
 
     mode = AnnotationMode(request.mode)
     annotator_ids = [str(user_id) for user_id in request.annotator_ids]
-    await validate_policy(session, project, mode, annotator_ids, request.resolver)
+    await validate_policy(
+        session,
+        project,
+        mode,
+        annotator_ids,
+        request.resolver,
+        request.required_consensus_annotations,
+        request.required_consensus_reviewers,
+    )
 
     before = {
         "mode": policy.mode.value,
         "resolver": policy.resolver,
         "annotator_ids": previous_ids,
+        "required_consensus_annotations": policy.required_consensus_annotations,
+        "required_consensus_reviewers": policy.required_consensus_reviewers,
         "version": policy.version,
     }
 
@@ -229,6 +268,8 @@ async def update_policy(
         )
 
     policy.mode = mode
+    policy.required_consensus_annotations = request.required_consensus_annotations
+    policy.required_consensus_reviewers = request.required_consensus_reviewers
     policy.resolver = request.resolver
     policy.parameters = dict(request.parameters)
     policy.review_thresholds = dict(request.review_thresholds)
@@ -246,6 +287,8 @@ async def update_policy(
             "mode": mode.value,
             "resolver": request.resolver,
             "annotator_ids": annotator_ids,
+            "required_consensus_annotations": request.required_consensus_annotations,
+            "required_consensus_reviewers": request.required_consensus_reviewers,
             "version": policy.version,
         },
     )

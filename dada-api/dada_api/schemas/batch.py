@@ -32,6 +32,8 @@ class BatchPolicyUpdate(BaseModel):
 
     mode: AnnotationModeName
     annotator_ids: list[UUID] = Field(default_factory=list)
+    required_consensus_annotations: int | None = Field(default=None, ge=1)
+    required_consensus_reviewers: int | None = Field(default=None, ge=1)
     resolver: str | None = Field(default=None, max_length=64)
     parameters: dict[str, float | int | str | bool] = Field(default_factory=dict)
     review_thresholds: dict[str, float] = Field(default_factory=dict)
@@ -53,6 +55,8 @@ class BatchResponse(BaseModel):
     status: BatchStatusName
     mode: AnnotationModeName
     annotator_ids: list[UUID]
+    required_consensus_annotations: int | None
+    required_consensus_reviewers: int | None
     resolver: str | None
     resolver_version: str | None
     parameters: dict[str, float | int | str | bool]

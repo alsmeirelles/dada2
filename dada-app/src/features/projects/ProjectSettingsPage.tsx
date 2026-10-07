@@ -33,6 +33,8 @@ export function ProjectSettingsPage() {
   const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: getCapabilities, staleTime: Infinity })
   const [mode, setMode] = useState<AnnotationMode>('single')
   const [annotatorIds, setAnnotatorIds] = useState<string[]>([])
+  const [requiredAnnotations, setRequiredAnnotations] = useState(2)
+  const [requiredReviewers, setRequiredReviewers] = useState(1)
   const [resolver, setResolver] = useState('')
   const [agreement, setAgreement] = useState(0.75)
   const [username, setUsername] = useState('')
@@ -47,6 +49,8 @@ export function ProjectSettingsPage() {
     if (!policy.data) return
     setMode(policy.data.mode)
     setAnnotatorIds(policy.data.annotator_ids)
+    setRequiredAnnotations(policy.data.required_consensus_annotations ?? 2)
+    setRequiredReviewers(policy.data.required_consensus_reviewers ?? 1)
     setResolver(policy.data.resolver ?? '')
     setAgreement(policy.data.review_thresholds?.agreement ?? 0.75)
   }, [policy.data])
@@ -59,15 +63,15 @@ export function ProjectSettingsPage() {
   const canManage = Boolean(user?.is_administrator || self?.role === 'owner' || self?.role === 'manager')
   const resolverOptions = capabilities.data?.consensus_resolvers[project.data?.task_type ?? ''] ?? []
   const formError = mode === 'consensus'
-    ? annotatorIds.length < 2
-      ? 'Consensus annotation needs at least two eligible annotators.'
-      : !resolver ? 'Choose a resolution method offered by the API.' : null
+    ? consensusError(annotatorIds.length, requiredAnnotations, requiredReviewers, resolver)
     : null
 
   const save = useMutation({
     mutationFn: () => saveAnnotationPolicy(projectId, {
       mode,
       annotator_ids: mode === 'consensus' ? annotatorIds : [],
+      required_consensus_annotations: mode === 'consensus' ? requiredAnnotations : null,
+      required_consensus_reviewers: mode === 'consensus' ? requiredReviewers : null,
       resolver: mode === 'consensus' ? resolver : null,
       parameters: {},
       review_thresholds: mode === 'consensus' ? { agreement } : {},
@@ -126,15 +130,17 @@ export function ProjectSettingsPage() {
       <div className="wizard-section">
         <fieldset className="task-picker"><legend>Annotation strategy</legend>
           <label aria-label="Single annotation" htmlFor="settings-mode-single" className={mode === 'single' ? 'task-option selected' : 'task-option'}><input id="settings-mode-single" type="radio" name="settings-mode" checked={mode === 'single'} onChange={() => setMode('single')} /> <span><strong>Single annotation</strong><small>One submission resolves each selected image.</small></span></label>
-          <label aria-label="Consensus annotation" htmlFor="settings-mode-consensus" className={mode === 'consensus' ? 'task-option selected' : 'task-option'}><input id="settings-mode-consensus" type="radio" name="settings-mode" checked={mode === 'consensus'} onChange={() => { setMode('consensus'); setResolver((value) => value || resolverOptions[0] || '') }} /> <span><strong>Consensus annotation</strong><small>Each selected member annotates independently; ambiguous items require review.</small></span></label>
+          <label aria-label="Consensus annotation" htmlFor="settings-mode-consensus" className={mode === 'consensus' ? 'task-option selected' : 'task-option'}><input id="settings-mode-consensus" type="radio" name="settings-mode" checked={mode === 'consensus'} onChange={() => { setMode('consensus'); setResolver((value) => value || resolverOptions[0] || '') }} /> <span><strong>Consensus annotation</strong><small>A fixed cohort annotates each image; ambiguous candidates receive independent review.</small></span></label>
         </fieldset>
         {mode === 'consensus' && <div className="field-grid">
           <label className="field">Consensus annotators
             <select multiple value={annotatorIds} onChange={(event) => setAnnotatorIds([...event.currentTarget.selectedOptions].map((option) => option.value))}>
               {eligibleMembers.map((member: ProjectMember) => <option key={member.user_id} value={member.user_id}>{member.display_name} ({member.username})</option>)}
             </select>
-            <small>Select at least two owners, managers, or annotators.</small>
+            <small>Eligible owners, managers, and annotators. Pool size: {annotatorIds.length}.</small>
           </label>
+          <label className="number-field"><span>Initial annotations per image</span><input type="number" min="2" step="1" value={requiredAnnotations} onChange={(event) => setRequiredAnnotations(Number(event.target.value))} /><small>Exact initial assignments: {requiredAnnotations} per selected image.</small></label>
+          <label className="number-field"><span>Additional reviewers</span><input type="number" min="1" step="1" value={requiredReviewers} onChange={(event) => setRequiredReviewers(Number(event.target.value))} /><small>Per escalated candidate; the total depends on resolver outcomes.</small></label>
           <label className="field">Resolution method
             <select value={resolver} onChange={(event) => setResolver(event.target.value)}>
               <option value="" disabled>Choose a method</option>
@@ -188,4 +194,12 @@ export function ProjectSettingsPage() {
 function saveError(error: Error) {
   if (error instanceof ApiError && error.code === 'version_conflict') return 'Settings changed elsewhere. The latest policy was loaded; review it and save again.'
   return error.message || 'Settings could not be saved.'
+}
+
+function consensusError(poolSize: number, initial: number, reviewers: number, resolver: string) {
+  if (initial < 2 || !Number.isInteger(initial)) return 'Initial annotations must be a whole number of at least two.'
+  if (reviewers < 1 || !Number.isInteger(reviewers)) return 'Additional reviewers must be a positive whole number.'
+  if (poolSize < initial + reviewers) return 'The eligible pool must fit the initial annotators and distinct reviewers.'
+  if (!resolver) return 'Choose a resolution method offered by the API.'
+  return null
 }

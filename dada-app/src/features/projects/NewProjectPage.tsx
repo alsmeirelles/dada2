@@ -282,8 +282,8 @@ export function NewProjectPage() {
                 <span><strong>Single annotation</strong><small>One submission resolves each selected image.</small></span>
               </label>
               <label aria-label="Consensus annotation" htmlFor="annotation-mode-consensus" className={draft.annotationPolicy.mode === 'consensus' ? 'task-option selected' : 'task-option'}>
-                <input id="annotation-mode-consensus" type="radio" name="annotation-mode" checked={draft.annotationPolicy.mode === 'consensus'} onChange={() => updateDraft({ annotationPolicy: { mode: 'consensus', annotatorUsernames: eligibleAnnotators, resolver: resolverOptions[0] ?? '', reviewThreshold: 0.75 } })} />
-                <span><strong>Consensus annotation</strong><small>Each group member labels every selected image independently.</small></span>
+                <input id="annotation-mode-consensus" type="radio" name="annotation-mode" checked={draft.annotationPolicy.mode === 'consensus'} onChange={() => updateDraft({ annotationPolicy: { mode: 'consensus', annotatorUsernames: eligibleAnnotators, requiredAnnotations: 2, requiredReviewers: 1, resolver: resolverOptions[0] ?? '', reviewThreshold: 0.75 } })} />
+                <span><strong>Consensus annotation</strong><small>A fixed cohort labels each image independently.</small></span>
               </label>
             </fieldset>
             {consensusPolicy && (
@@ -292,8 +292,10 @@ export function NewProjectPage() {
                   <select id="consensus-annotators" multiple value={consensusPolicy.annotatorUsernames} onChange={(event) => updateDraft({ annotationPolicy: { ...consensusPolicy, annotatorUsernames: [...event.currentTarget.selectedOptions].map((option) => option.value) } })}>
                     {eligibleAnnotators.map((username) => <option key={username} value={username}>{username}{username === user?.username ? ' (you, owner)' : ''}</option>)}
                   </select>
-                  <small>Select at least two members. You, as the project owner, may annotate too. The API validates final membership and authority.</small>
+                  <small>The pool must fit the initial cohort and distinct review cohort. You, as the project owner, may annotate too.</small>
                 </label>
+                <NumberField label="Initial annotations per image" help="Exact number of independent full-image assignments." value={consensusPolicy.requiredAnnotations} onChange={(value) => updateDraft({ annotationPolicy: { ...consensusPolicy, requiredAnnotations: value } })} />
+                <NumberField label="Additional reviewers per escalated candidate" help="Created only when automatic resolution needs more evidence." value={consensusPolicy.requiredReviewers} onChange={(value) => updateDraft({ annotationPolicy: { ...consensusPolicy, requiredReviewers: value } })} />
                 <label className="field" htmlFor="consensus-resolver">Resolution method
                   <select id="consensus-resolver" value={consensusPolicy.resolver} onChange={(event) => updateDraft({ annotationPolicy: { ...consensusPolicy, resolver: event.target.value } })}>
                     {resolverOptions.map((identifier) => (
@@ -350,6 +352,7 @@ export function NewProjectPage() {
               </> : <ReviewItem label="Dataset layout" value="One static batch" detail="every image annotated once; random acquisition, no later batches" />}
               <ReviewItem label="Strategy" value={draft.annotationPolicy.mode === 'single' ? 'Single annotation' : 'Consensus'} detail={strategySummary(draft, images.length)} />
               {draft.annotationPolicy.mode === 'consensus' && <>
+                <ReviewItem label="Review escalation" value={`${draft.annotationPolicy.requiredReviewers} additional reviewer${draft.annotationPolicy.requiredReviewers === 1 ? '' : 's'} per candidate`} detail="Total review work depends on automatic resolution outcomes" />
                 <ReviewItem label="Resolver" value={resolverLabel(draft.annotationPolicy.resolver)} detail="Provisional API catalog entry" />
                 <ReviewItem label="Review threshold" value={`${Math.round(draft.annotationPolicy.reviewThreshold * 100)}%`} detail="Agreement below this value requires review" />
               </>}
@@ -429,7 +432,9 @@ function validateStep(step: number, draft: ProjectDraft, images: LocalImage[]) {
     }
   }
   if (step === 3 && draft.annotationPolicy.mode === 'consensus') {
-    if (draft.annotationPolicy.annotatorUsernames.length < 2) return 'Consensus annotation needs at least two selected annotators.'
+    if (!Number.isInteger(draft.annotationPolicy.requiredAnnotations) || draft.annotationPolicy.requiredAnnotations < 2) return 'Initial consensus annotations must be a whole number of at least two.'
+    if (!Number.isInteger(draft.annotationPolicy.requiredReviewers) || draft.annotationPolicy.requiredReviewers < 1) return 'Additional reviewers must be a positive whole number.'
+    if (draft.annotationPolicy.annotatorUsernames.length < draft.annotationPolicy.requiredAnnotations + draft.annotationPolicy.requiredReviewers) return 'The eligible pool must fit the initial annotators and distinct additional reviewers.'
     if (!draft.annotationPolicy.resolver) return 'Choose a resolution method offered by the API.'
   }
   if (step === 4) {
@@ -453,7 +458,7 @@ function initialSizes(draft: ProjectDraft, totalMedia: number) {
 
 function strategySummary(draft: ProjectDraft, totalMedia: number) {
   const multiplier = draft.annotationPolicy.mode === 'consensus'
-    ? draft.annotationPolicy.annotatorUsernames.length
+    ? draft.annotationPolicy.requiredAnnotations
     : 1
   const describe = (label: string, images: number) => `${label}: ${images * multiplier} work items`
   if (draft.datasetLayout === 'single_batch') return describe('All images', totalMedia)

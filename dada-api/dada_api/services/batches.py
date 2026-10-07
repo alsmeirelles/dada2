@@ -14,6 +14,7 @@ from dada_api.models.batch import (
     AnnotationAssignment,
     AnnotationBatch,
     AnnotationBatchAnnotator,
+    AnnotationItemAnnotator,
     AssignmentStatus,
     BatchItem,
     BatchPurpose,
@@ -29,7 +30,7 @@ from dada_api.models.media import Media
 from dada_api.models.project import ANNOTATION_ROLES, Project, ProjectMember
 from dada_api.models.user import User
 from dada_api.schemas.batch import BatchPolicyUpdate
-from dada_api.services import annotation_policy, audit, selection
+from dada_api.services import annotation_policy, audit, cohort_selection, selection
 
 PAGE_SIZE = 50
 
@@ -60,6 +61,8 @@ async def _snapshot_policy(
     """Copy the project's default policy and group onto a new batch."""
     policy, annotator_ids = await annotation_policy.get_policy(session, project)
     batch.mode = policy.mode.value
+    batch.required_consensus_annotations = policy.required_consensus_annotations
+    batch.required_consensus_reviewers = policy.required_consensus_reviewers
     batch.resolver = policy.resolver
     batch.resolver_version = policy.resolver_version
     batch.parameters = dict(policy.parameters)
@@ -115,13 +118,27 @@ async def create_batch(
     session.add(batch)
     await _snapshot_policy(session, project, batch)
 
+    media_order = list(
+        await session.scalars(
+            select(Media.id)
+            .where(Media.id.in_(chosen))
+            .order_by(Media.relative_path, Media.id)
+        )
+    )
+    positions = {media_id: position for position, media_id in enumerate(media_order)}
     for media_id in chosen:
-        session.add(BatchItem(batch_id=batch.id, media_id=media_id))
+        session.add(
+            BatchItem(
+                batch_id=batch.id,
+                media_id=media_id,
+                position=positions[media_id],
+            )
+        )
     return chosen
 
 
 async def annotator_ids(session: AsyncSession, batch: AnnotationBatch) -> list[str]:
-    """Return a batch's snapshotted group in its recorded order."""
+    """Return a batch's snapshotted eligible pool in its recorded order."""
     return list(
         await session.scalars(
             select(AnnotationBatchAnnotator.user_id)
@@ -340,13 +357,21 @@ async def update_policy(
     mode = AnnotationMode(request.mode)
     requested_ids = [str(user_id) for user_id in request.annotator_ids]
     await annotation_policy.validate_policy(
-        session, project, mode, requested_ids, request.resolver
+        session,
+        project,
+        mode,
+        requested_ids,
+        request.resolver,
+        request.required_consensus_annotations,
+        request.required_consensus_reviewers,
     )
 
     before = {
         "mode": batch.mode,
         "resolver": batch.resolver,
         "annotator_ids": await annotator_ids(session, batch),
+        "required_consensus_annotations": batch.required_consensus_annotations,
+        "required_consensus_reviewers": batch.required_consensus_reviewers,
     }
 
     await session.execute(
@@ -362,6 +387,8 @@ async def update_policy(
         )
 
     batch.mode = mode.value
+    batch.required_consensus_annotations = request.required_consensus_annotations
+    batch.required_consensus_reviewers = request.required_consensus_reviewers
     batch.resolver = request.resolver
     batch.parameters = dict(request.parameters)
     batch.review_thresholds = dict(request.review_thresholds)
@@ -378,6 +405,8 @@ async def update_policy(
             "mode": mode.value,
             "resolver": request.resolver,
             "annotator_ids": requested_ids,
+            "required_consensus_annotations": request.required_consensus_annotations,
+            "required_consensus_reviewers": request.required_consensus_reviewers,
         },
     )
     await session.commit()
@@ -393,7 +422,7 @@ async def start(
 ) -> AnnotationBatch:
     """Freeze a batch's policy and generate its assignments atomically.
 
-    A consensus batch produces one assignment per snapshotted annotator per
+    A consensus batch produces one assignment per selected cohort member per
     item. A single-mode batch produces one assignment per item, dealt in turn
     to the snapshotted group, or to every member allowed to annotate when the
     group is empty. Every assignment therefore has an owner the moment it
@@ -439,12 +468,18 @@ async def start(
     mode = AnnotationMode(batch.mode)
     group = await annotator_ids(session, batch)
     await annotation_policy.validate_policy(
-        session, project, mode, group, batch.resolver
+        session,
+        project,
+        mode,
+        group,
+        batch.resolver,
+        batch.required_consensus_annotations,
+        batch.required_consensus_reviewers,
     )
 
     items = (
         await session.execute(
-            select(BatchItem.id, BatchItem.media_id)
+            select(BatchItem.id, BatchItem.media_id, BatchItem.position)
             .join(Media, Media.id == BatchItem.media_id)
             .where(BatchItem.batch_id == batch.id)
             .order_by(Media.relative_path, Media.id)
@@ -454,14 +489,31 @@ async def start(
 
     dealers = group or await annotation_members(session, project)
     assignments = 0
-    for position, (item_id, media_id) in enumerate(items):
+    for position, (item_id, media_id, item_position) in enumerate(items):
         owners = (
-            group
+            cohort_selection.initial_cohort(
+                group, item_position, batch.required_consensus_annotations
+            )
             if mode is AnnotationMode.consensus
             else [dealers[position % len(dealers)]]
         )
-        for annotator_id in owners:
-            session.add(seeded_assignment(item_id, annotator_id, seeds.get(media_id)))
+        for cohort_position, annotator_id in enumerate(owners):
+            assignment = seeded_assignment(item_id, annotator_id, seeds.get(media_id))
+            session.add(assignment)
+            if mode is AnnotationMode.consensus:
+                await session.flush()
+                session.add(
+                    AnnotationItemAnnotator(
+                        batch_item_id=item_id,
+                        generation=1,
+                        annotator_id=annotator_id,
+                        assignment_id=assignment.id,
+                        position=cohort_position,
+                        pool_position=group.index(annotator_id),
+                        selection_algorithm=cohort_selection.INITIAL_ALGORITHM,
+                        ordered_pool=group,
+                    )
+                )
         assignments += len(owners)
 
     batch.status = BatchStatus.annotating
@@ -477,9 +529,11 @@ async def start(
         after={
             "mode": mode.value,
             "annotator_ids": group,
+            "required_consensus_annotations": batch.required_consensus_annotations,
+            "required_consensus_reviewers": batch.required_consensus_reviewers,
             "items": len(items),
             "assignments": assignments,
-            "seeded_items": sum(1 for _, media_id in items if media_id in seeds),
+            "seeded_items": sum(1 for _, media_id, _ in items if media_id in seeds),
         },
     )
     await session.commit()

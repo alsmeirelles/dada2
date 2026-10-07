@@ -26,20 +26,29 @@ from dada_api.models.batch import (
     ACTIVE_ASSIGNMENT_STATUSES,
     AnnotationAssignment,
     AnnotationBatch,
+    AnnotationItemAnnotator,
     AssignmentStatus,
     BatchItem,
     BatchStatus,
     ItemStatus,
 )
+from dada_api.models.consensus import OutboxEvent
 from dada_api.models.label_import import ImportedSeedDocument
 from dada_api.models.media import ContentObject, Media
 from dada_api.models.project import Project, ProjectClass
 from dada_api.models.user import User
 from dada_api.schemas.assignment import DocumentWrite
-from dada_api.services import annotation_documents, audit, batches, datasets
+from dada_api.services import (
+    annotation_documents,
+    audit,
+    batches,
+    cohort_selection,
+    datasets,
+)
 
 PAGE_SIZE = 50
 OPEN_STATUSES = (AssignmentStatus.pending, AssignmentStatus.in_progress)
+INITIAL_EVIDENCE_READY_EVENT = "consensus.initial_evidence_ready.v1"
 
 
 @dataclass(frozen=True)
@@ -417,7 +426,7 @@ async def submit(
         await session.flush()
         await _resolve_batch_if_done(session, batch)
     else:
-        await _refresh_readiness(session, item)
+        await _refresh_readiness(session, item, batch)
 
     await session.commit()
     await session.refresh(assignment)
@@ -425,19 +434,142 @@ async def submit(
     return assignment, submission, resolved
 
 
-async def _refresh_readiness(session: AsyncSession, item: BatchItem) -> None:
-    """Mark an unresolved image ready once every active assignment submitted."""
+async def _refresh_readiness(
+    session: AsyncSession, item: BatchItem, batch: AnnotationBatch | None = None
+) -> None:
+    """Mark an image ready and atomically emit its immutable readiness event."""
     if item.status in (ItemStatus.resolved, ItemStatus.cancelled):
         return
-    open_work = await session.scalar(
-        select(func.count())
-        .select_from(AnnotationAssignment)
-        .where(
-            AnnotationAssignment.batch_item_id == item.id,
-            AnnotationAssignment.status.in_(OPEN_STATUSES),
+    if batch is None:
+        batch = await session.get(AnnotationBatch, item.batch_id)
+
+    cohort = list(
+        await session.scalars(
+            select(AnnotationItemAnnotator)
+            .where(
+                AnnotationItemAnnotator.batch_item_id == item.id,
+                AnnotationItemAnnotator.generation == item.initial_evidence_generation,
+            )
+            .order_by(AnnotationItemAnnotator.position)
         )
     )
-    item.status = ItemStatus.pending if open_work else ItemStatus.awaiting_resolution
+    if not cohort:
+        item.status = ItemStatus.pending
+        return
+
+    evidence: list[dict] = []
+    for member in cohort:
+        assignment = await session.get(AnnotationAssignment, member.assignment_id)
+        if assignment is None or assignment.status != AssignmentStatus.submitted:
+            item.status = ItemStatus.pending
+            batch.status = BatchStatus.annotating
+            return
+        submission = await _latest_submission(session, assignment)
+        if submission is None:
+            item.status = ItemStatus.pending
+            batch.status = BatchStatus.annotating
+            return
+        evidence.append(
+            {
+                "position": member.position,
+                "annotator_id": member.annotator_id,
+                "assignment_id": assignment.id,
+                "submission_id": submission.id,
+                "revision": submission.revision,
+                "content_hash": submission.content_hash,
+            }
+        )
+
+    item.status = ItemStatus.awaiting_resolution
+    existing = await session.scalar(
+        select(OutboxEvent.id).where(
+            OutboxEvent.event_type == INITIAL_EVIDENCE_READY_EVENT,
+            OutboxEvent.aggregate_id == item.id,
+            OutboxEvent.generation == item.initial_evidence_generation,
+        )
+    )
+    if existing is None:
+        first = cohort[0]
+        session.add(
+            OutboxEvent(
+                project_id=batch.project_id,
+                event_type=INITIAL_EVIDENCE_READY_EVENT,
+                aggregate_type="batch_item",
+                aggregate_id=item.id,
+                generation=item.initial_evidence_generation,
+                payload={
+                    "project_id": batch.project_id,
+                    "batch_id": batch.id,
+                    "batch_item_id": item.id,
+                    "policy_version": batch.source_policy_version,
+                    "evidence_generation": item.initial_evidence_generation,
+                    "cohort_selection": {
+                        "algorithm": first.selection_algorithm,
+                        "item_position": item.position,
+                        "ordered_pool": first.ordered_pool,
+                        "selected_annotator_ids": [row.annotator_id for row in cohort],
+                    },
+                    "inputs": evidence,
+                },
+            )
+        )
+
+    pending = await session.scalar(
+        select(func.count())
+        .select_from(BatchItem)
+        .where(
+            BatchItem.batch_id == batch.id,
+            BatchItem.id != item.id,
+            BatchItem.status == ItemStatus.pending,
+        )
+    )
+    if not pending:
+        batch.status = BatchStatus.resolving
+
+
+async def _advance_evidence_generation(
+    session: AsyncSession,
+    item: BatchItem,
+    *,
+    replaced_assignment_id: str | None = None,
+    replacement: AnnotationAssignment | None = None,
+) -> None:
+    """Copy a cohort into a new generation, optionally replacing one member."""
+    current = list(
+        await session.scalars(
+            select(AnnotationItemAnnotator)
+            .where(
+                AnnotationItemAnnotator.batch_item_id == item.id,
+                AnnotationItemAnnotator.generation == item.initial_evidence_generation,
+            )
+            .order_by(AnnotationItemAnnotator.position)
+        )
+    )
+    item.initial_evidence_generation += 1
+    for member in current:
+        is_replaced = member.assignment_id == replaced_assignment_id
+        session.add(
+            AnnotationItemAnnotator(
+                batch_item_id=item.id,
+                generation=item.initial_evidence_generation,
+                annotator_id=(
+                    replacement.annotator_id if is_replaced else member.annotator_id
+                ),
+                assignment_id=(replacement.id if is_replaced else member.assignment_id),
+                position=member.position,
+                pool_position=(
+                    member.ordered_pool.index(replacement.annotator_id)
+                    if is_replaced
+                    else member.pool_position
+                ),
+                selection_algorithm=(
+                    cohort_selection.REASSIGNMENT_ALGORITHM
+                    if replaced_assignment_id is not None
+                    else member.selection_algorithm
+                ),
+                ordered_pool=member.ordered_pool,
+            )
+        )
 
 
 async def _resolve_batch_if_done(session: AsyncSession, batch: AnnotationBatch) -> None:
@@ -565,7 +697,7 @@ async def reopen(
         ApiError: 409 when the assignment is not submitted or its image is
             already resolved.
     """
-    assignment, item, _ = await _load(session, project, assignment_id, lock=True)
+    assignment, item, batch = await _load(session, project, assignment_id, lock=True)
     if assignment.status != AssignmentStatus.submitted:
         raise ApiError(
             409,
@@ -576,12 +708,14 @@ async def reopen(
     _require_unresolved(item)
 
     latest = await _latest_submission(session, assignment)
+    if item.status == ItemStatus.awaiting_resolution:
+        await _advance_evidence_generation(session, item)
     assignment.draft = list(latest.objects)
     assignment.draft_saved_at = datetime.now(UTC)
     assignment.status = AssignmentStatus.in_progress
     assignment.version += 1
     await session.flush()
-    await _refresh_readiness(session, item)
+    await _refresh_readiness(session, item, batch)
 
     audit.record(
         session,
@@ -625,7 +759,7 @@ async def reassign(
             or the target already holds this image; 422 when the target may
             not annotate the project.
     """
-    assignment, item, _ = await _load(session, project, assignment_id, lock=True)
+    assignment, item, batch = await _load(session, project, assignment_id, lock=True)
     if assignment.status not in ACTIVE_ASSIGNMENT_STATUSES:
         raise ApiError(
             409,
@@ -639,6 +773,15 @@ async def reassign(
             422,
             "invalid_assignee",
             "The new annotator must be a project member allowed to annotate.",
+        )
+    if (
+        batch.mode == AnnotationMode.consensus
+        and annotator_id not in await batches.annotator_ids(session, batch)
+    ):
+        raise ApiError(
+            422,
+            "invalid_assignee",
+            "A consensus replacement must come from the batch's frozen pool.",
         )
     held = await session.scalar(
         select(func.count())
@@ -662,11 +805,19 @@ async def reassign(
     )
     replacement = batches.seeded_assignment(item.id, annotator_id, seed)
     session.add(replacement)
+    await session.flush()
+    if batch.mode == AnnotationMode.consensus:
+        await _advance_evidence_generation(
+            session,
+            item,
+            replaced_assignment_id=assignment.id,
+            replacement=replacement,
+        )
     previous = assignment.annotator_id
     assignment.status = AssignmentStatus.reassigned
     assignment.version += 1
     await session.flush()
-    await _refresh_readiness(session, item)
+    await _refresh_readiness(session, item, batch)
 
     audit.record(
         session,

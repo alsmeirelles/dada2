@@ -80,7 +80,7 @@ export function DraftProjectSetupPage() {
       validationSetUnit: current.validation_set_percentage !== null ? 'percentage' : 'count',
       iterationBatchSize: current.iteration_batch_size ?? 1,
       collaborators: (members.data?.items ?? []).filter((member) => member.role !== 'owner').map((member) => member.username),
-      annotationPolicy: policy.data?.mode === 'consensus' ? { mode: 'consensus', annotatorUsernames: policy.data.annotator_ids.map((id) => policyMembers.get(id)).filter((name): name is string => Boolean(name)), resolver: policy.data.resolver ?? '', reviewThreshold: policy.data.review_thresholds?.agreement ?? .75 } : { mode: 'single' },
+      annotationPolicy: policy.data?.mode === 'consensus' ? { mode: 'consensus', annotatorUsernames: policy.data.annotator_ids.map((id) => policyMembers.get(id)).filter((name): name is string => Boolean(name)), requiredAnnotations: policy.data.required_consensus_annotations ?? 2, requiredReviewers: policy.data.required_consensus_reviewers ?? 1, resolver: policy.data.resolver ?? '', reviewThreshold: policy.data.review_thresholds?.agreement ?? .75 } : { mode: 'single' },
     }
   }
   async function selectFiles(event: ChangeEvent<HTMLInputElement>) {

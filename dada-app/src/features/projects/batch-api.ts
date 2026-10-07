@@ -31,6 +31,8 @@ export function updateBatchPolicy(
       body: {
         mode: policy.mode,
         annotator_ids: policy.annotator_ids,
+        required_consensus_annotations: policy.required_consensus_annotations,
+        required_consensus_reviewers: policy.required_consensus_reviewers,
         resolver: policy.resolver ?? null,
         parameters: policy.parameters ?? {},
         review_thresholds: policy.review_thresholds ?? {},

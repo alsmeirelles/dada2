@@ -44,6 +44,8 @@ export type AnnotationPolicyDraft =
   | {
       mode: 'consensus'
       annotatorUsernames: string[]
+      requiredAnnotations: number
+      requiredReviewers: number
       resolver: string
       reviewThreshold: number
     }
@@ -52,6 +54,8 @@ export type AnnotationPolicy = {
   mode: AnnotationMode
   version: number
   annotator_ids: string[]
+  required_consensus_annotations: number | null
+  required_consensus_reviewers: number | null
   resolver?: string | null
   resolver_version?: string | null
   parameters?: Record<string, number | string | boolean>
@@ -112,6 +116,8 @@ export type AnnotationBatch = {
   status: BatchStatus
   mode: AnnotationMode
   annotator_ids: string[]
+  required_consensus_annotations: number | null
+  required_consensus_reviewers: number | null
   resolver: string | null
   resolver_version: string | null
   parameters: Record<string, number | string | boolean>

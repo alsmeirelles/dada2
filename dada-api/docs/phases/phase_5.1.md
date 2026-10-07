@@ -1,6 +1,8 @@
 # Phase 5.1 — consensus cohort and review-assignment revision
 
-**Status:** Required before Phase 6 implementation.
+**Status:** Implemented and verified on 2026-10-07. The Phase 5.1 gate is complete;
+Phase 6 remains gated by its decision record and approved Consensus Engine
+Requirements.
 **Scope:** This plan revises the Phase 4/5 consensus-assignment contract. It
 does not implement a resolver. It introduces the durable readiness event and
 the minimum input-snapshot, work-item, review-assignment, review-submission, and
@@ -251,3 +253,30 @@ start until this plan is implemented and verified, the Phase 6
 decision record is complete, and the Consensus Engine Requirements are
 approved. Phase 6 owns resolver packages, durable job execution, candidate
 matching/aggregation, review work-item resolution, and expert adjudication.
+
+## Implementation record
+
+- Migration `20261007_0009` adds nullable policy/batch counts, persisted item
+  positions and evidence generations, immutable item cohorts, resolution input
+  and work-item foundations, candidate-review evidence, and the transactional
+  outbox. It refuses to migrate legacy all-pool consensus batches until an
+  operator explicitly resets and rebuilds them.
+- `initial_round_robin_v1` and `review_round_robin_v1` are isolated selectors.
+  Batch start stores the ordered pool, selected members, positions, and
+  algorithm version; review construction stores its exclusions and stable
+  candidate ordinal.
+- The final selected-cohort submission emits one
+  `consensus.initial_evidence_ready.v1` event per item/generation. Reopen and
+  reassignment preserve earlier events, advance the generation, and make stale
+  events ineligible for input-snapshot creation.
+- The API exposes the four candidate-review routes from this plan. Review
+  assignments have separate optimistic drafts and immutable submissions, and
+  their detail representation contains only the source image and scoped frozen
+  candidate context.
+- The App separates candidate reviews from full-image assignments, uses a
+  distinct local-recovery namespace, and configures eligible-pool, initial, and
+  reviewer counts with exact initial-work estimates.
+- Verification covers metadata/migration parity, policy bounds, deterministic
+  cohort rotation/exclusion, selected assignment counts, readiness events,
+  stale evidence generations, review ownership/blindness, immutable review
+  links, App tests, and production builds.

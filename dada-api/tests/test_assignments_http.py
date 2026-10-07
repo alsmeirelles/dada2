@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import delete, func, select
 
 from dada_api.core.config import get_settings
+from dada_api.core.errors import ApiError
 from dada_api.core.security import hash_password
 from dada_api.db.session import async_session_factory
 from dada_api.main import app
@@ -24,13 +25,14 @@ from dada_api.models.batch import (
     AnnotationBatchAnnotator,
     BatchItem,
 )
+from dada_api.models.consensus import OutboxEvent, ResolutionWorkItem, ReviewSubmission
 from dada_api.models.dataset import DatasetSplit
 from dada_api.models.idempotency import IdempotencyRecord
 from dada_api.models.label_import import AnnotationImport
 from dada_api.models.media import ContentObject, Media
 from dada_api.models.project import Project, ProjectClass, ProjectMember
 from dada_api.models.user import User
-from dada_api.services import datasets
+from dada_api.services import datasets, resolution_foundation
 
 pytestmark = pytest.mark.skipif(
     os.getenv("DADA_RUN_INTEGRATION") != "1",
@@ -211,7 +213,12 @@ async def _project(
             headers=_auth(token),
             json={
                 "mode": "consensus",
-                "annotator_ids": list(project["member_ids"].values()),
+                "annotator_ids": [
+                    *project["member_ids"].values(),
+                    project["owner_id"],
+                ],
+                "required_consensus_annotations": 2,
+                "required_consensus_reviewers": 1,
                 "resolver": "two_stage_box_fusion",
                 "parameters": {},
                 "review_thresholds": {},
@@ -374,9 +381,10 @@ async def test_two_consensus_annotators_work_the_same_image_independently(
             headers=_auth(token),
         )
 
-    assert len(annie_queue["items"]) == len(bob_queue["items"]) == TRAINING_SIZE
+    assert len(annie_queue["items"]) == 1
+    assert len(bob_queue["items"]) == TRAINING_SIZE
     assert annie_queue["counts"] == {
-        "pending": TRAINING_SIZE,
+        "pending": 1,
         "in_progress": 0,
         "submitted": 0,
     }
@@ -401,7 +409,11 @@ async def test_two_consensus_annotators_work_the_same_image_independently(
         resolutions = await session.scalar(
             select(func.count()).select_from(ResolvedAnnotation)
         )
+        events = list(await session.scalars(select(OutboxEvent)))
     assert resolutions == 0
+    assert len(events) == 1
+    assert events[0].event_type == "consensus.initial_evidence_ready.v1"
+    assert [entry["submission_id"] for entry in events[0].payload["inputs"]]
 
 
 async def test_stale_drafts_and_duplicate_submissions_are_refused(
@@ -451,6 +463,115 @@ async def test_stale_drafts_and_duplicate_submissions_are_refused(
     async with async_session_factory() as session:
         revisions = list(await session.scalars(select(AnnotationSubmission.revision)))
     assert revisions == [1]
+
+
+async def test_candidate_review_is_scoped_private_and_immutable(
+    database: None,
+) -> None:
+    await _create_user("owner")
+    await _create_user("annie")
+    await _create_user("bob")
+    owner = await _token("owner")
+    annie, bob = await _token("annie"), await _token("bob")
+
+    async with _client() as client:
+        project = await _project(
+            client, owner, members=("annie", "bob"), consensus=True
+        )
+        await _start(client, owner, project["id"], "test")
+        annie_assignment = (await _queue(client, annie, project["id"]))["items"][0]
+        bob_assignment = (await _queue(client, bob, project["id"]))["items"][0]
+        await _write(
+            client,
+            annie,
+            project["id"],
+            annie_assignment["id"],
+            "submit",
+            1,
+            [_box(project["class_id"])],
+        )
+        await _write(
+            client,
+            bob,
+            project["id"],
+            bob_assignment["id"],
+            "submit",
+            1,
+            [_box(project["class_id"], 20)],
+        )
+
+        async with async_session_factory() as session:
+            event = await session.scalar(select(OutboxEvent))
+            source_input = await resolution_foundation.create_initial_input(
+                session, event.id
+            )
+            (
+                work_item,
+                assignments,
+            ) = await resolution_foundation.create_review_work_item(
+                session,
+                source_input,
+                candidate_key="candidate-0",
+                candidate_ordinal=0,
+                scope="candidate",
+                candidate_context={
+                    "class_id": project["class_id"],
+                    "box": [10, 10, 40, 30],
+                },
+            )
+            review_assignment_id = assignments[0].id
+            source_input_id = source_input.id
+            work_item_id = work_item.id
+            await session.commit()
+
+        queue = await client.get(
+            f"/api/v1/projects/{project['id']}/review-assignments",
+            headers=_auth(owner),
+        )
+        detail = await client.get(
+            f"/api/v1/projects/{project['id']}/review-assignments/{review_assignment_id}",
+            headers=_auth(owner),
+        )
+        forbidden = await client.get(
+            f"/api/v1/projects/{project['id']}/review-assignments/{review_assignment_id}",
+            headers=_auth(annie),
+        )
+        drafted = await client.put(
+            f"/api/v1/projects/{project['id']}/review-assignments/{review_assignment_id}/draft",
+            headers=_auth(owner),
+            json={"version": 1, "evidence": {"verdict": "accept"}},
+        )
+        stale = await client.put(
+            f"/api/v1/projects/{project['id']}/review-assignments/{review_assignment_id}/draft",
+            headers=_auth(owner),
+            json={"version": 1, "evidence": {"verdict": "reject"}},
+        )
+        submitted = await client.post(
+            f"/api/v1/projects/{project['id']}/review-assignments/{review_assignment_id}/submit",
+            headers={**_auth(owner), "Idempotency-Key": "candidate-review-submit-1"},
+            json={"version": 2, "evidence": {"verdict": "accept"}},
+        )
+
+    assert queue.status_code == 200, queue.text
+    assert [item["id"] for item in queue.json()["items"]] == [review_assignment_id]
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["candidate_context"] == {
+        "class_id": project["class_id"],
+        "box": [10, 10, 40, 30],
+    }
+    assert "source_inputs" not in detail.text
+    assert forbidden.status_code == 403
+    assert drafted.json()["version"] == 2
+    assert stale.json()["error"]["code"] == "version_conflict"
+    assert submitted.status_code == 200, submitted.text
+
+    async with async_session_factory() as session:
+        evidence = await session.scalar(select(ReviewSubmission))
+        stored_work = await session.get(ResolutionWorkItem, work_item_id)
+    assert evidence.source_input_id == source_input_id
+    assert evidence.work_item_id == work_item_id
+    assert evidence.evidence == {"verdict": "accept"}
+    assert stored_work.status == "review_ready"
 
 
 async def test_only_the_assignee_reaches_an_assignment(database: None) -> None:
@@ -659,6 +780,18 @@ async def test_reopen_gives_submitted_work_back_as_a_new_revision(
     assert opened["revision"] == 1
     assert corrected.json()["revision"] == 2
     assert await _item_statuses(batch["id"]) == ["awaiting_resolution"]
+    async with async_session_factory() as session:
+        item = await session.scalar(
+            select(BatchItem).where(BatchItem.batch_id == batch["id"])
+        )
+        events = list(
+            await session.scalars(select(OutboxEvent).order_by(OutboxEvent.generation))
+        )
+        with pytest.raises(ApiError) as stale_event:
+            await resolution_foundation.create_initial_input(session, events[0].id)
+    assert item.initial_evidence_generation == 2
+    assert [event.generation for event in events] == [1, 2]
+    assert stale_event.value.code == "stale_evidence_generation"
 
 
 async def test_a_resolved_single_image_cannot_be_reopened(database: None) -> None:
@@ -690,12 +823,7 @@ async def test_reassign_moves_work_without_sharing_it(database: None) -> None:
 
     async with _client() as client:
         project = await _project(
-            client, token, members=("annie", "bob"), consensus=True
-        )
-        carl = await client.post(
-            f"/api/v1/projects/{project['id']}/members",
-            headers=_auth(token),
-            json={"username": "carl", "role": "annotator"},
+            client, token, members=("annie", "bob", "carl"), consensus=True
         )
         viv = await client.post(
             f"/api/v1/projects/{project['id']}/members",
@@ -722,8 +850,8 @@ async def test_reassign_moves_work_without_sharing_it(database: None) -> None:
                 json={"annotator_id": annotator_id},
             )
 
-        moved = await reassign(mine["id"], carl.json()["user_id"])
-        twice = await reassign(bobs["id"], carl.json()["user_id"])
+        moved = await reassign(mine["id"], project["member_ids"]["carl"])
+        twice = await reassign(bobs["id"], project["member_ids"]["carl"])
         to_viewer = await reassign(bobs["id"], viv.json()["user_id"])
         annie_after = await _queue(client, annie, project["id"])
         annie_save = await _write(
@@ -734,7 +862,7 @@ async def test_reassign_moves_work_without_sharing_it(database: None) -> None:
         ).json()
 
     assert moved.status_code == 201, moved.text
-    assert moved.json()["annotator_id"] == carl.json()["user_id"]
+    assert moved.json()["annotator_id"] == project["member_ids"]["carl"]
     assert moved.json()["status"] == "pending"
     assert twice.json()["error"]["code"] == "already_assigned"
     assert to_viewer.status_code == 422

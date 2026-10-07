@@ -23,6 +23,8 @@ describe('Phase 4 API clients', () => {
       mode: 'consensus',
       version: 8,
       annotator_ids: ['annotator-a', 'annotator-b'],
+      required_consensus_annotations: 2,
+      required_consensus_reviewers: 1,
       resolver: 'majority_vote',
       resolver_version: '2.0',
       parameters: { minimum_votes: 2 },
@@ -37,6 +39,8 @@ describe('Phase 4 API clients', () => {
     expect(JSON.parse(request.body)).toEqual({
       mode: 'consensus',
       annotator_ids: ['annotator-a', 'annotator-b'],
+      required_consensus_annotations: 2,
+      required_consensus_reviewers: 1,
       resolver: 'majority_vote',
       parameters: { minimum_votes: 2 },
       review_thresholds: { agreement: 0.8 },
