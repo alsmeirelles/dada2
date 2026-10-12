@@ -55,11 +55,15 @@ chosen class. An annotator who submitted a valid image document but had no
 matching box supplies a `no_object` observation. Missing assignments remain
 missing values and block first-release resolution.
 
-Run the user-selected, registered Cleanlab classification adapter described in
-[classification.md](classification.md). The adapter resolves the class from
-the candidate's observations and records quality/confidence. It may use an
-approved model-run probability vector only when its provenance matches the
-media/model version.
+Run the selected native statistical class strategy described in
+[classification.md](classification.md). The strategy resolves the candidate's
+class and existence from this human-observation matrix only. `no_object` is a
+normal categorical outcome for this decision. Model predictions, predicted
+probabilities, embeddings, and model seeds are excluded from the input.
+Detection may use `categorical_vote` or `dirichlet_vote`, and may use
+`reliability_weighted_vote` or `dawid_skene` when their Phase 6 eligibility
+gates pass. `multilabel_binary_vote` applies only to multi-label image
+classification.
 
 Accept a candidate object only when:
 
@@ -69,8 +73,10 @@ Accept a candidate object only when:
 - the group did not violate matching ambiguity rules.
 
 Ties, low class quality, object-count disagreement outside configured limits,
-or ambiguous matches send the whole image to manual review. The worker must
-not let a box's original class decide matching before class disambiguation.
+or ambiguous matches create candidate-scoped review work items while the
+image-level worker retains the complete case. Reviewers see and annotate only
+the affected candidate context. The worker must not let a box's original class
+decide matching before class disambiguation.
 
 ## Stage 2: box refinement
 
@@ -83,9 +89,10 @@ from API capabilities, with typed parameters. The first adapters are:
 - `trimmed_mean_box` for configurable outlier trimming.
 
 Package-free box refinement is intentional: crowd-kit segmentation algorithms
-are not box aggregators, and Cleanlab's role here is class resolution. Every
-adapter returns a rectangle that is clipped to original dimensions and rejected
-for non-positive area or failed geometry validation.
+are not box aggregators, and class/existence resolution is handled by DADA's
+native statistical strategies. Every adapter returns a rectangle that is
+clipped to original dimensions and rejected for non-positive area or failed
+geometry validation.
 
 Record supporting source boxes, IoU distribution, selected strategy/version,
 parameters, resulting coordinates, and any excluded outlier boxes. Low
@@ -120,6 +127,6 @@ that annotator's own confidence weight.
 Golden fixtures must cover: same object/different class; two adjacent objects;
 duplicate same-rater boxes; one omitted object; unmatched false positive;
 transitive-overlap bridge prevention; class tie; low-IoU geometry; clipped
-boxes; each refinement strategy; and an adjudicated replacement. Concurrency
-tests must prove a duplicate worker result cannot create two accepted
-resolutions.
+boxes; each class strategy/refinement strategy combination; rejection of
+model-derived class inputs; and an adjudicated replacement. Concurrency tests
+must prove a duplicate worker result cannot create two accepted resolutions.

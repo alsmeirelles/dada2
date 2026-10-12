@@ -145,15 +145,18 @@ metrics, and test fixtures are defined in:
 | Segmentation | [segmentation consensus](consensus/segmentation.md) |
 
 Detection and segmentation always use two stages: (1) class-agnostic object or
-instance identification followed by Cleanlab-backed class/existence
+instance identification followed by native statistical class/existence
 disambiguation, then (2) box or mask refinement only for accepted candidates.
 STAPLE is therefore only a segmentation refinement option after instance/class
 alignment; it is not a universal resolver.
 
-Cleanlab is the first registered adapter family for class resolution. crowd-kit
-is the first registered adapter family for segmentation mask refinement. A
-user chooses only a typed strategy identifier and parameters exposed by
-`GET /api/v1/capabilities` for the project's task and installed package
+DADA-owned implementations provide model-free class resolution through
+`categorical_vote`, `multilabel_binary_vote`, `dirichlet_vote`,
+`reliability_weighted_vote`, and `dawid_skene`. The latter two are conditional
+on a sufficient frozen evidence snapshot. crowd-kit is the first registered
+adapter family for segmentation mask refinement only. A user chooses only a
+typed strategy identifier and parameters exposed by
+`GET /api/v1/capabilities` for the project's task and compatible dependency
 versions. The API never accepts arbitrary package class names or code from a
 client.
 
@@ -379,16 +382,18 @@ peer evidence.
   services for policy snapshotting, assignment generation, batch progress,
   resolution scheduling, and adjudication.
 - Introduce independent `LearningAdapter` and `ConsensusResolver` ports. The
-  consensus worker may use NumPy/SciPy/image libraries, Cleanlab, and crowd-kit,
-  but FastAPI and ORM objects must not cross the port. Implement the registered
+  consensus worker may use NumPy/SciPy/image libraries and crowd-kit, but its
+  class resolvers are DADA-owned and accept only human-label observations.
+  FastAPI and ORM objects must not cross the port. Implement the registered
   adapters and two-stage detection/segmentation behavior specified in the
   [classification](consensus/classification.md),
   [detection](consensus/detection.md), and
   [segmentation](consensus/segmentation.md) strategy documents.
-- Add Cleanlab and crowd-kit in an isolated, version-pinned consensus worker
-  dependency group when Phase 6 begins. The API process does not import either
-  package at startup; a missing or incompatible optional dependency causes a
-  capability to be unavailable, never a silent strategy substitution.
+- Add crowd-kit in an isolated, version-pinned consensus worker dependency
+  group when Phase 6 begins. The API process does not import it at startup; a
+  missing or incompatible optional dependency makes only its mask-refinement
+  capabilities unavailable. Native class strategies remain versioned
+  capabilities and never silently substitute for one another.
 - Phase 5.1 uses a transactional outbox to persist exactly one
   `consensus.initial_evidence_ready.v1` domain event with the final required
   submission for each batch-item evidence generation. Reopening or reassigning
@@ -401,8 +406,8 @@ peer evidence.
 - Derive and persist project-scoped annotator performance observations when a
   resolution is accepted or adjudicated, then rebuild affected summary rows
   idempotently. Keep resolver diagnostics separate from these per-annotator
-  observations so later confidence-weight calculations can select only
-  eligible evidence.
+  observations so Phase 6 reliability-weight and Dawid-Skene snapshots can
+  select only eligible independent evidence.
 - Add Alembic migrations, deterministic OpenAPI regeneration, and database
   constraints for all stated uniqueness and immutability rules.
 
@@ -725,10 +730,15 @@ that document **Approved** before implementing the consensus engine.
 - Define the versioned resolver command/result protocol and durable resolution
   jobs. First provide a deterministic fake covering success, ambiguity,
   invalid output, retries, duplicates, timeout, and permanent failure.
-- Implement the user-selectable Cleanlab class resolvers, detection
-  identification/class-disambiguation then box refinement, and segmentation
-  instance/class disambiguation then crowd-kit/STAPLE mask refinement described
-  in the [classification](consensus/classification.md),
+- Implement and fixture-test the native `categorical_vote`,
+  `multilabel_binary_vote`, and `dirichlet_vote` strategies. Implement
+  `reliability_weighted_vote` and `dawid_skene` in the same phase with explicit
+  evidence sufficiency, class-coverage, identifiability, convergence, and
+  immutable parameter-snapshot gates. No class resolver accepts model output.
+- Integrate those strategies with detection identification/class
+  disambiguation then box refinement, and segmentation instance/class
+  disambiguation then crowd-kit/STAPLE mask refinement described in the
+  [classification](consensus/classification.md),
   [detection](consensus/detection.md), and
   [segmentation](consensus/segmentation.md) strategy documents.
 - Persist disagreement diagnostics, resolution-proposal/accepted-resolution versions, and
@@ -748,11 +758,13 @@ App work:
   [Phase 6 resolution and adjudication work](../../dada-app/docs/annotator-disagreement-adaptation-plan.md#phase-6-resolution-and-adjudication).
 
 Exit gate: golden fixtures for all three task types produce deterministic
-results; low agreement reaches review; no raw submission is mutated; an
-adjudication can close an item; duplicate worker results cannot create two
-accepted resolutions; accepted and adjudicated fixtures create correct,
-project-scoped class-retention and box/mask-agreement observations without
-duplicating them on worker retry.
+results; all three initial strategies pass task-appropriate fixtures; the two
+conditional strategies pass both eligible and ineligible-corpus fixtures; low
+agreement reaches review; no raw submission is mutated; an adjudication can
+close an item; duplicate worker results cannot create two accepted resolutions;
+accepted and adjudicated fixtures create correct, project-scoped
+class-retention and box/mask-agreement observations without duplicating them on
+worker retry.
 
 ### Phase 7: learning boundary, exports, metrics, and assisted segmentation
 
@@ -932,7 +944,7 @@ it will migrate existing policy values to this target pipeline vocabulary:
 
 | Task | Phase 2 provisional ID | Target pipeline ID |
 | --- | --- | --- |
-| Classification | `majority_vote` | `cleanlab_multiannotator` |
+| Classification | `majority_vote` | `statistical_class_consensus` |
 | Detection | `two_stage_box_fusion` | `two_stage_detection_consensus` |
 | Segmentation | `two_stage_mask_fusion` | `two_stage_segmentation_consensus` |
 
@@ -954,12 +966,11 @@ generic review-policy value, not as an algorithm tuning control.
 
 ## Explicitly deferred work
 
-- Adaptive annotator reliability weighting (for example Dawid-Skene) remains
-  deferred as a consensus input. The project-scoped evidence and summaries
-  required to evaluate it are delivered in Phases 6–7, but activation requires
-  adequate adjudicated/gold or cross-fitted evidence, bias monitoring, and a
-  separate policy/versioning decision.
-- Partial quorums drawn from a larger annotator pool.
+- GLAD and independent Bayesian classifier combination class resolvers. Their
+  identifiability, corpus-size, convergence, and resource policies require a
+  later decision before they can be advertised.
+- Dynamic or adaptive cohort resizing after the initial and review cohorts are
+  frozen.
 - Cross-image or temporal consensus for video.
 - Automated annotator scoring, ranking, or punitive performance workflows.
 - Additional production active-learning/model-training adapters beyond the

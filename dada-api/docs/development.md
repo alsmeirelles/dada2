@@ -227,13 +227,16 @@ an advertised identifier; anything else is `422 unsupported_resolver`.
 
 The current identifiers are a **provisional catalog**. Clients discover and
 persist them without hard-coding behavior around their names. Phase 6 will
-migrate them to the target pipeline vocabulary: `cleanlab_multiannotator`,
+migrate them to the target pipeline vocabulary: `statistical_class_consensus`,
 `two_stage_detection_consensus`, and `two_stage_segmentation_consensus`.
 `staple` remains a segmentation-refinement option, never a top-level resolver.
 The Phase 2 parameter contract is closed: clients send `parameters: {}` and
 may expose only `review_thresholds.agreement`. Resolver-specific schemas,
-defaults, package versions, and advanced controls belong to Phase 6; the API
-stores the fields opaquely until then.
+defaults, implementation/dependency versions, and advanced controls belong to
+Phase 6; the API stores the fields opaquely until then. Phase 6 implements the
+native class strategies recorded in
+[the Phase 6 decision record](phases/phase_6.md); model output is not a class
+consensus input.
 
 ## Dataset ingestion
 

@@ -1,6 +1,6 @@
 # Consensus Engine Requirements
 
-**Status:** Draft — implementation blocked  
+**Status:** Approved  
 **Target phase:** Phase 6  
 **Decision record:** `docs/phases/phase_6.md` (must exist and be approved before implementation)
 
@@ -116,6 +116,8 @@ Required invariants:
 - Imported seed documents are excluded from the input snapshot. They may be
   linked as provenance for a human-authored submission, but only submitted
   annotator documents are observations or consensus votes.
+- Model predictions, probabilities, embeddings, model seeds, and learning-run
+  outputs are excluded from every class/existence resolver input.
 
 ### CE-F02 — resolver registry and capabilities
 
@@ -124,9 +126,16 @@ Required invariants:
   rejected.
 - Every pipeline and sub-strategy has a typed, closed parameter schema with
   defaults, bounds, descriptions, and compatibility metadata.
-- Capabilities expose adapter semantic version and installed dependency version.
+- Phase 6 implements the native class strategy catalog approved by `P6-01`:
+  `categorical_vote`, `multilabel_binary_vote`, `dirichlet_vote`,
+  `reliability_weighted_vote`, and `dawid_skene`.
+- Capabilities expose resolver semantic version, installed dependency version
+  where applicable, and eligibility metadata for conditional strategies.
 - A missing/incompatible optional dependency removes the capability and yields
   a stable unavailable error. The engine never substitutes another algorithm.
+- Insufficient evidence, class coverage, identifiability, or convergence data
+  makes a conditional strategy unavailable for that project/batch without
+  removing its implementation from the Phase 6 catalog.
 - Provisional Phase 2 policy IDs are migrated according to `P6-02`.
 
 ### CE-F03 — input normalization
@@ -147,9 +156,12 @@ Required invariants:
   multi-label projects, including explicit negative observations and review on
   ties or unusable output.
 - Detection first identifies candidate objects class-agnostically, resolves
-  existence/class, then refines only boxes supporting accepted candidates.
+  existence/class with an applicable native statistical strategy, then refines
+  only boxes supporting accepted candidates.
 - Segmentation first identifies instances class-agnostically, resolves
-  existence/class, then aggregates only masks supporting accepted instances.
+  existence/class with an applicable native statistical strategy, then
+  aggregates only masks supporting accepted instances. crowd-kit participates
+  only in mask refinement.
 - Same-annotator duplicate objects never become independent votes.
 - No resolver may select an annotator, class display order, or random output as
   an undocumented tie breaker.
@@ -338,8 +350,12 @@ Phase 6 requires:
 5. duplicate, stale, timeout, crash, and permanent-failure worker tests;
 6. authorization and blindness tests across every role and endpoint;
 7. App contract tests for review, evidence, retry, acceptance, adjudication,
-   accessibility, and stale-version recovery; and
-8. deterministic replay using the exact approved dependency versions.
+   accessibility, and stale-version recovery;
+8. deterministic replay using the exact approved resolver and dependency
+   versions; and
+9. task-appropriate fixtures for all three initial native strategies plus
+   eligible/ineligible corpus, biased-weight, insufficient-coverage, and
+   convergence fixtures for both conditional strategies.
 
 The Phase 6 exit gate is satisfied only when all three task pipelines pass
 their golden fixtures, low-quality cases reach review, raw submissions remain
@@ -353,8 +369,10 @@ are maintained in the canonical [Phase 6 decision record](phases/phase_6.md).
 
 Approval metadata to complete after the decision record is accepted:
 
-- **Approved by:** `[TO DECIDE]`
-- **Approval date:** `[TO DECIDE]`
+- **Approved by:** `Meirelles`
+- **Approval date:** `2026-10-12`
 - **Approved decision record:** [Phase 6 decision record](phases/phase_6.md)
-- **OpenAPI baseline:** `[TO DECIDE]`
-- **Resolver compatibility set:** `[TO DECIDE]`
+- **OpenAPI baseline:** commit `1ee87e67`
+- **Resolver compatibility set:** native catalog fixed by `P6-01`; exact
+  strategy schemas, numeric defaults, and dependency versions remain
+  `[Approved: P6-02/P6-03]`

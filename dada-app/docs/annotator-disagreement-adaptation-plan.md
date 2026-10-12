@@ -200,9 +200,12 @@ project wizard:
   Require the selected pool to contain at least the sum of the two configured
   counts. Explain validation failures inline and retain them when moving
   between wizard steps.
-- Select a task-compatible resolver. Do not offer STAPLE for classification or
-  detection. Present advanced parameters and thresholds in a collapsible
-  section with server-provided/default values.
+- Select a task-compatible pipeline and native class strategy from server
+  capabilities. Do not offer STAPLE for classification or detection. Present
+  advanced parameters and thresholds in a collapsible section with
+  server-provided/default values. Conditional strategies such as
+  reliability-weighted voting and Dawid-Skene must show their evidence
+  eligibility and cannot be selected when the API marks them unavailable.
 - Show the exact initial-assignment estimate separately for initial training,
   validation, test, and one acquisition iteration, plus their total. Label
   this as initial work items rather than images. Show the reviewer count as
@@ -616,6 +619,8 @@ review-assignment revision](../../dada-api/docs/phases/phase_5.1.md), resolve sh
 before implementing API or App consensus behavior.
 
 - Add resolution progress and review-required states.
+- Render the Phase 6 native strategy identity and diagnostics without implying
+  that model predictions or model seeds contributed to class consensus.
 - Build the review queue, evidence comparison, retry, acceptance, editing, and
   adjudication flows. Distinguish image-level consensus cases from derived
   object/instance resolution work items, and show resolution-lease controls
