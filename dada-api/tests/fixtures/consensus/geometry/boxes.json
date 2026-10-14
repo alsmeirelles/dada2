@@ -1,0 +1,143 @@
+{
+  "iou": [
+    {
+      "a": [10, 10, 20, 20],
+      "b": [11, 11, 20, 20],
+      "expected": 0.8223234624145785
+    },
+    {
+      "a": [0, 0, 10, 10],
+      "b": [10, 0, 10, 10],
+      "expected": 0.0
+    },
+    {
+      "a": [0, 0, 20, 10],
+      "b": [0, 0, 10, 10],
+      "expected": 0.5
+    },
+    {
+      "a": [0, 0, 10, 10],
+      "b": [30, 30, 5, 5],
+      "expected": 0.0
+    }
+  ],
+  "median_pairwise_iou": [
+    {
+      "name": "low_geometric_agreement",
+      "boxes": [
+        [0, 0, 10, 10],
+        [5, 0, 10, 10],
+        [0, 0, 10, 10]
+      ],
+      "expected": 0.3333333333333333
+    },
+    {
+      "name": "even_pair_count",
+      "boxes": [
+        [0, 0, 10, 10],
+        [1, 0, 10, 10],
+        [2, 0, 10, 10],
+        [3, 0, 10, 10]
+      ],
+      "expected": 0.7424242424242424
+    },
+    {
+      "name": "single_box",
+      "boxes": [
+        [0, 0, 10, 10]
+      ],
+      "expected": null
+    }
+  ],
+  "refine": [
+    {
+      "name": "coordinate_median",
+      "strategy": {
+        "strategy": "coordinate_median"
+      },
+      "boxes": [
+        [10, 10, 20, 20],
+        [12, 8, 20, 22],
+        [9, 11, 19, 20],
+        [11, 10, 21, 19],
+        [40, 30, 20, 20]
+      ],
+      "width": 100,
+      "height": 100,
+      "expected": [11.0, 10.0, 21.0, 20.0]
+    },
+    {
+      "name": "trimmed_mean_box",
+      "strategy": {
+        "strategy": "trimmed_mean_box",
+        "trim_fraction": 0.2
+      },
+      "boxes": [
+        [10, 10, 20, 20],
+        [12, 8, 20, 22],
+        [9, 11, 19, 20],
+        [11, 10, 21, 19],
+        [40, 30, 20, 20]
+      ],
+      "width": 100,
+      "height": 100,
+      "expected": [11.0, 10.333333333333334, 20.333333333333332, 20.0]
+    },
+    {
+      "name": "trimmed_mean_box_no_trim_for_two",
+      "strategy": {
+        "strategy": "trimmed_mean_box",
+        "trim_fraction": 0.4
+      },
+      "boxes": [
+        [10, 10, 20, 20],
+        [12, 8, 20, 22]
+      ],
+      "width": 100,
+      "height": 100,
+      "expected": [11.0, 9.0, 20.0, 21.0]
+    },
+    {
+      "name": "weighted_box_fusion",
+      "strategy": {
+        "strategy": "weighted_box_fusion"
+      },
+      "boxes": [
+        [10, 10, 20, 20],
+        [12, 8, 20, 22],
+        [9, 11, 19, 20],
+        [11, 10, 21, 19],
+        [40, 30, 20, 20]
+      ],
+      "width": 100,
+      "height": 100,
+      "expected": [16.4, 13.8, 20.0, 20.2]
+    },
+    {
+      "name": "clipped_to_image",
+      "strategy": {
+        "strategy": "coordinate_median"
+      },
+      "boxes": [
+        [90, 40, 20, 20],
+        [92, 42, 20, 20]
+      ],
+      "width": 100,
+      "height": 50,
+      "expected": [91.0, 41.0, 9.0, 9.0]
+    }
+  ],
+  "refine_invalid": [
+    {
+      "name": "no_area_after_clipping",
+      "strategy": {
+        "strategy": "coordinate_median"
+      },
+      "boxes": [
+        [110, 0, 10, 10]
+      ],
+      "width": 100,
+      "height": 50
+    }
+  ]
+}

@@ -1,0 +1,919 @@
+{
+  "polygons": [
+    {
+      "name": "square",
+      "rings": [
+        [2, 2, 7, 2, 7, 7, 2, 7]
+      ],
+      "width": 10,
+      "height": 10,
+      "simplify_tolerance": null,
+      "expected": {
+        "area": 36,
+        "checksum": "821d1fcca586254613f7cb690da6bab3c444da7bfa22bea6ad5ee50dd27a2c9e",
+        "bounding_box": [2, 2, 6, 6],
+        "rings": [
+          [7.0, 2.0, 7.0, 7.0, 2.0, 7.0, 2.0, 2.0]
+        ],
+        "diagnostics": {
+          "library": "opencv",
+          "library_version": "4.13.0",
+          "retrieval": "RETR_CCOMP",
+          "approximation": "CHAIN_APPROX_SIMPLE",
+          "simplify_tolerance": null,
+          "outer_rings": 1,
+          "holes": 0,
+          "dropped_degenerate": 0
+        },
+        "mask": [
+          "..........",
+          "..........",
+          "..######..",
+          "..######..",
+          "..######..",
+          "..######..",
+          "..######..",
+          "..######..",
+          "..........",
+          ".........."
+        ]
+      }
+    },
+    {
+      "name": "sub_pixel_vertices",
+      "rings": [
+        [1.25, 1.5, 8.75, 1.5, 8.75, 6.4, 1.25, 6.4]
+      ],
+      "width": 10,
+      "height": 8,
+      "simplify_tolerance": null,
+      "expected": {
+        "area": 45,
+        "checksum": "38c2bef9d29b57805c91d53827b216727ed50b6e7ff3e7fb7f9db4f1662a69cb",
+        "bounding_box": [1, 2, 9, 5],
+        "rings": [
+          [9.0, 2.0, 9.0, 6.0, 1.0, 6.0, 1.0, 2.0]
+        ],
+        "diagnostics": {
+          "library": "opencv",
+          "library_version": "4.13.0",
+          "retrieval": "RETR_CCOMP",
+          "approximation": "CHAIN_APPROX_SIMPLE",
+          "simplify_tolerance": null,
+          "outer_rings": 1,
+          "holes": 0,
+          "dropped_degenerate": 0
+        },
+        "mask": [
+          "..........",
+          "..........",
+          ".#########",
+          ".#########",
+          ".#########",
+          ".#########",
+          ".#########",
+          ".........."
+        ]
+      }
+    },
+    {
+      "name": "sub_pixel_triangle",
+      "rings": [
+        [7.72, 1.62, 12.85, 1.52, 8.5, 13.47]
+      ],
+      "width": 14,
+      "height": 14,
+      "simplify_tolerance": null,
+      "expected": {
+        "area": 42,
+        "checksum": "4f0d96fc4c43cf16cdad2ae0b09742099f46a5bfa25707c6cb4b5f0e020756dd",
+        "bounding_box": [8, 2, 6, 12],
+        "rings": [
+          [13.0, 2.0, 13.0, 3.0, 12.0, 4.0, 12.0, 6.0, 11.0, 7.0, 11.0, 8.0, 10.0, 9.0, 10.0, 11.0, 9.0, 12.0, 9.0, 13.0, 9.0, 8.0, 8.0, 7.0, 8.0, 2.0]
+        ],
+        "diagnostics": {
+          "library": "opencv",
+          "library_version": "4.13.0",
+          "retrieval": "RETR_CCOMP",
+          "approximation": "CHAIN_APPROX_SIMPLE",
+          "simplify_tolerance": null,
+          "outer_rings": 1,
+          "holes": 0,
+          "dropped_degenerate": 0
+        },
+        "mask": [
+          "..............",
+          "..............",
+          "........######",
+          "........######",
+          "........#####.",
+          "........#####.",
+          "........#####.",
+          "........####..",
+          ".........###..",
+          ".........##...",
+          ".........##...",
+          ".........##...",
+          ".........#....",
+          ".........#...."
+        ]
+      }
+    },
+    {
+      "name": "polygon_with_hole",
+      "rings": [
+        [2, 2, 17, 2, 17, 17, 2, 17],
+        [6, 6, 12, 6, 12, 12, 6, 12]
+      ],
+      "width": 20,
+      "height": 20,
+      "simplify_tolerance": null,
+      "expected": {
+        "area": 207,
+        "checksum": "b88cdf483d95dd618734fff6b9521c550e31b45081638497796ff954537e6796",
+        "bounding_box": [2, 2, 16, 16],
+        "rings": [
+          [17.0, 2.0, 17.0, 17.0, 2.0, 17.0, 2.0, 2.0],
+          [5.0, 12.0, 6.0, 13.0, 12.0, 13.0, 13.0, 12.0, 13.0, 6.0, 12.0, 5.0, 6.0, 5.0, 5.0, 6.0]
+        ],
+        "diagnostics": {
+          "library": "opencv",
+          "library_version": "4.13.0",
+          "retrieval": "RETR_CCOMP",
+          "approximation": "CHAIN_APPROX_SIMPLE",
+          "simplify_tolerance": null,
+          "outer_rings": 1,
+          "holes": 1,
+          "dropped_degenerate": 0
+        },
+        "mask": [
+          "....................",
+          "....................",
+          "..################..",
+          "..################..",
+          "..################..",
+          "..################..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..################..",
+          "..################..",
+          "..################..",
+          "..################..",
+          "..################..",
+          "....................",
+          "...................."
+        ]
+      }
+    },
+    {
+      "name": "hole_ring_listed_first",
+      "rings": [
+        [6, 6, 12, 6, 12, 12, 6, 12],
+        [2, 2, 17, 2, 17, 17, 2, 17]
+      ],
+      "width": 20,
+      "height": 20,
+      "simplify_tolerance": null,
+      "expected": {
+        "area": 207,
+        "checksum": "b88cdf483d95dd618734fff6b9521c550e31b45081638497796ff954537e6796",
+        "bounding_box": [2, 2, 16, 16],
+        "rings": [
+          [17.0, 2.0, 17.0, 17.0, 2.0, 17.0, 2.0, 2.0],
+          [5.0, 12.0, 6.0, 13.0, 12.0, 13.0, 13.0, 12.0, 13.0, 6.0, 12.0, 5.0, 6.0, 5.0, 5.0, 6.0]
+        ],
+        "diagnostics": {
+          "library": "opencv",
+          "library_version": "4.13.0",
+          "retrieval": "RETR_CCOMP",
+          "approximation": "CHAIN_APPROX_SIMPLE",
+          "simplify_tolerance": null,
+          "outer_rings": 1,
+          "holes": 1,
+          "dropped_degenerate": 0
+        },
+        "mask": [
+          "....................",
+          "....................",
+          "..################..",
+          "..################..",
+          "..################..",
+          "..################..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..####.......#####..",
+          "..################..",
+          "..################..",
+          "..################..",
+          "..################..",
+          "..################..",
+          "....................",
+          "...................."
+        ]
+      }
+    },
+    {
+      "name": "disconnected_regions",
+      "rings": [
+        [10, 6, 14, 6, 14, 9, 10, 9],
+        [1, 1, 4, 1, 4, 4, 1, 4]
+      ],
+      "width": 16,
+      "height": 12,
+      "simplify_tolerance": null,
+      "expected": {
+        "area": 36,
+        "checksum": "ec97fb28142c0c3abf5cbe4fa47f6b24eb51d85c60c9ce8be8b8594f87f10943",
+        "bounding_box": [1, 1, 14, 9],
+        "rings": [
+          [4.0, 1.0, 4.0, 4.0, 1.0, 4.0, 1.0, 1.0],
+          [14.0, 6.0, 14.0, 9.0, 10.0, 9.0, 10.0, 6.0]
+        ],
+        "diagnostics": {
+          "library": "opencv",
+          "library_version": "4.13.0",
+          "retrieval": "RETR_CCOMP",
+          "approximation": "CHAIN_APPROX_SIMPLE",
+          "simplify_tolerance": null,
+          "outer_rings": 2,
+          "holes": 0,
+          "dropped_degenerate": 0
+        },
+        "mask": [
+          "................",
+          ".####...........",
+          ".####...........",
+          ".####...........",
+          ".####...........",
+          "................",
+          "..........#####.",
+          "..........#####.",
+          "..........#####.",
+          "..........#####.",
+          "................",
+          "................"
+        ]
+      }
+    },
+    {
+      "name": "island_inside_hole",
+      "rings": [
+        [1, 1, 20, 1, 20, 20, 1, 20],
+        [5, 5, 16, 5, 16, 16, 5, 16],
+        [9, 9, 12, 9, 12, 12, 9, 12]
+      ],
+      "width": 22,
+      "height": 22,
+      "simplify_tolerance": null,
+      "expected": {
+        "area": 272,
+        "checksum": "2e8c71785df12454b76868df5410210976da0003636cd989bc1914e3f35826cf",
+        "bounding_box": [1, 1, 20, 20],
+        "rings": [
+          [20.0, 1.0, 20.0, 20.0, 1.0, 20.0, 1.0, 1.0],
+          [4.0, 16.0, 5.0, 17.0, 16.0, 17.0, 17.0, 16.0, 17.0, 5.0, 16.0, 4.0, 5.0, 4.0, 4.0, 5.0],
+          [12.0, 9.0, 12.0, 12.0, 9.0, 12.0, 9.0, 9.0]
+        ],
+        "diagnostics": {
+          "library": "opencv",
+          "library_version": "4.13.0",
+          "retrieval": "RETR_CCOMP",
+          "approximation": "CHAIN_APPROX_SIMPLE",
+          "simplify_tolerance": null,
+          "outer_rings": 2,
+          "holes": 1,
+          "dropped_degenerate": 0
+        },
+        "mask": [
+          "......................",
+          ".####################.",
+          ".####################.",
+          ".####################.",
+          ".####################.",
+          ".####............####.",
+          ".####............####.",
+          ".####............####.",
+          ".####............####.",
+          ".####....####....####.",
+          ".####....####....####.",
+          ".####....####....####.",
+          ".####....####....####.",
+          ".####............####.",
+          ".####............####.",
+          ".####............####.",
+          ".####............####.",
+          ".####################.",
+          ".####################.",
+          ".####################.",
+          ".####################.",
+          "......................"
+        ]
+      }
+    },
+    {
+      "name": "thin_two_pixel_structure",
+      "rings": [
+        [1, 5, 20, 5, 20, 6, 1, 6]
+      ],
+      "width": 24,
+      "height": 10,
+      "simplify_tolerance": null,
+      "expected": {
+        "area": 40,
+        "checksum": "d27d49f1b7716517df5f70ac824dfe16c63874f3af658dd99e06db66d2e68158",
+        "bounding_box": [1, 5, 20, 2],
+        "rings": [
+          [20.0, 5.0, 20.0, 6.0, 1.0, 6.0, 1.0, 5.0]
+        ],
+        "diagnostics": {
+          "library": "opencv",
+          "library_version": "4.13.0",
+          "retrieval": "RETR_CCOMP",
+          "approximation": "CHAIN_APPROX_SIMPLE",
+          "simplify_tolerance": null,
+          "outer_rings": 1,
+          "holes": 0,
+          "dropped_degenerate": 0
+        },
+        "mask": [
+          "........................",
+          "........................",
+          "........................",
+          "........................",
+          "........................",
+          ".####################...",
+          ".####################...",
+          "........................",
+          "........................",
+          "........................"
+        ]
+      }
+    },
+    {
+      "name": "thin_one_pixel_structure_dropped",
+      "rings": [
+        [1, 5, 20, 5, 20, 5.4, 1, 5.4]
+      ],
+      "width": 24,
+      "height": 10,
+      "simplify_tolerance": null,
+      "expected": {
+        "area": 20,
+        "checksum": "f465e6016b35b0338e08d527865876e5da252b71778ee10c3dbff2d273de3170",
+        "bounding_box": [1, 5, 20, 1],
+        "rings": [],
+        "diagnostics": {
+          "library": "opencv",
+          "library_version": "4.13.0",
+          "retrieval": "RETR_CCOMP",
+          "approximation": "CHAIN_APPROX_SIMPLE",
+          "simplify_tolerance": null,
+          "outer_rings": 0,
+          "holes": 0,
+          "dropped_degenerate": 1
+        },
+        "mask": [
+          "........................",
+          "........................",
+          "........................",
+          "........................",
+          "........................",
+          ".####################...",
+          "........................",
+          "........................",
+          "........................",
+          "........................"
+        ]
+      }
+    },
+    {
+      "name": "star_traced",
+      "rings": [
+        [52.0, 30.0, 40.222, 33.661, 45.383, 44.863, 34.781, 38.56, 29.909, 49.89, 27.5, 37.794, 15.82, 41.756, 23.197, 31.871, 12.437, 25.842, 24.719, 24.71, 22.0, 12.679, 31.059, 21.049, 38.18, 10.979, 38.022, 23.312, 50.271, 21.865]
+      ],
+      "width": 64,
+      "height": 60,
+      "simplify_tolerance": null,
+      "expected": {
+        "area": 681,
+        "checksum": "7f4f08a8e75aebe8a525d1eec1260058ec4a09b60299136a25d923f58e4e71d5",
+        "bounding_box": [12, 11, 41, 40],
+        "rings": [
+          [38.0, 22.0, 39.0, 23.0, 44.0, 23.0, 45.0, 22.0, 50.0, 22.0, 50.0, 24.0, 51.0, 25.0, 51.0, 28.0, 52.0, 29.0, 52.0, 30.0, 51.0, 30.0, 50.0, 31.0, 48.0, 31.0, 47.0, 32.0, 45.0, 32.0, 44.0, 33.0, 42.0, 33.0, 40.0, 35.0, 41.0, 36.0, 41.0, 37.0, 42.0, 38.0, 42.0, 39.0, 43.0, 40.0, 43.0, 41.0, 44.0, 42.0, 44.0, 43.0, 45.0, 44.0, 45.0, 45.0, 44.0, 44.0, 43.0, 44.0, 42.0, 43.0, 41.0, 43.0, 39.0, 41.0, 38.0, 41.0, 37.0, 40.0, 35.0, 40.0, 34.0, 41.0, 34.0, 42.0, 33.0, 43.0, 33.0, 44.0, 32.0, 45.0, 32.0, 46.0, 31.0, 47.0, 31.0, 48.0, 30.0, 49.0, 30.0, 50.0, 30.0, 48.0, 29.0, 47.0, 29.0, 42.0, 28.0, 41.0, 28.0, 39.0, 27.0, 38.0, 26.0, 39.0, 24.0, 39.0, 23.0, 40.0, 21.0, 40.0, 20.0, 41.0, 18.0, 41.0, 17.0, 42.0, 16.0, 42.0, 17.0, 41.0, 17.0, 40.0, 19.0, 38.0, 19.0, 37.0, 22.0, 34.0, 22.0, 33.0, 23.0, 32.0, 22.0, 31.0, 21.0, 31.0, 20.0, 30.0, 19.0, 30.0, 18.0, 29.0, 17.0, 29.0, 16.0, 28.0, 15.0, 28.0, 14.0, 27.0, 13.0, 27.0, 12.0, 26.0, 18.0, 26.0, 19.0, 25.0, 24.0, 25.0, 25.0, 24.0, 24.0, 23.0, 24.0, 20.0, 23.0, 19.0, 23.0, 16.0, 22.0, 15.0, 22.0, 13.0, 26.0, 17.0, 27.0, 17.0, 31.0, 21.0, 32.0, 20.0, 32.0, 19.0, 34.0, 17.0, 34.0, 16.0, 37.0, 13.0, 37.0, 12.0, 38.0, 11.0]
+        ],
+        "diagnostics": {
+          "library": "opencv",
+          "library_version": "4.13.0",
+          "retrieval": "RETR_CCOMP",
+          "approximation": "CHAIN_APPROX_SIMPLE",
+          "simplify_tolerance": null,
+          "outer_rings": 1,
+          "holes": 0,
+          "dropped_degenerate": 0
+        }
+      }
+    },
+    {
+      "name": "star_simplified",
+      "rings": [
+        [52.0, 30.0, 40.222, 33.661, 45.383, 44.863, 34.781, 38.56, 29.909, 49.89, 27.5, 37.794, 15.82, 41.756, 23.197, 31.871, 12.437, 25.842, 24.719, 24.71, 22.0, 12.679, 31.059, 21.049, 38.18, 10.979, 38.022, 23.312, 50.271, 21.865]
+      ],
+      "width": 64,
+      "height": 60,
+      "simplify_tolerance": 1.0,
+      "expected": {
+        "area": 681,
+        "checksum": "7f4f08a8e75aebe8a525d1eec1260058ec4a09b60299136a25d923f58e4e71d5",
+        "bounding_box": [12, 11, 41, 40],
+        "rings": [
+          [38.0, 22.0, 50.0, 22.0, 52.0, 30.0, 42.0, 33.0, 40.0, 35.0, 45.0, 45.0, 35.0, 40.0, 30.0, 50.0, 27.0, 38.0, 16.0, 42.0, 23.0, 32.0, 12.0, 26.0, 25.0, 24.0, 22.0, 13.0, 31.0, 21.0, 38.0, 11.0]
+        ],
+        "diagnostics": {
+          "library": "opencv",
+          "library_version": "4.13.0",
+          "retrieval": "RETR_CCOMP",
+          "approximation": "CHAIN_APPROX_SIMPLE",
+          "simplify_tolerance": 1.0,
+          "outer_rings": 1,
+          "holes": 0,
+          "dropped_degenerate": 0
+        }
+      }
+    }
+  ],
+  "matching": [
+    {
+      "name": "adjacent_touching_instances",
+      "metric": "iou",
+      "threshold": 0.5,
+      "width": 24,
+      "height": 12,
+      "objects": [
+        [
+          [
+            [0, 0, 9, 0, 9, 9, 0, 9]
+          ],
+          [
+            [10, 0, 19, 0, 19, 9, 10, 9]
+          ]
+        ],
+        [
+          [
+            [0, 0, 9, 0, 9, 10, 0, 10]
+          ],
+          [
+            [10, 1, 19, 1, 19, 9, 10, 9]
+          ]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          },
+          {
+            "members": [
+              [0, 1],
+              [1, 1]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "low_dice_masks",
+      "metric": "dice",
+      "threshold": 0.6666666666666666,
+      "width": 20,
+      "height": 12,
+      "objects": [
+        [
+          [
+            [0, 0, 9, 0, 9, 9, 0, 9]
+          ]
+        ],
+        [
+          [
+            [5, 0, 14, 0, 14, 9, 5, 9]
+          ]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0]
+            ],
+            "ambiguous": false
+          },
+          {
+            "members": [
+              [1, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "dice_match_where_iou_fails",
+      "metric": "dice",
+      "threshold": 0.6666666666666666,
+      "width": 20,
+      "height": 12,
+      "objects": [
+        [
+          [
+            [0, 0, 9, 0, 9, 9, 0, 9]
+          ]
+        ],
+        [
+          [
+            [3, 0, 12, 0, 12, 9, 3, 9]
+          ]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "dice_pair_compared_by_iou",
+      "metric": "iou",
+      "threshold": 0.5,
+      "width": 20,
+      "height": 12,
+      "objects": [
+        [
+          [
+            [0, 0, 9, 0, 9, 9, 0, 9]
+          ]
+        ],
+        [
+          [
+            [3, 0, 12, 0, 12, 9, 3, 9]
+          ]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "thin_structures_offset_by_one_pixel",
+      "metric": "iou",
+      "threshold": 0.5,
+      "width": 32,
+      "height": 12,
+      "objects": [
+        [
+          [
+            [0, 5, 29, 5, 29, 6, 0, 6]
+          ]
+        ],
+        [
+          [
+            [0, 6, 29, 6, 29, 7, 0, 7]
+          ]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0]
+            ],
+            "ambiguous": false
+          },
+          {
+            "members": [
+              [1, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "instances_with_holes",
+      "metric": "iou",
+      "threshold": 0.5,
+      "width": 20,
+      "height": 20,
+      "objects": [
+        [
+          [
+            [2, 2, 17, 2, 17, 17, 2, 17],
+            [6, 6, 12, 6, 12, 12, 6, 12]
+          ]
+        ],
+        [
+          [
+            [2, 3, 17, 3, 17, 17, 2, 17],
+            [7, 7, 12, 7, 12, 12, 7, 12]
+          ]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "disconnected_instance",
+      "metric": "iou",
+      "threshold": 0.5,
+      "width": 16,
+      "height": 12,
+      "objects": [
+        [
+          [
+            [1, 1, 4, 1, 4, 4, 1, 4],
+            [10, 6, 14, 6, 14, 9, 10, 9]
+          ]
+        ],
+        [
+          [
+            [1, 1, 4, 1, 4, 4, 1, 4],
+            [10, 6, 13, 6, 13, 9, 10, 9]
+          ]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "same_rater_duplicate_mask",
+      "metric": "iou",
+      "threshold": 0.5,
+      "width": 12,
+      "height": 12,
+      "objects": [
+        [
+          [
+            [0, 0, 9, 0, 9, 9, 0, 9]
+          ],
+          [
+            [1, 0, 9, 0, 9, 9, 1, 9]
+          ]
+        ],
+        [
+          [
+            [0, 0, 9, 0, 9, 9, 0, 9]
+          ]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": [
+          [0, 1]
+        ]
+      }
+    }
+  ],
+  "post_processing": [
+    {
+      "name": "every_step_disabled",
+      "width": 40,
+      "height": 40,
+      "rings": [
+        [5, 5, 24, 5, 24, 24, 5, 24],
+        [10, 10, 11, 10, 11, 11, 10, 11],
+        [30, 30, 31, 30, 31, 31, 30, 31]
+      ],
+      "settings": {
+        "remove_components_below": null,
+        "fill_holes_below": null,
+        "simplify_tolerance": null
+      },
+      "expected": {
+        "checksum": "3fbb119d5856ed30e200723542f5d5ed3ee09272f7b1fc3db90a950cdd17e074",
+        "diagnostics": {
+          "raw_checksum": "3fbb119d5856ed30e200723542f5d5ed3ee09272f7b1fc3db90a950cdd17e074",
+          "final_checksum": "3fbb119d5856ed30e200723542f5d5ed3ee09272f7b1fc3db90a950cdd17e074",
+          "area_before": 400,
+          "area_after": 400,
+          "components_before": 2,
+          "components_after": 2,
+          "holes_before": 1,
+          "holes_after": 1,
+          "removed_components": 0,
+          "filled_holes": 0,
+          "area_change": 0.0,
+          "topology_change": 0.0,
+          "material_change": false
+        }
+      }
+    },
+    {
+      "name": "material_topology_change",
+      "width": 40,
+      "height": 40,
+      "rings": [
+        [5, 5, 24, 5, 24, 24, 5, 24],
+        [10, 10, 11, 10, 11, 11, 10, 11],
+        [30, 30, 31, 30, 31, 31, 30, 31]
+      ],
+      "settings": {
+        "remove_components_below": {
+          "pixels": 10,
+          "image_ratio": 0.01
+        },
+        "fill_holes_below": {
+          "pixels": 10,
+          "image_ratio": 0.01
+        },
+        "simplify_tolerance": null
+      },
+      "expected": {
+        "checksum": "ee39073f6e4b4d3e613329a22dfee0d2579f352b01c703d19be0ea63ad2e5132",
+        "diagnostics": {
+          "raw_checksum": "3fbb119d5856ed30e200723542f5d5ed3ee09272f7b1fc3db90a950cdd17e074",
+          "final_checksum": "ee39073f6e4b4d3e613329a22dfee0d2579f352b01c703d19be0ea63ad2e5132",
+          "area_before": 400,
+          "area_after": 400,
+          "components_before": 2,
+          "components_after": 1,
+          "holes_before": 1,
+          "holes_after": 0,
+          "removed_components": 1,
+          "filled_holes": 1,
+          "area_change": 0.0,
+          "topology_change": 0.666667,
+          "material_change": true
+        }
+      }
+    },
+    {
+      "name": "small_change_not_material",
+      "width": 40,
+      "height": 40,
+      "rings": [
+        [5, 5, 24, 5, 24, 24, 5, 24],
+        [8, 8, 9, 8, 9, 9, 8, 9],
+        [12, 8, 13, 8, 13, 9, 12, 9],
+        [16, 8, 17, 8, 17, 9, 16, 9],
+        [8, 14, 9, 14, 9, 15, 8, 15],
+        [12, 14, 13, 14, 13, 15, 12, 15],
+        [20, 20, 20.3, 20, 20.3, 20.3, 20, 20.3]
+      ],
+      "settings": {
+        "remove_components_below": null,
+        "fill_holes_below": {
+          "pixels": 2,
+          "image_ratio": 0.01
+        },
+        "simplify_tolerance": null
+      },
+      "expected": {
+        "checksum": "0f88ef21d294e2ed76ae84086bf6b7ddbbc86237193067335e4e05f1ab35bff0",
+        "diagnostics": {
+          "raw_checksum": "2637e0032b4640d04f2f5305c6ed9d02899b9f7f5e3683cb45e11b2ea5e9deea",
+          "final_checksum": "0f88ef21d294e2ed76ae84086bf6b7ddbbc86237193067335e4e05f1ab35bff0",
+          "area_before": 379,
+          "area_after": 380,
+          "components_before": 1,
+          "components_after": 1,
+          "holes_before": 6,
+          "holes_after": 5,
+          "removed_components": 0,
+          "filled_holes": 1,
+          "area_change": 0.002639,
+          "topology_change": 0.142857,
+          "material_change": false
+        }
+      }
+    },
+    {
+      "name": "below_pixels_but_not_ratio_is_kept",
+      "width": 40,
+      "height": 40,
+      "rings": [
+        [5, 5, 24, 5, 24, 24, 5, 24],
+        [30, 30, 31, 30, 31, 31, 30, 31]
+      ],
+      "settings": {
+        "remove_components_below": {
+          "pixels": 10,
+          "image_ratio": 0.001
+        },
+        "fill_holes_below": null,
+        "simplify_tolerance": null
+      },
+      "expected": {
+        "checksum": "e4d2dd08743d1cdde8497714f3eded1aaee8b8026d5e3b9cac1bf9008691362d",
+        "diagnostics": {
+          "raw_checksum": "e4d2dd08743d1cdde8497714f3eded1aaee8b8026d5e3b9cac1bf9008691362d",
+          "final_checksum": "e4d2dd08743d1cdde8497714f3eded1aaee8b8026d5e3b9cac1bf9008691362d",
+          "area_before": 404,
+          "area_after": 404,
+          "components_before": 2,
+          "components_after": 2,
+          "holes_before": 0,
+          "holes_after": 0,
+          "removed_components": 0,
+          "filled_holes": 0,
+          "area_change": 0.0,
+          "topology_change": 0.0,
+          "material_change": false
+        }
+      }
+    },
+    {
+      "name": "material_area_change",
+      "width": 40,
+      "height": 40,
+      "rings": [
+        [2, 2, 5, 2, 5, 5, 2, 5],
+        [20, 20, 23, 20, 23, 22, 20, 22]
+      ],
+      "settings": {
+        "remove_components_below": {
+          "pixels": 14,
+          "image_ratio": 0.5
+        },
+        "fill_holes_below": null,
+        "simplify_tolerance": null
+      },
+      "expected": {
+        "checksum": "f15dbb881a39d8d3a835ffe1829ffa870691eee4dc056c1b5b5f2f38b8a5dafa",
+        "diagnostics": {
+          "raw_checksum": "7c915f3936f3e6ace46d2751b9d4a625bff15fed8fdebd0a51b8f106b6f50641",
+          "final_checksum": "f15dbb881a39d8d3a835ffe1829ffa870691eee4dc056c1b5b5f2f38b8a5dafa",
+          "area_before": 28,
+          "area_after": 16,
+          "components_before": 2,
+          "components_after": 1,
+          "holes_before": 0,
+          "holes_after": 0,
+          "removed_components": 1,
+          "filled_holes": 0,
+          "area_change": 0.428571,
+          "topology_change": 0.5,
+          "material_change": true
+        }
+      }
+    }
+  ]
+}

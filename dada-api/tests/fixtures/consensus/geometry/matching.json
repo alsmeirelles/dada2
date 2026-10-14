@@ -1,0 +1,567 @@
+{
+  "box_cases": [
+    {
+      "name": "same_object_two_raters",
+      "threshold": 0.5,
+      "objects": [
+        [
+          [10, 10, 20, 20]
+        ],
+        [
+          [11, 11, 20, 20]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "two_adjacent_objects",
+      "threshold": 0.5,
+      "objects": [
+        [
+          [0, 0, 10, 10],
+          [12, 0, 10, 10]
+        ],
+        [
+          [1, 0, 10, 10],
+          [12, 1, 10, 10]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          },
+          {
+            "members": [
+              [0, 1],
+              [1, 1]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "duplicate_same_rater_boxes",
+      "threshold": 0.5,
+      "objects": [
+        [
+          [0, 0, 10, 10],
+          [1, 0, 10, 10]
+        ],
+        [
+          [0, 0, 10, 10]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": [
+          [0, 1]
+        ]
+      }
+    },
+    {
+      "name": "one_omitted_object",
+      "threshold": 0.5,
+      "objects": [
+        [
+          [0, 0, 10, 10],
+          [50, 50, 10, 10]
+        ],
+        [
+          [1, 1, 10, 10]
+        ],
+        [
+          [0, 1, 10, 10],
+          [51, 50, 10, 10]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0],
+              [2, 0]
+            ],
+            "ambiguous": false
+          },
+          {
+            "members": [
+              [0, 1],
+              [2, 1]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "unmatched_false_positive",
+      "threshold": 0.5,
+      "objects": [
+        [
+          [0, 0, 10, 10]
+        ],
+        [
+          [1, 0, 10, 10],
+          [80, 80, 5, 5]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          },
+          {
+            "members": [
+              [1, 1]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "transitive_bridge_prevented",
+      "threshold": 0.5,
+      "objects": [
+        [
+          [0, 0, 20, 10]
+        ],
+        [
+          [0, 0, 12, 10]
+        ],
+        [
+          [9, 0, 11, 10]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          },
+          {
+            "members": [
+              [2, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "equal_score_ambiguity",
+      "threshold": 0.5,
+      "objects": [
+        [
+          [0, 0, 20, 10]
+        ],
+        [
+          [0, 0, 10, 10]
+        ],
+        [
+          [10, 0, 10, 10]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": true
+          },
+          {
+            "members": [
+              [2, 0]
+            ],
+            "ambiguous": true
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "three_raters_agree",
+      "threshold": 0.5,
+      "objects": [
+        [
+          [0, 0, 10, 10]
+        ],
+        [
+          [1, 0, 10, 10]
+        ],
+        [
+          [0, 1, 10, 10]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0],
+              [2, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "rater_without_objects",
+      "threshold": 0.5,
+      "objects": [
+        [
+          [0, 0, 10, 10]
+        ],
+        [],
+        [
+          [1, 1, 10, 10]
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [2, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    }
+  ],
+  "table_cases": [
+    {
+      "name": "tie_with_blocked_merge",
+      "threshold": 0.5,
+      "objects": [
+        [
+          "u"
+        ],
+        [
+          "w"
+        ],
+        [
+          "v"
+        ]
+      ],
+      "overlaps": [
+        [
+          "u",
+          "w",
+          0.8
+        ],
+        [
+          "u",
+          "v",
+          0.8
+        ],
+        [
+          "w",
+          "v",
+          0.1
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": true
+          },
+          {
+            "members": [
+              [2, 0]
+            ],
+            "ambiguous": true
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "tie_already_decided_by_higher_score",
+      "threshold": 0.5,
+      "objects": [
+        [
+          "u"
+        ],
+        [
+          "x"
+        ],
+        [
+          "v"
+        ],
+        [
+          "w"
+        ]
+      ],
+      "overlaps": [
+        [
+          "u",
+          "v",
+          0.6
+        ],
+        [
+          "u",
+          "w",
+          0.6
+        ],
+        [
+          "x",
+          "v",
+          0.9
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [3, 0]
+            ],
+            "ambiguous": false
+          },
+          {
+            "members": [
+              [1, 0],
+              [2, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "ambiguity_propagates_and_lower_tier",
+      "threshold": 0.5,
+      "objects": [
+        [
+          "a"
+        ],
+        [
+          "b"
+        ],
+        [
+          "c"
+        ],
+        [
+          "d"
+        ]
+      ],
+      "overlaps": [
+        [
+          "a",
+          "b",
+          0.9
+        ],
+        [
+          "b",
+          "c",
+          0.7
+        ],
+        [
+          "a",
+          "c",
+          0.7
+        ],
+        [
+          "c",
+          "d",
+          0.7
+        ],
+        [
+          "a",
+          "d",
+          0.2
+        ],
+        [
+          "b",
+          "d",
+          0.6
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0],
+              [2, 0]
+            ],
+            "ambiguous": true
+          },
+          {
+            "members": [
+              [3, 0]
+            ],
+            "ambiguous": true
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "threshold_compared_after_quantization",
+      "threshold": 0.5,
+      "objects": [
+        [
+          "a"
+        ],
+        [
+          "b"
+        ]
+      ],
+      "overlaps": [
+        [
+          "a",
+          "b",
+          0.4999995
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "just_below_threshold_after_quantization",
+      "threshold": 0.5,
+      "objects": [
+        [
+          "a"
+        ],
+        [
+          "b"
+        ]
+      ],
+      "overlaps": [
+        [
+          "a",
+          "b",
+          0.4999994
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0]
+            ],
+            "ambiguous": false
+          },
+          {
+            "members": [
+              [1, 0]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    },
+    {
+      "name": "one_to_one_assignment_maximizes_total",
+      "threshold": 0.5,
+      "objects": [
+        [
+          "a1",
+          "a2"
+        ],
+        [
+          "b1",
+          "b2"
+        ]
+      ],
+      "overlaps": [
+        [
+          "a1",
+          "b1",
+          0.7
+        ],
+        [
+          "a1",
+          "b2",
+          0.8
+        ],
+        [
+          "a2",
+          "b2",
+          0.75
+        ]
+      ],
+      "expected": {
+        "groups": [
+          {
+            "members": [
+              [0, 0],
+              [1, 0]
+            ],
+            "ambiguous": false
+          },
+          {
+            "members": [
+              [0, 1],
+              [1, 1]
+            ],
+            "ambiguous": false
+          }
+        ],
+        "duplicates": []
+      }
+    }
+  ]
+}

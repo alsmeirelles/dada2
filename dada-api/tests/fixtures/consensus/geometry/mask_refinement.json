@@ -1,0 +1,551 @@
+{
+  "cases": [
+    {
+      "name": "segmentation_majority_vote_noisy_four_raters",
+      "strategy": {
+        "strategy": "segmentation_majority_vote"
+      },
+      "masks": [
+        [
+          "..#....",
+          "...##.#",
+          "##.##..",
+          "###.#..",
+          "#.##..#"
+        ],
+        [
+          ".##..#.",
+          ".#####.",
+          "..##.#.",
+          ".#####.",
+          "..#..#."
+        ],
+        [
+          "....#..",
+          ".#.##..",
+          ".###.#.",
+          "##.###.",
+          "......."
+        ],
+        [
+          ".##...#",
+          "###..#.",
+          ".#####.",
+          "...#.#.",
+          "#...#.."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          ".##....",
+          ".#####.",
+          ".#####.",
+          "######.",
+          "#.#...."
+        ],
+        "diagnostics": {
+          "strategy": "segmentation_majority_vote",
+          "package": "crowd-kit",
+          "version": "1.4.2",
+          "pixel_threshold": 0.5
+        }
+      }
+    },
+    {
+      "name": "segmentation_em_noisy_four_raters",
+      "strategy": {
+        "strategy": "segmentation_em"
+      },
+      "masks": [
+        [
+          "..#....",
+          "...##.#",
+          "##.##..",
+          "###.#..",
+          "#.##..#"
+        ],
+        [
+          ".##..#.",
+          ".#####.",
+          "..##.#.",
+          ".#####.",
+          "..#..#."
+        ],
+        [
+          "....#..",
+          ".#.##..",
+          ".###.#.",
+          "##.###.",
+          "......."
+        ],
+        [
+          ".##...#",
+          "###..#.",
+          ".#####.",
+          "...#.#.",
+          "#...#.."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          "....#..",
+          ".#.##..",
+          ".###.#.",
+          "##.###.",
+          "......."
+        ],
+        "diagnostics": {
+          "strategy": "segmentation_em",
+          "package": "crowd-kit",
+          "version": "1.4.2",
+          "pixel_threshold": 0.5
+        }
+      }
+    },
+    {
+      "name": "segmentation_rasa_noisy_four_raters",
+      "strategy": {
+        "strategy": "segmentation_rasa"
+      },
+      "masks": [
+        [
+          "..#....",
+          "...##.#",
+          "##.##..",
+          "###.#..",
+          "#.##..#"
+        ],
+        [
+          ".##..#.",
+          ".#####.",
+          "..##.#.",
+          ".#####.",
+          "..#..#."
+        ],
+        [
+          "....#..",
+          ".#.##..",
+          ".###.#.",
+          "##.###.",
+          "......."
+        ],
+        [
+          ".##...#",
+          "###..#.",
+          ".#####.",
+          "...#.#.",
+          "#...#.."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          ".##....",
+          ".#####.",
+          ".###.#.",
+          ".#####.",
+          "..#...."
+        ],
+        "diagnostics": {
+          "strategy": "segmentation_rasa",
+          "package": "crowd-kit",
+          "version": "1.4.2",
+          "pixel_threshold": 0.5
+        }
+      }
+    },
+    {
+      "name": "staple_noisy_four_raters_threshold_0_5",
+      "strategy": {
+        "strategy": "staple",
+        "pixel_threshold": 0.5
+      },
+      "masks": [
+        [
+          "..#....",
+          "...##.#",
+          "##.##..",
+          "###.#..",
+          "#.##..#"
+        ],
+        [
+          ".##..#.",
+          ".#####.",
+          "..##.#.",
+          ".#####.",
+          "..#..#."
+        ],
+        [
+          "....#..",
+          ".#.##..",
+          ".###.#.",
+          "##.###.",
+          "......."
+        ],
+        [
+          ".##...#",
+          "###..#.",
+          ".#####.",
+          "...#.#.",
+          "#...#.."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          ".##..#.",
+          ".#####.",
+          "..##.#.",
+          ".#####.",
+          "..#..#."
+        ],
+        "diagnostics": {
+          "strategy": "staple",
+          "pixel_threshold": 0.5,
+          "staple": {
+            "iterations": 100,
+            "converged": false,
+            "prior": 0.45,
+            "sensitivity": [0.440275, 0.979744, 0.625123, 0.5977],
+            "specificity": [0.529348, 0.858489, 0.83175, 0.655426]
+          }
+        }
+      }
+    },
+    {
+      "name": "staple_noisy_four_raters_threshold_0_9",
+      "strategy": {
+        "strategy": "staple",
+        "pixel_threshold": 0.9
+      },
+      "masks": [
+        [
+          "..#....",
+          "...##.#",
+          "##.##..",
+          "###.#..",
+          "#.##..#"
+        ],
+        [
+          ".##..#.",
+          ".#####.",
+          "..##.#.",
+          ".#####.",
+          "..#..#."
+        ],
+        [
+          "....#..",
+          ".#.##..",
+          ".###.#.",
+          "##.###.",
+          "......."
+        ],
+        [
+          ".##...#",
+          "###..#.",
+          ".#####.",
+          "...#.#.",
+          "#...#.."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          ".......",
+          ".#.##..",
+          "..##.#.",
+          ".#.###.",
+          "......."
+        ],
+        "diagnostics": {
+          "strategy": "staple",
+          "pixel_threshold": 0.9,
+          "staple": {
+            "iterations": 100,
+            "converged": false,
+            "prior": 0.45,
+            "sensitivity": [0.440275, 0.979744, 0.625123, 0.5977],
+            "specificity": [0.529348, 0.858489, 0.83175, 0.655426]
+          }
+        }
+      }
+    },
+    {
+      "name": "segmentation_majority_vote_three_raters",
+      "strategy": {
+        "strategy": "segmentation_majority_vote"
+      },
+      "masks": [
+        [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        [
+          "..##..",
+          ".####.",
+          "#####.",
+          "..###."
+        ],
+        [
+          ".##...",
+          ".###..",
+          ".#####",
+          "...#.."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        "diagnostics": {
+          "strategy": "segmentation_majority_vote",
+          "package": "crowd-kit",
+          "version": "1.4.2",
+          "pixel_threshold": 0.5
+        }
+      }
+    },
+    {
+      "name": "segmentation_em_three_raters",
+      "strategy": {
+        "strategy": "segmentation_em"
+      },
+      "masks": [
+        [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        [
+          "..##..",
+          ".####.",
+          "#####.",
+          "..###."
+        ],
+        [
+          ".##...",
+          ".###..",
+          ".#####",
+          "...#.."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        "diagnostics": {
+          "strategy": "segmentation_em",
+          "package": "crowd-kit",
+          "version": "1.4.2",
+          "pixel_threshold": 0.5
+        }
+      }
+    },
+    {
+      "name": "segmentation_rasa_three_raters",
+      "strategy": {
+        "strategy": "segmentation_rasa"
+      },
+      "masks": [
+        [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        [
+          "..##..",
+          ".####.",
+          "#####.",
+          "..###."
+        ],
+        [
+          ".##...",
+          ".###..",
+          ".#####",
+          "...#.."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        "diagnostics": {
+          "strategy": "segmentation_rasa",
+          "package": "crowd-kit",
+          "version": "1.4.2",
+          "pixel_threshold": 0.5
+        }
+      }
+    },
+    {
+      "name": "staple_three_raters_threshold_0_5",
+      "strategy": {
+        "strategy": "staple",
+        "pixel_threshold": 0.5
+      },
+      "masks": [
+        [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        [
+          "..##..",
+          ".####.",
+          "#####.",
+          "..###."
+        ],
+        [
+          ".##...",
+          ".###..",
+          ".#####",
+          "...#.."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        "diagnostics": {
+          "strategy": "staple",
+          "pixel_threshold": 0.5,
+          "staple": {
+            "iterations": 9,
+            "converged": true,
+            "prior": 0.527778,
+            "sensitivity": [1.0, 0.923077, 0.769231],
+            "specificity": [1.0, 0.818182, 0.909091]
+          }
+        }
+      }
+    },
+    {
+      "name": "staple_three_raters_threshold_0_9",
+      "strategy": {
+        "strategy": "staple",
+        "pixel_threshold": 0.9
+      },
+      "masks": [
+        [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        [
+          "..##..",
+          ".####.",
+          "#####.",
+          "..###."
+        ],
+        [
+          ".##...",
+          ".###..",
+          ".#####",
+          "...#.."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        "diagnostics": {
+          "strategy": "staple",
+          "pixel_threshold": 0.9,
+          "staple": {
+            "iterations": 9,
+            "converged": true,
+            "prior": 0.527778,
+            "sensitivity": [1.0, 0.923077, 0.769231],
+            "specificity": [1.0, 0.818182, 0.909091]
+          }
+        }
+      }
+    },
+    {
+      "name": "segmentation_majority_vote_two_raters_keeps_ties",
+      "strategy": {
+        "strategy": "segmentation_majority_vote"
+      },
+      "masks": [
+        [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        [
+          "..##..",
+          ".####.",
+          "#####.",
+          "..###."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          ".###..",
+          ".####.",
+          "#####.",
+          "..###."
+        ],
+        "diagnostics": {
+          "strategy": "segmentation_majority_vote",
+          "package": "crowd-kit",
+          "version": "1.4.2",
+          "pixel_threshold": 0.5
+        }
+      }
+    },
+    {
+      "name": "segmentation_em_two_raters",
+      "strategy": {
+        "strategy": "segmentation_em"
+      },
+      "masks": [
+        [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        [
+          "..##..",
+          ".####.",
+          "#####.",
+          "..###."
+        ]
+      ],
+      "expected": {
+        "mask": [
+          ".###..",
+          ".####.",
+          ".####.",
+          "..##.."
+        ],
+        "diagnostics": {
+          "strategy": "segmentation_em",
+          "package": "crowd-kit",
+          "version": "1.4.2",
+          "pixel_threshold": 0.5
+        }
+      }
+    }
+  ]
+}

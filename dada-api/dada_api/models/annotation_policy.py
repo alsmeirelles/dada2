@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -67,7 +68,10 @@ class AnnotationPolicyDefault(Base):
     resolver: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolver_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     parameters: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
-    review_thresholds: Mapped[dict[str, float]] = mapped_column(JSONB, default=dict)
+    review_thresholds: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    require_independent_adjudicator: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

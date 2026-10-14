@@ -37,6 +37,14 @@ learning = [
     "opencv-python-headless>=4.10.0",
     "numpy>=1.26.4",
 ]
+# Consensus worker only; exact pins keep resolver output replayable (P6-01).
+consensus = [
+    "numpy==2.4.6",
+    "scipy==1.17.1",
+    "opencv-python-headless==4.13.0.92",
+    "pandas==3.0.6",
+    "crowd-kit==1.4.2",
+]
 dev = [
     "pytest>=8.2.2",
     "pytest-asyncio>=0.23.7",

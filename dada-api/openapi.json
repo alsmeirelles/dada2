@@ -1,6 +1,201 @@
 {
   "components": {
     "schemas": {
+      "AdjudicationRequest": {
+        "description": "An expert decision on one resolution work item.\n\n``objects`` is required to edit or replace and ignored when accepting.\n``source_submission_id`` names the raw submission an\n``edit_submission`` started from. A rationale is required for edits,\nreplacements, conflicted self-adjudication, and overriding an earlier\nexpert decision.",
+        "properties": {
+          "action": {
+            "enum": [
+              "accept_proposal",
+              "edit_proposal",
+              "edit_submission",
+              "replace"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "expected_configuration_fingerprint": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Configuration Fingerprint"
+          },
+          "expected_evidence_generation": {
+            "minimum": 1.0,
+            "title": "Expected Evidence Generation",
+            "type": "integer"
+          },
+          "expected_resolution_version": {
+            "minimum": 0.0,
+            "title": "Expected Resolution Version",
+            "type": "integer"
+          },
+          "objects": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CanonicalAnnotationObject"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objects"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "source_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Submission Id"
+          }
+        },
+        "required": [
+          "expected_evidence_generation",
+          "expected_resolution_version",
+          "action"
+        ],
+        "title": "AdjudicationRequest",
+        "type": "object"
+      },
+      "AdjudicationResponse": {
+        "description": "The recorded decision and the image's new resolution, if it closed.",
+        "properties": {
+          "adjudication": {
+            "$ref": "#/components/schemas/AdjudicationView"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolutionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "adjudication",
+          "resolution"
+        ],
+        "title": "AdjudicationResponse",
+        "type": "object"
+      },
+      "AdjudicationView": {
+        "description": "One audited expert decision.",
+        "properties": {
+          "action": {
+            "enum": [
+              "accept_proposal",
+              "edit_proposal",
+              "edit_submission",
+              "replace"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "actor_id": {
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "actor_role": {
+            "title": "Actor Role",
+            "type": "string"
+          },
+          "contributor_conflict": {
+            "title": "Contributor Conflict",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "objects": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "resolved_annotation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Annotation Id"
+          },
+          "work_item_id": {
+            "format": "uuid",
+            "title": "Work Item Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "work_item_id",
+          "action",
+          "actor_id",
+          "actor_role",
+          "objects",
+          "rationale",
+          "contributor_conflict",
+          "resolved_annotation_id",
+          "created_at"
+        ],
+        "title": "AdjudicationView",
+        "type": "object"
+      },
       "AdministratorPasswordReset": {
         "description": "Administrator request to replace another user's password.",
         "properties": {
@@ -221,24 +416,13 @@
             "type": "string"
           },
           "parameters": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "boolean"
-                }
-              ]
-            },
+            "additionalProperties": true,
             "title": "Parameters",
             "type": "object"
+          },
+          "require_independent_adjudicator": {
+            "title": "Require Independent Adjudicator",
+            "type": "boolean"
           },
           "required_consensus_annotations": {
             "anyOf": [
@@ -285,9 +469,7 @@
             "title": "Resolver Version"
           },
           "review_thresholds": {
-            "additionalProperties": {
-              "type": "number"
-            },
+            "additionalProperties": true,
             "title": "Review Thresholds",
             "type": "object"
           },
@@ -305,13 +487,14 @@
           "resolver_version",
           "parameters",
           "review_thresholds",
+          "require_independent_adjudicator",
           "version"
         ],
         "title": "AnnotationPolicyResponse",
         "type": "object"
       },
       "AnnotationPolicyUpdate": {
-        "description": "Optimistically versioned policy replacement.\n\n``version`` carries the version the caller believes is current. Parameters\nstay opaque here because their per-resolver schemas belong to Phase 6; the\nresolver identifier itself is validated against advertised capabilities.",
+        "description": "Optimistically versioned policy replacement.\n\n``version`` carries the version the caller believes is current.\n``parameters`` and ``review_thresholds`` are validated against the task's\nclosed pipeline configuration, which ``GET /capabilities`` describes;\nomitted values take their defaults.",
         "properties": {
           "annotator_ids": {
             "items": {
@@ -330,24 +513,14 @@
             "type": "string"
           },
           "parameters": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "boolean"
-                }
-              ]
-            },
+            "additionalProperties": true,
             "title": "Parameters",
             "type": "object"
+          },
+          "require_independent_adjudicator": {
+            "default": false,
+            "title": "Require Independent Adjudicator",
+            "type": "boolean"
           },
           "required_consensus_annotations": {
             "anyOf": [
@@ -386,9 +559,7 @@
             "title": "Resolver"
           },
           "review_thresholds": {
-            "additionalProperties": {
-              "type": "number"
-            },
+            "additionalProperties": true,
             "title": "Review Thresholds",
             "type": "object"
           },
@@ -406,7 +577,7 @@
         "type": "object"
       },
       "AssignmentDetail": {
-        "description": "One assignment opened by its annotator.\n\n``objects`` is the caller's draft while the work is open and their latest\nsubmission once it is submitted. ``seeded_from_import`` says the work began\nfrom imported labels without exposing the import itself.",
+        "description": "One assignment opened by its annotator.\n\n``objects`` is the caller's draft while the work is open and their latest\nsubmission once it is submitted. ``seeded_from_import`` says the work began\nfrom imported labels without exposing the import itself. ``resolution``\nis present only once the image is resolved.",
         "properties": {
           "batch_id": {
             "format": "uuid",
@@ -456,6 +627,16 @@
             "format": "uuid",
             "title": "Project Id",
             "type": "string"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FinalResolution"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revision": {
             "anyOf": [
@@ -857,24 +1038,14 @@
             "type": "string"
           },
           "parameters": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "boolean"
-                }
-              ]
-            },
+            "additionalProperties": true,
             "title": "Parameters",
             "type": "object"
+          },
+          "require_independent_adjudicator": {
+            "default": false,
+            "title": "Require Independent Adjudicator",
+            "type": "boolean"
           },
           "required_consensus_annotations": {
             "anyOf": [
@@ -913,9 +1084,7 @@
             "title": "Resolver"
           },
           "review_thresholds": {
-            "additionalProperties": {
-              "type": "number"
-            },
+            "additionalProperties": true,
             "title": "Review Thresholds",
             "type": "object"
           }
@@ -963,6 +1132,10 @@
             "title": "In Progress Assignments",
             "type": "integer"
           },
+          "in_review_items": {
+            "title": "In Review Items",
+            "type": "integer"
+          },
           "mode": {
             "enum": [
               "single",
@@ -972,22 +1145,7 @@
             "type": "string"
           },
           "parameters": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "boolean"
-                }
-              ]
-            },
+            "additionalProperties": true,
             "title": "Parameters",
             "type": "object"
           },
@@ -1010,6 +1168,10 @@
           "requested_size": {
             "title": "Requested Size",
             "type": "integer"
+          },
+          "require_independent_adjudicator": {
+            "title": "Require Independent Adjudicator",
+            "type": "boolean"
           },
           "required_consensus_annotations": {
             "anyOf": [
@@ -1059,10 +1221,16 @@
             ],
             "title": "Resolver Version"
           },
+          "resolving_items": {
+            "title": "Resolving Items",
+            "type": "integer"
+          },
+          "review_required_items": {
+            "title": "Review Required Items",
+            "type": "integer"
+          },
           "review_thresholds": {
-            "additionalProperties": {
-              "type": "number"
-            },
+            "additionalProperties": true,
             "title": "Review Thresholds",
             "type": "object"
           },
@@ -1138,6 +1306,7 @@
           "resolver_version",
           "parameters",
           "review_thresholds",
+          "require_independent_adjudicator",
           "source_policy_version",
           "selection_strategy",
           "selection_seed",
@@ -1146,6 +1315,9 @@
           "total_items",
           "resolved_items",
           "awaiting_resolution_items",
+          "resolving_items",
+          "in_review_items",
+          "review_required_items",
           "cancelled_items",
           "total_assignments",
           "available_assignments",
@@ -1158,17 +1330,113 @@
         "title": "BatchResponse",
         "type": "object"
       },
+      "CancelRunRequest": {
+        "description": "Cancel an active resolver run.",
+        "properties": {
+          "rationale": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rationale"
+        ],
+        "title": "CancelRunRequest",
+        "type": "object"
+      },
+      "CanonicalAnnotationObject": {
+        "description": "One object of a canonical document written by an expert.",
+        "properties": {
+          "attributes": {
+            "additionalProperties": true,
+            "title": "Attributes",
+            "type": "object"
+          },
+          "class_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Class Id",
+            "type": "string"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "polygon": "#/components/schemas/CanonicalPolygonGeometry",
+                    "rectangle": "#/components/schemas/RectangleGeometry"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RectangleGeometry"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CanonicalPolygonGeometry"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "class_id",
+          "geometry"
+        ],
+        "title": "CanonicalAnnotationObject",
+        "type": "object"
+      },
+      "CanonicalPolygonGeometry": {
+        "description": "A polygon of a canonical document, which may trace a mask outline with\nup to 10,000 points per ring (D14).",
+        "properties": {
+          "coordinates": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 20000,
+              "minItems": 6,
+              "type": "array"
+            },
+            "minItems": 1,
+            "title": "Coordinates",
+            "type": "array"
+          },
+          "type": {
+            "const": "polygon",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "coordinates"
+        ],
+        "title": "CanonicalPolygonGeometry",
+        "type": "object"
+      },
       "CapabilitiesResponse": {
         "description": "Limits and features that clients must discover at runtime.",
         "properties": {
-          "consensus_resolvers": {
+          "consensus_pipelines": {
             "additionalProperties": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
+              "$ref": "#/components/schemas/PipelineCapability"
             },
-            "title": "Consensus Resolvers",
+            "title": "Consensus Pipelines",
             "type": "object"
           },
           "max_file_bytes": {
@@ -1245,7 +1513,7 @@
           "max_import_file_bytes",
           "supported_task_types",
           "supported_annotation_modes",
-          "consensus_resolvers",
+          "consensus_pipelines",
           "realtime_transport"
         ],
         "title": "CapabilitiesResponse",
@@ -1465,6 +1733,168 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
+      "EvidenceResponse": {
+        "description": "Everything an owner or manager needs to review one image.",
+        "properties": {
+          "batch_id": {
+            "format": "uuid",
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "batch_item_id": {
+            "format": "uuid",
+            "title": "Batch Item Id",
+            "type": "string"
+          },
+          "contributors": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Contributors",
+            "type": "array"
+          },
+          "media": {
+            "$ref": "#/components/schemas/AssignmentMedia"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "require_independent_adjudicator": {
+            "title": "Require Independent Adjudicator",
+            "type": "boolean"
+          },
+          "resolutions": {
+            "items": {
+              "$ref": "#/components/schemas/ResolutionView"
+            },
+            "title": "Resolutions",
+            "type": "array"
+          },
+          "reviews": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewEvidence"
+            },
+            "title": "Reviews",
+            "type": "array"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunView"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "submissions": {
+            "items": {
+              "$ref": "#/components/schemas/SubmissionEvidence"
+            },
+            "title": "Submissions",
+            "type": "array"
+          },
+          "task_type": {
+            "title": "Task Type",
+            "type": "string"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/EvidenceVersions"
+          },
+          "work_items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkItemView"
+            },
+            "title": "Work Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "batch_item_id",
+          "batch_id",
+          "purpose",
+          "status",
+          "task_type",
+          "media",
+          "versions",
+          "require_independent_adjudicator",
+          "contributors",
+          "submissions",
+          "reviews",
+          "runs",
+          "resolutions",
+          "work_items"
+        ],
+        "title": "EvidenceResponse",
+        "type": "object"
+      },
+      "EvidenceVersions": {
+        "description": "The values a manager action must send back as its expected versions.",
+        "properties": {
+          "configuration_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Fingerprint"
+          },
+          "evidence_generation": {
+            "title": "Evidence Generation",
+            "type": "integer"
+          },
+          "resolution_version": {
+            "title": "Resolution Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "evidence_generation",
+          "configuration_fingerprint",
+          "resolution_version"
+        ],
+        "title": "EvidenceVersions",
+        "type": "object"
+      },
+      "FinalResolution": {
+        "description": "An image's accepted canonical annotation as its annotators may see it.\n\n``source`` says whether it came from the single submission, automatic\nconsensus, or an expert's adjudication; nothing about peers is included.",
+        "properties": {
+          "objects": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "source": {
+            "enum": [
+              "single_submission",
+              "automatic_consensus",
+              "expert_adjudication"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "source",
+          "objects"
+        ],
+        "title": "FinalResolution",
+        "type": "object"
+      },
       "HealthResponse": {
         "description": "API health response.",
         "properties": {
@@ -1609,6 +2039,67 @@
         "title": "ImportReport",
         "type": "object"
       },
+      "LeaseResponse": {
+        "description": "An active edit lease on one work item.",
+        "properties": {
+          "acquired_at": {
+            "format": "date-time",
+            "title": "Acquired At",
+            "type": "string"
+          },
+          "cap_at": {
+            "format": "date-time",
+            "title": "Cap At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "holder_id": {
+            "format": "uuid",
+            "title": "Holder Id",
+            "type": "string"
+          },
+          "renewed_at": {
+            "format": "date-time",
+            "title": "Renewed At",
+            "type": "string"
+          },
+          "work_item_id": {
+            "format": "uuid",
+            "title": "Work Item Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_item_id",
+          "holder_id",
+          "acquired_at",
+          "renewed_at",
+          "expires_at",
+          "cap_at"
+        ],
+        "title": "LeaseResponse",
+        "type": "object"
+      },
+      "LeaseRevokeRequest": {
+        "description": "Revoke an abandoned edit lease.",
+        "properties": {
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "LeaseRevokeRequest",
+        "type": "object"
+      },
       "LoginRequest": {
         "description": "JSON login payload.",
         "properties": {
@@ -1711,6 +2202,118 @@
         "title": "MediaResponse",
         "type": "object"
       },
+      "ParameterDescriptor": {
+        "description": "One settable resolver field, described so a client can render and\nvalidate it without hard-coding its meaning.\n\n``name`` is dotted for fields inside a nested group. Ratio bounds and\ndefaults are ``{\"numerator\", \"denominator\"}`` objects; an ``area`` value\nis ``{\"pixels\", \"image_ratio\"}``.",
+        "properties": {
+          "advanced": {
+            "title": "Advanced",
+            "type": "boolean"
+          },
+          "default": {
+            "title": "Default"
+          },
+          "help": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help"
+          },
+          "kind": {
+            "enum": [
+              "ratio",
+              "number",
+              "integer",
+              "enum",
+              "boolean",
+              "area"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "maximum": {
+            "title": "Maximum"
+          },
+          "maximum_inclusive": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Inclusive"
+          },
+          "minimum": {
+            "title": "Minimum"
+          },
+          "minimum_inclusive": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Inclusive"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "nullable": {
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "default",
+          "nullable",
+          "options",
+          "minimum",
+          "maximum",
+          "minimum_inclusive",
+          "maximum_inclusive",
+          "advanced",
+          "unit",
+          "help"
+        ],
+        "title": "ParameterDescriptor",
+        "type": "object"
+      },
       "PasswordChange": {
         "description": "Authenticated user's request to replace their own password.",
         "properties": {
@@ -1732,6 +2335,308 @@
           "new_password"
         ],
         "title": "PasswordChange",
+        "type": "object"
+      },
+      "PerformanceReport": {
+        "description": "Project-scoped annotator performance for owners and managers.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PerformanceSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "minimum_cell": {
+            "title": "Minimum Cell",
+            "type": "integer"
+          },
+          "minimum_decisions": {
+            "title": "Minimum Decisions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "minimum_decisions",
+          "minimum_cell"
+        ],
+        "title": "PerformanceReport",
+        "type": "object"
+      },
+      "PerformanceSummary": {
+        "description": "Aggregate agreement of one annotator for one evaluation source.\n\n``outcomes``, ``metrics`` and ``classes`` are null when the row has fewer\nthan ``minimum_decisions`` decisions; an individual value is null when\nfewer than ``minimum_cell`` observations back it.",
+        "properties": {
+          "annotator_id": {
+            "format": "uuid",
+            "title": "Annotator Id",
+            "type": "string"
+          },
+          "annotator_name": {
+            "title": "Annotator Name",
+            "type": "string"
+          },
+          "classes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classes"
+          },
+          "decisions": {
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "evaluation_source": {
+            "title": "Evaluation Source",
+            "type": "string"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metrics"
+          },
+          "outcomes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcomes"
+          },
+          "suppressed": {
+            "title": "Suppressed",
+            "type": "boolean"
+          },
+          "task_type": {
+            "title": "Task Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "annotator_id",
+          "annotator_name",
+          "evaluation_source",
+          "task_type",
+          "decisions",
+          "suppressed",
+          "outcomes",
+          "metrics",
+          "classes"
+        ],
+        "title": "PerformanceSummary",
+        "type": "object"
+      },
+      "PipelineCapability": {
+        "description": "The resolver pipeline of one task type, sent as the policy\n``resolver``.",
+        "properties": {
+          "class_strategies": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyCapability"
+            },
+            "title": "Class Strategies",
+            "type": "array"
+          },
+          "geometry_strategies": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyCapability"
+            },
+            "title": "Geometry Strategies",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ParameterDescriptor"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "review_thresholds": {
+            "items": {
+              "$ref": "#/components/schemas/ParameterDescriptor"
+            },
+            "title": "Review Thresholds",
+            "type": "array"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "dependency_missing",
+                  "dependency_incompatible",
+                  "quarantined",
+                  "resource_profile_unvalidated"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "unavailable_reason",
+          "class_strategies",
+          "geometry_strategies",
+          "parameters",
+          "review_thresholds"
+        ],
+        "title": "PipelineCapability",
+        "type": "object"
+      },
+      "PolicyChange": {
+        "description": "One audited change of the default policy and the fields it changed.",
+        "properties": {
+          "actor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id"
+          },
+          "actor_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Name"
+          },
+          "changed_at": {
+            "format": "date-time",
+            "title": "Changed At",
+            "type": "string"
+          },
+          "changed_fields": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Changed Fields",
+            "type": "object"
+          },
+          "resolver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver"
+          },
+          "resolver_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver Version"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "actor_id",
+          "actor_name",
+          "changed_at",
+          "resolver",
+          "resolver_version",
+          "changed_fields"
+        ],
+        "title": "PolicyChange",
+        "type": "object"
+      },
+      "PolicyHistory": {
+        "description": "The read-only history of a project's default policy (A6-04).\n\n``preparing_batches`` counts the batches a change can still reach; started\nbatches keep their own snapshot.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyChange"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "preparing_batches": {
+            "title": "Preparing Batches",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "preparing_batches"
+        ],
+        "title": "PolicyHistory",
         "type": "object"
       },
       "PolygonGeometry": {
@@ -2412,6 +3317,61 @@
         "title": "ProjectUpdate",
         "type": "object"
       },
+      "ProposalView": {
+        "description": "A run's immutable proposal.",
+        "properties": {
+          "candidates": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "diagnostics": {
+            "additionalProperties": true,
+            "title": "Diagnostics",
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "objects": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "outcome",
+          "objects",
+          "candidates",
+          "diagnostics",
+          "content_hash",
+          "created_at"
+        ],
+        "title": "ProposalView",
+        "type": "object"
+      },
       "ReadinessResponse": {
         "description": "Aggregate dependency and migration readiness state.",
         "properties": {
@@ -2462,6 +3422,361 @@
           "coordinates"
         ],
         "title": "RectangleGeometry",
+        "type": "object"
+      },
+      "ResolutionQueueItem": {
+        "description": "One open case in a batch's manager queue, without full evidence.",
+        "properties": {
+          "batch_item_id": {
+            "format": "uuid",
+            "title": "Batch Item Id",
+            "type": "string"
+          },
+          "candidate_key": {
+            "title": "Candidate Key",
+            "type": "string"
+          },
+          "class_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Strategy"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "lease_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Expires At"
+          },
+          "lease_holder_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Holder Id"
+          },
+          "media_id": {
+            "format": "uuid",
+            "title": "Media Id",
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "title": "Metrics",
+            "type": "object"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "resolver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver"
+          },
+          "resolver_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver Version"
+          },
+          "reviews_required": {
+            "title": "Reviews Required",
+            "type": "integer"
+          },
+          "reviews_submitted": {
+            "title": "Reviews Submitted",
+            "type": "integer"
+          },
+          "scope": {
+            "enum": [
+              "image",
+              "candidate"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending_review",
+              "review_ready",
+              "review_required",
+              "resolved",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "submissions": {
+            "title": "Submissions",
+            "type": "integer"
+          },
+          "work_item_id": {
+            "format": "uuid",
+            "title": "Work Item Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_item_id",
+          "batch_item_id",
+          "media_id",
+          "relative_path",
+          "scope",
+          "candidate_key",
+          "status",
+          "reason",
+          "submissions",
+          "reviews_submitted",
+          "reviews_required",
+          "resolver",
+          "resolver_version",
+          "class_strategy",
+          "metrics",
+          "lease_holder_id",
+          "lease_expires_at",
+          "created_at"
+        ],
+        "title": "ResolutionQueueItem",
+        "type": "object"
+      },
+      "ResolutionQueuePage": {
+        "description": "A cursor page of the manager queue.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ResolutionQueueItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ResolutionQueuePage",
+        "type": "object"
+      },
+      "ResolutionView": {
+        "description": "One canonical resolution version of the image.",
+        "properties": {
+          "accepted_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted By"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "objects": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "superseded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded At"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "source",
+          "objects",
+          "content_hash",
+          "accepted_by",
+          "run_id",
+          "created_at",
+          "superseded_at"
+        ],
+        "title": "ResolutionView",
+        "type": "object"
+      },
+      "ResolverConfigurationWrite": {
+        "description": "An explicit configuration for a manual retry, validated like a policy.",
+        "properties": {
+          "parameters": {
+            "additionalProperties": true,
+            "title": "Parameters",
+            "type": "object"
+          },
+          "review_thresholds": {
+            "additionalProperties": true,
+            "title": "Review Thresholds",
+            "type": "object"
+          }
+        },
+        "title": "ResolverConfigurationWrite",
+        "type": "object"
+      },
+      "ResolverEligibility": {
+        "description": "The project's current eligibility for the conditional strategies.",
+        "properties": {
+          "strategies": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyEligibility"
+            },
+            "title": "Strategies",
+            "type": "array"
+          }
+        },
+        "required": [
+          "strategies"
+        ],
+        "title": "ResolverEligibility",
+        "type": "object"
+      },
+      "RetryRequest": {
+        "description": "Ask for a new resolver run over the image's latest evidence.",
+        "properties": {
+          "configuration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolverConfigurationWrite"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expected_configuration_fingerprint": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Configuration Fingerprint"
+          },
+          "expected_evidence_generation": {
+            "minimum": 1.0,
+            "title": "Expected Evidence Generation",
+            "type": "integer"
+          },
+          "expected_resolution_version": {
+            "minimum": 0.0,
+            "title": "Expected Resolution Version",
+            "type": "integer"
+          },
+          "rationale": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_evidence_generation",
+          "expected_resolution_version",
+          "rationale"
+        ],
+        "title": "RetryRequest",
         "type": "object"
       },
       "ReviewAssignmentDetail": {
@@ -2609,8 +3924,62 @@
         "title": "ReviewDraftSaved",
         "type": "object"
       },
+      "ReviewEvidence": {
+        "description": "One immutable scoped review submission.",
+        "properties": {
+          "candidate_key": {
+            "title": "Candidate Key",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reviewer_id": {
+            "format": "uuid",
+            "title": "Reviewer Id",
+            "type": "string"
+          },
+          "reviewer_name": {
+            "title": "Reviewer Name",
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          },
+          "work_item_id": {
+            "format": "uuid",
+            "title": "Work Item Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "work_item_id",
+          "candidate_key",
+          "reviewer_id",
+          "reviewer_name",
+          "evidence",
+          "content_hash",
+          "submitted_at"
+        ],
+        "title": "ReviewEvidence",
+        "type": "object"
+      },
       "ReviewEvidenceWrite": {
-        "description": "A complete private review draft or submission.",
+        "description": "A private review draft or submission.\n\nA draft may be incomplete. A submission must be an\n:class:`ImageReviewEvidence` for an image case or a\n:class:`CandidateReviewEvidence` for a candidate case (D16).",
         "properties": {
           "evidence": {
             "additionalProperties": true,
@@ -2788,6 +4157,161 @@
         "title": "ReviewSubmissionReceived",
         "type": "object"
       },
+      "RunView": {
+        "description": "A resolver run with its provenance and outcome.",
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "configuration": {
+            "additionalProperties": true,
+            "title": "Configuration",
+            "type": "object"
+          },
+          "configuration_fingerprint": {
+            "title": "Configuration Fingerprint",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dependency_versions": {
+            "additionalProperties": true,
+            "title": "Dependency Versions",
+            "type": "object"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Detail"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_fingerprint": {
+            "title": "Input Fingerprint",
+            "type": "string"
+          },
+          "pipeline": {
+            "title": "Pipeline",
+            "type": "string"
+          },
+          "pipeline_version": {
+            "title": "Pipeline Version",
+            "type": "string"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProposalView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "review_required",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "trigger",
+          "status",
+          "pipeline",
+          "pipeline_version",
+          "configuration",
+          "configuration_fingerprint",
+          "input_fingerprint",
+          "dependency_versions",
+          "attempt",
+          "failure_code",
+          "failure_detail",
+          "requested_by",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "proposal"
+        ],
+        "title": "RunView",
+        "type": "object"
+      },
       "SamPredictRequest": {
         "description": "SAM prediction request.",
         "properties": {
@@ -2882,6 +4406,167 @@
           "coordinates"
         ],
         "title": "SamPrompt",
+        "type": "object"
+      },
+      "StrategyCapability": {
+        "description": "A selectable class or geometry strategy of a pipeline.\n\nA ``conditional`` strategy also depends on project evidence, reported by\n``GET /projects/{project_id}/resolver-eligibility``. A non-null\n``unavailable_reason`` means it cannot be selected; nothing is ever\nsubstituted for it.",
+        "properties": {
+          "conditional": {
+            "title": "Conditional",
+            "type": "boolean"
+          },
+          "dependencies": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Dependencies",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ParameterDescriptor"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "dependency_missing",
+                  "dependency_incompatible",
+                  "quarantined",
+                  "resource_profile_unvalidated"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "conditional",
+          "unavailable_reason",
+          "dependencies",
+          "parameters"
+        ],
+        "title": "StrategyCapability",
+        "type": "object"
+      },
+      "StrategyEligibility": {
+        "description": "Whether one conditional strategy has the evidence it needs (D11).",
+        "properties": {
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "missing": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "report": {
+            "additionalProperties": true,
+            "title": "Report",
+            "type": "object"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy",
+          "eligible",
+          "missing",
+          "report"
+        ],
+        "title": "StrategyEligibility",
+        "type": "object"
+      },
+      "SubmissionEvidence": {
+        "description": "One immutable annotator submission, named for owners and managers.",
+        "properties": {
+          "annotator_id": {
+            "format": "uuid",
+            "title": "Annotator Id",
+            "type": "string"
+          },
+          "annotator_name": {
+            "title": "Annotator Name",
+            "type": "string"
+          },
+          "assignment_id": {
+            "format": "uuid",
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "current_generation": {
+            "title": "Current Generation",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "objects": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "assignment_id",
+          "annotator_id",
+          "annotator_name",
+          "revision",
+          "content_hash",
+          "objects",
+          "submitted_at",
+          "current_generation"
+        ],
+        "title": "SubmissionEvidence",
         "type": "object"
       },
       "SubmissionReceived": {
@@ -3307,6 +4992,131 @@
           "version"
         ],
         "title": "UserUpdate",
+        "type": "object"
+      },
+      "WorkItemView": {
+        "description": "One image-level or candidate-level case with its lease and decisions.",
+        "properties": {
+          "adjudications": {
+            "items": {
+              "$ref": "#/components/schemas/AdjudicationView"
+            },
+            "title": "Adjudications",
+            "type": "array"
+          },
+          "candidate_context": {
+            "additionalProperties": true,
+            "title": "Candidate Context",
+            "type": "object"
+          },
+          "candidate_key": {
+            "title": "Candidate Key",
+            "type": "string"
+          },
+          "candidate_ordinal": {
+            "title": "Candidate Ordinal",
+            "type": "integer"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lease": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LeaseResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "reviews_required": {
+            "title": "Reviews Required",
+            "type": "integer"
+          },
+          "reviews_submitted": {
+            "title": "Reviews Submitted",
+            "type": "integer"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "scope": {
+            "enum": [
+              "image",
+              "candidate"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending_review",
+              "review_ready",
+              "review_required",
+              "resolved",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "candidate_key",
+          "candidate_ordinal",
+          "scope",
+          "status",
+          "reason",
+          "candidate_context",
+          "run_id",
+          "reviews_submitted",
+          "reviews_required",
+          "lease",
+          "adjudications",
+          "created_at",
+          "closed_at"
+        ],
+        "title": "WorkItemView",
         "type": "object"
       }
     },
@@ -4112,7 +5922,7 @@
     },
     "/api/v1/capabilities": {
       "get": {
-        "description": "Return upload limits, media formats, tasks, resolvers, and transport.",
+        "description": "Return upload limits, media formats, tasks, resolvers, and transport.\n\nResolver availability reflects the installed dependency versions and any\nopen operator quarantine.",
         "operationId": "read_capabilities_api_v1_capabilities_get",
         "responses": {
           "200": {
@@ -5059,6 +6869,162 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/annotation-policy/history": {
+      "get": {
+        "description": "Return the read-only history of the default policy, newest first.\n\nArgs:\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    Every change with its actor, time, and changed fields.",
+        "operationId": "read_annotation_policy_history_api_v1_projects__project_id__annotation_policy_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Annotation Policy History",
+        "tags": [
+          "annotation-policy"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/annotator-performance": {
+      "get": {
+        "description": "Return named, suppressed aggregates of the project's observations.\n\nArgs:\n    project: Project authorized for performance reading.\n    session: Active database session.\n\nReturns:\n    One summary per annotator and evaluation source.",
+        "operationId": "read_annotator_performance_api_v1_projects__project_id__annotator_performance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Annotator Performance",
+        "tags": [
+          "resolutions"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/assignments": {
       "get": {
         "description": "List the caller's own image assignments.\n\nThe queue never shows another annotator's work or progress, and an image\nstays in the queue however many peers are working on it.\n\nArgs:\n    purpose: Optional batch purpose filter.\n    state: Optional assignment status filter.\n    cursor: Opaque cursor from a previous page.\n    project: Project resolved and authorized by the dependency.\n    user: The annotator.\n    session: Active database session.\n\nReturns:\n    One page of assignments, the next cursor, and the caller's counts.",
@@ -5742,6 +7708,190 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/batch-items/{item_id}/evidence": {
+      "get": {
+        "description": "Return one image's complete, named evidence and resolution history.\n\nArgs:\n    item_id: Batch item of the image.\n    project: Project authorized for evidence reading.\n    session: Active database session.\n\nReturns:\n    The image's evidence, cases, runs, and expected versions.",
+        "operationId": "read_evidence_api_v1_projects__project_id__batch_items__item_id__evidence_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Evidence",
+        "tags": [
+          "resolutions"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/batch-items/{item_id}/resolve": {
+      "post": {
+        "description": "Queue a manual resolver run over an image's latest evidence.\n\nArgs:\n    item_id: Batch item of the image.\n    request: Expected versions, rationale, optional configuration.\n    project: Project authorized to run resolution.\n    user: Owner or manager recorded as the actor.\n    session: Active database session.\n\nReturns:\n    The queued run.",
+        "operationId": "retry_resolution_api_v1_projects__project_id__batch_items__item_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retry Resolution",
+        "tags": [
+          "resolutions"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/batches": {
       "get": {
         "description": "List a project's annotation batches.\n\nBatches name the consensus group and count everyone's submissions, so\nthey are a manager view: annotators must not see peer identity or\nprogress before they submit, and use their own assignment queue instead.\n\nArgs:\n    cursor: Opaque cursor from a previous page.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    One page of batches with the cursor for the next one.",
@@ -6118,6 +8268,182 @@
         "summary": "List Batch Assignments",
         "tags": [
           "assignments"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/batches/{batch_id}/resolutions": {
+      "get": {
+        "description": "List a batch's open resolution cases, failures first.\n\nArgs:\n    batch_id: Batch whose cases are listed.\n    state: Work item statuses to include; defaults to cases awaiting an\n        expert.\n    reason: Optional reason filter.\n    class_strategy: Optional class-strategy filter.\n    min_age_seconds: Only cases at least this old.\n    cursor: Opaque page cursor.\n    project: Project authorized for evidence reading.\n    session: Active database session.\n\nReturns:\n    One page of cases without document content.",
+        "operationId": "list_resolution_queue_api_v1_projects__project_id__batches__batch_id__resolutions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": [
+                "review_required"
+              ],
+              "items": {
+                "enum": [
+                  "pending_review",
+                  "review_ready",
+                  "review_required",
+                  "resolved",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "title": "State",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason"
+            }
+          },
+          {
+            "in": "query",
+            "name": "class_strategy",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Class Strategy"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_age_seconds",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Age Seconds"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolutionQueuePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Resolution Queue",
+        "tags": [
+          "resolutions"
         ]
       }
     },
@@ -7234,6 +9560,533 @@
         "summary": "Change Member Role",
         "tags": [
           "members"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/resolution-runs/{run_id}/cancel": {
+      "post": {
+        "description": "Cancel an active run; the image moves to an expert.\n\nArgs:\n    run_id: Run to cancel.\n    request: Mandatory rationale.\n    project: Project authorized to run resolution.\n    user: Owner or manager recorded as the actor.\n    session: Active database session.\n\nReturns:\n    The cancelled, or cancellation-flagged, run.",
+        "operationId": "cancel_resolution_run_api_v1_projects__project_id__resolution_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Resolution Run",
+        "tags": [
+          "resolutions"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/resolution-work-items/{work_item_id}/adjudicate": {
+      "post": {
+        "description": "Accept, edit, or replace the decision of one resolution case.\n\nArgs:\n    work_item_id: Case being decided.\n    request: Action, objects, rationale, and expected versions.\n    project: Project authorized for adjudication.\n    user: Owner or manager recorded as the adjudicator.\n    session: Active database session.\n\nReturns:\n    The decision and, when the image closed, its new resolution.",
+        "operationId": "adjudicate_work_item_api_v1_projects__project_id__resolution_work_items__work_item_id__adjudicate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_item_id",
+            "required": true,
+            "schema": {
+              "title": "Work Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdjudicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdjudicationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Adjudicate Work Item",
+        "tags": [
+          "resolutions"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/resolution-work-items/{work_item_id}/lease": {
+      "delete": {
+        "description": "Release the caller's edit lease on a case.\n\nArgs:\n    work_item_id: Case being left.\n    project: Project authorized for adjudication.\n    user: Lease holder.\n    session: Active database session.\n\nReturns:\n    An empty response.",
+        "operationId": "release_lease_api_v1_projects__project_id__resolution_work_items__work_item_id__lease_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_item_id",
+            "required": true,
+            "schema": {
+              "title": "Work Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Release Lease",
+        "tags": [
+          "resolutions"
+        ]
+      },
+      "post": {
+        "description": "Acquire or renew the caller's 15-minute edit lease on a case.\n\nArgs:\n    work_item_id: Case to edit.\n    project: Project authorized for adjudication.\n    user: Owner or manager taking the lease.\n    session: Active database session.\n\nReturns:\n    The caller's active lease.",
+        "operationId": "acquire_lease_api_v1_projects__project_id__resolution_work_items__work_item_id__lease_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_item_id",
+            "required": true,
+            "schema": {
+              "title": "Work Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acquire Lease",
+        "tags": [
+          "resolutions"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/resolution-work-items/{work_item_id}/lease/revoke": {
+      "post": {
+        "description": "Revoke an abandoned edit lease with an audited reason.\n\nArgs:\n    work_item_id: Case whose lease is revoked.\n    request: Mandatory reason.\n    project: Project authorized for adjudication.\n    user: Owner or manager revoking.\n    session: Active database session.\n\nReturns:\n    An empty response.",
+        "operationId": "revoke_lease_api_v1_projects__project_id__resolution_work_items__work_item_id__lease_revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_item_id",
+            "required": true,
+            "schema": {
+              "title": "Work Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeaseRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Lease",
+        "tags": [
+          "resolutions"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/resolver-eligibility": {
+      "get": {
+        "description": "Report what each conditional strategy still lacks for this project.\n\nArgs:\n    project: Project authorized to manage its annotation policy.\n    session: Active database session.\n\nReturns:\n    One verdict per conditional strategy over the default policy's pool.",
+        "operationId": "read_resolver_eligibility_api_v1_projects__project_id__resolver_eligibility_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolverEligibility"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Resolver Eligibility",
+        "tags": [
+          "resolutions"
         ]
       }
     },

@@ -1,0 +1,125 @@
+{
+  "cases": [
+    {
+      "name": "three_raters_small",
+      "max_iterations": 100,
+      "tolerance": 1e-06,
+      "masks": [
+        [
+          ".###.",
+          ".###.",
+          "..#.."
+        ],
+        [
+          ".##..",
+          ".####",
+          "..#.."
+        ],
+        [
+          "####.",
+          ".##..",
+          "....."
+        ]
+      ],
+      "expected": {
+        "probabilities": [
+          [1e-06, 1.0, 1.0, 0.999999, 0.0],
+          [0.0, 1.0, 1.0, 1.0, 3e-06],
+          [0.0, 0.0, 1.0, 0.0, 0.0]
+        ],
+        "diagnostics": {
+          "iterations": 10,
+          "converged": true,
+          "prior": 0.444444,
+          "sensitivity": [0.999999, 0.857143, 0.714285],
+          "specificity": [1.0, 0.875, 0.875]
+        }
+      }
+    },
+    {
+      "name": "two_raters_one_iteration",
+      "max_iterations": 1,
+      "tolerance": 1e-06,
+      "masks": [
+        [
+          "##.."
+        ],
+        [
+          "#..."
+        ]
+      ],
+      "expected": {
+        "probabilities": [
+          [0.99983, 0.375, 6.1e-05, 6.1e-05]
+        ],
+        "diagnostics": {
+          "iterations": 1,
+          "converged": false,
+          "prior": 0.375,
+          "sensitivity": [0.999911, 0.727174],
+          "specificity": [0.761844, 0.999935]
+        }
+      }
+    },
+    {
+      "name": "identical_raters",
+      "max_iterations": 100,
+      "tolerance": 1e-06,
+      "masks": [
+        [
+          ".##",
+          ".#."
+        ],
+        [
+          ".##",
+          ".#."
+        ],
+        [
+          ".##",
+          ".#."
+        ]
+      ],
+      "expected": {
+        "probabilities": [
+          [0.0, 1.0, 1.0],
+          [0.0, 1.0, 0.0]
+        ],
+        "diagnostics": {
+          "iterations": 3,
+          "converged": true,
+          "prior": 0.5,
+          "sensitivity": [1.0, 1.0, 1.0],
+          "specificity": [1.0, 1.0, 1.0]
+        }
+      }
+    },
+    {
+      "name": "all_empty",
+      "max_iterations": 100,
+      "tolerance": 1e-06,
+      "masks": [
+        [
+          "..",
+          ".."
+        ],
+        [
+          "..",
+          ".."
+        ]
+      ],
+      "expected": {
+        "probabilities": [
+          [0.0, 0.0],
+          [0.0, 0.0]
+        ],
+        "diagnostics": {
+          "iterations": 0,
+          "converged": true,
+          "prior": 0.0,
+          "sensitivity": [0.99, 0.99],
+          "specificity": [0.99, 0.99]
+        }
+      }
+    }
+  ]
+}

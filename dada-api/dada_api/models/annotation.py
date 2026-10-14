@@ -4,7 +4,15 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,6 +20,8 @@ from dada_api.db.base import Base
 
 DOCUMENT_SCHEMA_VERSION = 1
 SINGLE_SUBMISSION_SOURCE = "single_submission"
+AUTOMATIC_CONSENSUS_SOURCE = "automatic_consensus"
+EXPERT_ADJUDICATION_SOURCE = "expert_adjudication"
 
 
 class AnnotationSubmission(Base):
@@ -67,12 +77,20 @@ class ResolvedAnnotation(Base):
 
     Training and exports may only ever read these rows, never raw
     submissions. Single mode writes version 1 directly from the submission;
-    consensus and adjudication add their own versions in later phases.
+    consensus acceptance and adjudication add later versions. Exactly one
+    version per image is current: the one whose ``superseded_at`` is null.
+    ``accepted_by`` is null when the system accepted a proposal automatically.
     """
 
     __tablename__ = "resolved_annotations"
     __table_args__ = (
         UniqueConstraint("batch_item_id", "version", name="uq_resolution_version"),
+        Index(
+            "uq_resolution_current",
+            "batch_item_id",
+            unique=True,
+            postgresql_where=text("superseded_at IS NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(
@@ -93,6 +111,18 @@ class ResolvedAnnotation(Base):
     )
     objects: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     content_hash: Mapped[str] = mapped_column(String(64))
+    run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("resolution_runs.id", ondelete="CASCADE"), nullable=True
+    )
+    proposal_id: Mapped[str | None] = mapped_column(
+        ForeignKey("resolution_proposals.id", ondelete="CASCADE"), nullable=True
+    )
+    accepted_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    superseded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

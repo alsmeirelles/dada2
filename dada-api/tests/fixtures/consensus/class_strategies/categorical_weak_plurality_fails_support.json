@@ -1,0 +1,56 @@
+{
+  "name": "categorical_weak_plurality_fails_support",
+  "strategy": {
+    "strategy": "categorical_vote",
+    "decision_rule": "plurality"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "cat",
+    "dog",
+    "no_object"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "cat"
+    },
+    {
+      "rater": "bia",
+      "outcome": "cat"
+    },
+    {
+      "rater": "caio",
+      "outcome": "dog"
+    },
+    {
+      "rater": "davi",
+      "outcome": "no_object"
+    }
+  ],
+  "expected": {
+    "outcome": "cat",
+    "passed": false,
+    "reasons": [
+      "support_below_threshold"
+    ],
+    "metrics": {
+      "votes": {
+        "cat": 2,
+        "dog": 1,
+        "no_object": 1
+      },
+      "valid_votes": 4,
+      "support": {
+        "numerator": 2,
+        "denominator": 4
+      },
+      "margin": 1,
+      "normalized_entropy": 0.946395,
+      "decision_rule": "plurality"
+    }
+  }
+}

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -21,10 +22,18 @@ from dada_api.db.base import Base
 
 
 class ItemStatus(StrEnum):
-    """Lifecycle of one image inside a batch."""
+    """Lifecycle of one image inside a batch.
+
+    In consensus mode ``awaiting_resolution`` means queued for a resolver
+    run, ``in_review`` means scoped reviewers are collecting evidence, and
+    ``review_required`` means an owner or manager must decide.
+    """
 
     pending = "pending"
     awaiting_resolution = "awaiting_resolution"
+    resolving = "resolving"
+    in_review = "in_review"
+    review_required = "review_required"
     resolved = "resolved"
     cancelled = "cancelled"
 
@@ -120,7 +129,14 @@ class AnnotationBatch(Base):
     resolver: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolver_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     parameters: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
-    review_thresholds: Mapped[dict[str, float]] = mapped_column(JSONB, default=dict)
+    review_thresholds: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    require_independent_adjudicator: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )
+    calibration_snapshot_id: Mapped[str | None] = mapped_column(
+        ForeignKey("resolver_calibration_snapshots.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     source_policy_version: Mapped[int] = mapped_column(Integer)
     selection_strategy: Mapped[str] = mapped_column(String(32))
     selection_seed: Mapped[int] = mapped_column(BigInteger)

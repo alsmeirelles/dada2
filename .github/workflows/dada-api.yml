@@ -54,7 +54,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: uv sync --extra dev --frozen
+      - run: uv sync --extra dev --extra consensus --frozen
       - run: uv run alembic upgrade head
       - run: uv run alembic check
       - run: uv run ruff check dada_api tests alembic

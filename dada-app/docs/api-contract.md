@@ -624,3 +624,394 @@ Their errors are:
 **Projects.** `PATCH /api/v1/projects/{project_id}` accepts
 `acquisition_strategy` on `split` projects. A `single_batch` project returns
 `422 acquisition_strategy_not_allowed`.
+
+## Phase 6 implemented shapes
+
+These complement "Annotation batches — Phase 4.1 target" and the Phase 5
+shapes. Decisions are recorded in `dada-api/docs/phases/phase_6.md`.
+
+**Who sees what.**
+
+- Annotators and reviewers see only their own work while an image is open.
+- Once an image is `resolved`, its annotators see the final annotation and its
+  source (`AssignmentDetail.resolution`).
+- Raw submissions with names, proposals, runs, adjudications, leases, and
+  performance are owner/manager only.
+
+### Capabilities and policy configuration
+
+`consensus_resolvers` is replaced by `consensus_pipelines`, keyed by task type.
+The client renders the configuration form from the descriptors and never
+hard-codes a strategy's meaning.
+
+```ts
+type UnavailableReason =
+  | 'dependency_missing' | 'dependency_incompatible'
+  | 'quarantined' | 'resource_profile_unvalidated'
+
+type ParameterDescriptor = {
+  name: string                // dotted inside a group, e.g. "class_strategy.alpha"
+  kind: 'ratio' | 'number' | 'integer' | 'enum' | 'boolean' | 'area'
+  default: unknown            // ratio: {numerator, denominator}; area: {pixels, image_ratio}
+  nullable: boolean
+  options: string[] | null
+  minimum: unknown; maximum: unknown
+  minimum_inclusive: boolean | null; maximum_inclusive: boolean | null
+  advanced: boolean
+  unit: string | null
+  help: string | null
+}
+
+type StrategyCapability = {
+  id: string; version: string
+  conditional: boolean        // eligibility also depends on project evidence
+  unavailable_reason: UnavailableReason | null
+  dependencies: Record<string, string | null>
+  parameters: ParameterDescriptor[]
+}
+
+type PipelineCapability = {
+  id: string                  // sent as the policy `resolver`
+  version: string
+  unavailable_reason: UnavailableReason | null
+  class_strategies: StrategyCapability[]
+  geometry_strategies: StrategyCapability[]
+  parameters: ParameterDescriptor[]
+  review_thresholds: ParameterDescriptor[]
+}
+
+// GET /api/v1/capabilities gains
+consensus_pipelines: Record<TaskType, PipelineCapability>
+```
+
+| Task | Pipeline (`resolver`) | Class strategies | Geometry strategies |
+| --- | --- | --- | --- |
+| `classification` | `statistical_class_consensus` | `multilabel_binary_vote`, `dirichlet_vote`, `reliability_weighted_vote`*, `dawid_skene`* | — |
+| `detection` | `two_stage_detection_consensus` | `categorical_vote`, `dirichlet_vote`, `reliability_weighted_vote`*, `dawid_skene`* | `coordinate_median`, `trimmed_mean_box`, `weighted_box_fusion` |
+| `segmentation` | `two_stage_segmentation_consensus` | as detection | `segmentation_majority_vote`, `segmentation_em`, `segmentation_rasa`, `staple` |
+
+\* Conditional: a batch can start with it only when
+`GET /projects/{project_id}/resolver-eligibility` reports it eligible.
+
+`AnnotationPolicyUpdate`, `AnnotationPolicyResponse`, `BatchPolicyUpdate`, and
+`Batch` carry the typed configuration and a new flag:
+
+```ts
+parameters: Record<string, unknown>          // closed per pipeline; omitted values take defaults
+review_thresholds: Record<string, unknown>
+require_independent_adjudicator: boolean     // default false
+```
+
+The defaults the API fills in for an empty configuration:
+
+```json
+{
+  "classification": {
+    "parameters": {"class_strategy": {"strategy": "multilabel_binary_vote"}},
+    "review_thresholds": {"minimum_support": {"numerator": 2, "denominator": 3}}
+  },
+  "detection": {
+    "parameters": {
+      "class_strategy": {"strategy": "categorical_vote", "decision_rule": "supermajority"},
+      "matching_iou": 0.5,
+      "box_refinement": {"strategy": "coordinate_median"}
+    },
+    "review_thresholds": {
+      "minimum_support": {"numerator": 2, "denominator": 3},
+      "minimum_median_iou": 0.5
+    }
+  },
+  "segmentation": {
+    "parameters": {
+      "class_strategy": {"strategy": "categorical_vote", "decision_rule": "supermajority"},
+      "matching_metric": "iou",
+      "matching_threshold": 0.5,
+      "mask_refinement": {"strategy": "segmentation_majority_vote"},
+      "post_processing": {
+        "remove_components_below": null, "fill_holes_below": null, "simplify_tolerance": null
+      }
+    },
+    "review_thresholds": {
+      "minimum_support": {"numerator": 2, "denominator": 3},
+      "minimum_median_overlap": 0.5
+    }
+  }
+}
+```
+
+Saving a policy fails with:
+
+- `422 unsupported_resolver` when `resolver` is not the task's pipeline;
+- `422 invalid_resolver_configuration` (`details.errors`) for an unknown key,
+  an out-of-bounds value, or a vote threshold at or below 1/2.
+
+A policy may name a strategy that is currently unavailable. Its runs then
+fail with `resolver_unavailable`, and the image goes to manual review; nothing
+is substituted.
+
+Starting a batch whose class strategy is conditional freezes a calibration
+snapshot. When the evidence is insufficient, the start fails with
+`422 resolver_unavailable`, `details: {strategy, missing: [...]}`, and creates
+no assignments.
+
+| Method | Endpoint | Result |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/annotation-policy/history` | `PolicyHistory` |
+| `GET` | `/api/v1/projects/{project_id}/resolver-eligibility` | `ResolverEligibility` |
+
+```ts
+type PolicyHistory = {
+  items: {
+    version: number; actor_id: string | null; actor_name: string | null; changed_at: string
+    resolver: string | null; resolver_version: string | null
+    changed_fields: Record<string, { before: unknown; after: unknown }>
+  }[]
+  preparing_batches: number    // batches a change can still reach
+}
+
+type ResolverEligibility = {
+  strategies: {
+    strategy: 'reliability_weighted_vote' | 'dawid_skene'
+    eligible: boolean
+    missing: { requirement: string; [detail: string]: unknown }[]
+    report: Record<string, unknown>
+  }[]
+}
+```
+
+Both are owner/manager only.
+
+### Batch progress
+
+`Batch` gains `resolving_items`, `in_review_items`, and `review_required_items`.
+
+- An image waits in `awaiting_resolution` until a run is queued.
+- It is `resolving` while a run is active.
+- It is `in_review` while scoped reviewers work.
+- It is `review_required` when a manager must decide.
+
+The batch is `resolved` once every non-cancelled image is resolved.
+
+### Review evidence
+
+`POST …/review-assignments/{assignment_id}/submit` now validates `evidence`:
+
+```ts
+// image-level classification case
+type ImageReviewEvidence = { class_ids: string[] }            // at least one
+// candidate case in detection and segmentation
+type CandidateReviewEvidence =
+  | { decision: 'object'; class_id: string; geometry: RectangleGeometry | PolygonGeometry }
+  | { decision: 'no_object' }
+```
+
+Extra keys are refused with `422 invalid_review_evidence`. Drafts stay free-form.
+
+### Manager resolution routes
+
+Owners and managers, as given by `read_annotation_evidence`, `run_resolution`,
+`adjudicate`, and `read_annotator_performance`; every other role gets `403`.
+
+| Method | Endpoint | Body | Result |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/batches/{batch_id}/resolutions` | `?state=&reason=&class_strategy=&min_age_seconds=&cursor=` | `ResolutionQueuePage` |
+| `GET` | `/api/v1/projects/{project_id}/batch-items/{item_id}/evidence` | — | `EvidenceResponse` |
+| `POST` | `/api/v1/projects/{project_id}/batch-items/{item_id}/resolve` | `RetryRequest` | `202 RunView` |
+| `POST` | `/api/v1/projects/{project_id}/resolution-runs/{run_id}/cancel` | `CancelRunRequest` | `RunView` |
+| `POST` | `/api/v1/projects/{project_id}/resolution-work-items/{work_item_id}/lease` | — | `LeaseResponse` (acquire or renew) |
+| `DELETE` | `/api/v1/projects/{project_id}/resolution-work-items/{work_item_id}/lease` | — | `204` |
+| `POST` | `/api/v1/projects/{project_id}/resolution-work-items/{work_item_id}/lease/revoke` | `{reason}` | `204` |
+| `POST` | `/api/v1/projects/{project_id}/resolution-work-items/{work_item_id}/adjudicate` | `AdjudicationRequest` | `AdjudicationResponse` |
+| `GET` | `/api/v1/projects/{project_id}/annotator-performance` | — | `PerformanceReport` |
+
+`state` defaults to `review_required` and may repeat. The queue is ordered by
+severity, then age.
+
+```ts
+type WorkItemStatus = 'pending_review' | 'review_ready' | 'review_required' | 'resolved' | 'cancelled'
+type RunStatus = 'queued' | 'running' | 'succeeded' | 'review_required' | 'failed' | 'cancelled'
+
+type ResolutionQueueItem = {
+  work_item_id: string; batch_item_id: string; media_id: string; relative_path: string
+  scope: 'image' | 'candidate'; candidate_key: string
+  status: WorkItemStatus
+  reason: string | null
+  submissions: number; reviews_submitted: number; reviews_required: number
+  resolver: string | null; resolver_version: string | null; class_strategy: string | null
+  metrics: Record<string, unknown>
+  lease_holder_id: string | null; lease_expires_at: string | null
+  created_at: string
+}
+
+// every manager write sends back what it was based on
+type ExpectedVersions = {
+  expected_evidence_generation: number
+  expected_configuration_fingerprint: string | null
+  expected_resolution_version: number          // 0 before the first resolution
+}
+
+type EvidenceResponse = {
+  batch_item_id: string; batch_id: string; purpose: BatchPurpose; status: string
+  task_type: TaskType
+  media: { id: string; relative_path: string; width: number; height: number; image_url: string }
+  versions: { evidence_generation: number; configuration_fingerprint: string | null; resolution_version: number }
+  require_independent_adjudicator: boolean
+  contributors: string[]                       // annotators and reviewers of this image
+  submissions: {
+    id: string; assignment_id: string; annotator_id: string; annotator_name: string
+    revision: number; content_hash: string; objects: AnnotationObject[]
+    submitted_at: string; current_generation: boolean
+  }[]
+  reviews: {
+    id: string; work_item_id: string; candidate_key: string
+    reviewer_id: string; reviewer_name: string
+    evidence: Record<string, unknown>; content_hash: string; submitted_at: string
+  }[]
+  runs: RunView[]
+  resolutions: ResolutionView[]                // every version, newest last
+  work_items: WorkItemView[]
+}
+
+type RunView = {
+  id: string; sequence: number; trigger: string; status: RunStatus
+  pipeline: string; pipeline_version: string
+  configuration: Record<string, unknown>; configuration_fingerprint: string
+  input_fingerprint: string; dependency_versions: Record<string, unknown>
+  attempt: number; failure_code: string | null; failure_detail: string | null
+  requested_by: string | null
+  created_at: string; started_at: string | null; finished_at: string | null
+  proposal: {
+    id: string; outcome: string
+    objects: AnnotationObject[]                // the proposed canonical document
+    candidates: Record<string, unknown>[]      // one decision per image or object case
+    diagnostics: Record<string, unknown>
+    content_hash: string; created_at: string
+  } | null
+}
+
+type ResolutionView = {
+  id: string; version: number
+  source: 'single_submission' | 'automatic_consensus' | 'expert_adjudication'
+  objects: AnnotationObject[]; content_hash: string
+  accepted_by: string | null; run_id: string | null
+  created_at: string; superseded_at: string | null
+}
+
+type WorkItemView = {
+  id: string; candidate_key: string; candidate_ordinal: number
+  scope: 'image' | 'candidate'; status: WorkItemStatus; reason: string | null
+  candidate_context: Record<string, unknown>   // region, frozen candidate, metrics
+  run_id: string | null
+  reviews_submitted: number; reviews_required: number
+  lease: LeaseResponse | null
+  adjudications: AdjudicationView[]
+  created_at: string; closed_at: string | null
+}
+
+type LeaseResponse = {
+  work_item_id: string; holder_id: string
+  acquired_at: string; renewed_at: string
+  expires_at: string                           // 15 minutes after the last renewal
+  cap_at: string                               // 2 hours after acquisition
+}
+
+type RetryRequest = ExpectedVersions & {
+  rationale: string                            // 1..2000
+  configuration?: { parameters: Record<string, unknown>; review_thresholds: Record<string, unknown> }
+}
+type CancelRunRequest = { rationale: string }
+
+type AdjudicationRequest = ExpectedVersions & {
+  action: 'accept_proposal' | 'edit_proposal' | 'edit_submission' | 'replace'
+  objects?: AnnotationObject[]                 // required except for accept_proposal; up to 1,000
+  source_submission_id?: string                // required for edit_submission
+  rationale?: string                           // see below
+}
+type AdjudicationView = {
+  id: string; work_item_id: string; action: AdjudicationRequest['action']
+  actor_id: string; actor_role: string; objects: AnnotationObject[]
+  rationale: string | null; contributor_conflict: boolean
+  resolved_annotation_id: string | null; created_at: string
+}
+type AdjudicationResponse = { adjudication: AdjudicationView; resolution: ResolutionView | null }
+```
+
+**Review reasons.** A work item's `reason` is one of:
+
+- `support_below_threshold`, `class_tie`, `posterior_below_threshold`;
+- `ambiguous_match`, `geometry_below_threshold`, `topology_invalid`;
+- `expert_required`, after a second round still fails or a run is cancelled;
+- `worker_failed`, `resolver_output_invalid`, `resolver_unavailable`, after a
+  permanent run failure.
+
+**Adjudication rules.**
+
+- **Lease.** Only a `review_required` case can be leased. Adjudicating needs
+  the caller's own active lease. Renew it with another `POST …/lease` at least
+  every 15 minutes. A lease never lasts more than 2 hours.
+- **Rationale.** A rationale is required for:
+  - `edit_proposal`, `edit_submission`, and `replace`;
+  - adjudicating as a contributor of the image (`contributor_conflict: true`);
+  - overriding an earlier expert decision.
+- **Independence.** With `require_independent_adjudicator`, a contributor gets
+  `403 adjudicator_not_independent`.
+- **Composition.** An image's resolution is composed once every one of its work
+  items is decided; until then `resolution` is null.
+- **Retry.** `POST …/resolve` always creates a new run over the latest evidence.
+  It never replaces a run already in progress.
+
+Errors on these routes:
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `version_conflict` | 409 | An expected version is stale; refetch the evidence and keep the local draft |
+| `resolution_in_progress` | 409 | A run is already queued or running |
+| `resolution_not_ready` | 409 | The image has no complete evidence yet |
+| `resolution_config_conflict` | 409 | The configuration changed since it was read |
+| `run_not_active` | 409 | The run already finished |
+| `work_item_closed` / `work_item_not_open` | 409 | The case was already decided, cancelled, or does not await an expert |
+| `item_closed` | 409 | The image was cancelled |
+| `lease_required` | 409 | Acquire the lease first |
+| `lease_held` | 409 | Someone else holds the lease |
+| `lease_cap_reached` | 409 | The two-hour cap passed; release and reacquire |
+| `adjudicator_not_independent` | 403 | The project requires an independent adjudicator |
+| `rationale_required` | 422 | This action needs a rationale |
+| `invalid_source` | 422 | `source_submission_id` is not a submission of this image |
+| `proposal_unavailable` | 422 | There is no proposal to accept or edit |
+| `invalid_document` | 422 | `details.errors: [{object_id, code}]` |
+| `invalid_resolver_configuration` | 422 | The retry configuration is not valid |
+
+### Annotator performance
+
+```ts
+type PerformanceReport = {
+  items: {
+    annotator_id: string; annotator_name: string
+    evaluation_source: 'automated_consensus' | 'human_adjudication'
+    task_type: TaskType
+    decisions: number
+    suppressed: boolean                        // fewer than minimum_decisions
+    outcomes: Record<string, number | null> | null
+    metrics: Record<string, number | null> | null   // class_agreement, box_iou, mask_iou, mask_dice, existence
+    classes: Record<string, number | null> | null
+  }[]
+  minimum_decisions: number                    // 30
+  minimum_cell: number                         // 5; smaller cells are null
+}
+```
+
+The outcomes are `retained`, `class_changed`, `false_positive`,
+`missed_object`, `duplicate`, and `not_applicable`. Agreement with automated
+consensus is never a quality score: only `human_adjudication` rows feed the
+reliability weights.
+
+### Annotator view of the final annotation
+
+```ts
+// AssignmentDetail gains
+resolution: {
+  version: number
+  source: 'single_submission' | 'automatic_consensus' | 'expert_adjudication'
+  objects: AnnotationObject[]
+} | null                                       // set only once the image is resolved
+```

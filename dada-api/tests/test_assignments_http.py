@@ -219,7 +219,7 @@ async def _project(
                 ],
                 "required_consensus_annotations": 2,
                 "required_consensus_reviewers": 1,
-                "resolver": "two_stage_box_fusion",
+                "resolver": "two_stage_detection_consensus",
                 "parameters": {},
                 "review_thresholds": {},
                 "version": 1,
@@ -293,6 +293,9 @@ async def _write(
     body = {"version": version, "objects": objects}
     send = client.put if action == "draft" else client.post
     return await send(url, headers={**_auth(token), **(headers or {})}, json=body)
+
+
+REVIEW_EVIDENCE = {"decision": "no_object"}
 
 
 def _box(class_id: str, x: float = 10.0) -> dict:
@@ -546,10 +549,15 @@ async def test_candidate_review_is_scoped_private_and_immutable(
             headers=_auth(owner),
             json={"version": 1, "evidence": {"verdict": "reject"}},
         )
+        untyped = await client.post(
+            f"/api/v1/projects/{project['id']}/review-assignments/{review_assignment_id}/submit",
+            headers=_auth(owner),
+            json={"version": 2, "evidence": {"verdict": "accept"}},
+        )
         submitted = await client.post(
             f"/api/v1/projects/{project['id']}/review-assignments/{review_assignment_id}/submit",
             headers={**_auth(owner), "Idempotency-Key": "candidate-review-submit-1"},
-            json={"version": 2, "evidence": {"verdict": "accept"}},
+            json={"version": 2, "evidence": REVIEW_EVIDENCE},
         )
 
     assert queue.status_code == 200, queue.text
@@ -563,6 +571,7 @@ async def test_candidate_review_is_scoped_private_and_immutable(
     assert forbidden.status_code == 403
     assert drafted.json()["version"] == 2
     assert stale.json()["error"]["code"] == "version_conflict"
+    assert untyped.json()["error"]["code"] == "invalid_review_evidence"
     assert submitted.status_code == 200, submitted.text
 
     async with async_session_factory() as session:
@@ -570,7 +579,7 @@ async def test_candidate_review_is_scoped_private_and_immutable(
         stored_work = await session.get(ResolutionWorkItem, work_item_id)
     assert evidence.source_input_id == source_input_id
     assert evidence.work_item_id == work_item_id
-    assert evidence.evidence == {"verdict": "accept"}
+    assert evidence.evidence == REVIEW_EVIDENCE
     assert stored_work.status == "review_ready"
 
 

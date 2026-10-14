@@ -1,0 +1,45 @@
+{
+  "name": "dirichlet_jeffreys_prior_two_votes",
+  "strategy": {
+    "strategy": "dirichlet_vote",
+    "alpha": 0.5,
+    "minimum_posterior": 0.9
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "positive",
+    "negative"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "positive"
+    },
+    {
+      "rater": "bia",
+      "outcome": "positive"
+    }
+  ],
+  "expected": {
+    "outcome": "positive",
+    "passed": true,
+    "reasons": [],
+    "metrics": {
+      "votes": {
+        "positive": 2,
+        "negative": 0
+      },
+      "valid_votes": 2,
+      "support": {
+        "numerator": 2,
+        "denominator": 2
+      },
+      "margin": 2,
+      "normalized_entropy": 0.0,
+      "posterior": 0.924413
+    }
+  }
+}

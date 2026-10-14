@@ -15,13 +15,14 @@ from dada_api.models.batch import (
     BatchItem,
 )
 from dada_api.models.consensus import (
+    INITIAL_EVIDENCE_READY_EVENT,
     OutboxEvent,
     ResolutionInput,
     ResolutionWorkItem,
+    ResolutionWorkStatus,
     ReviewAssignment,
 )
 from dada_api.services import cohort_selection
-from dada_api.services.assignments import INITIAL_EVIDENCE_READY_EVENT
 
 
 def _hash(value: Any) -> str:
@@ -74,8 +75,27 @@ async def create_review_work_item(
     candidate_ordinal: int,
     scope: str,
     candidate_context: dict[str, Any],
+    reason: str | None = None,
+    run_id: str | None = None,
 ) -> tuple[ResolutionWorkItem, list[ReviewAssignment]]:
-    """Create one frozen work item and its distinct deterministic reviewers."""
+    """Create one frozen work item and its distinct deterministic reviewers.
+
+    Args:
+        session: Active database session.
+        source_input: Input snapshot whose run produced the candidate.
+        candidate_key: Deterministic candidate identity.
+        candidate_ordinal: Stable ordinal fed to the review selector.
+        scope: ``image`` or ``candidate``.
+        candidate_context: Frozen context the reviewers may see.
+        reason: Why automatic acceptance failed.
+        run_id: Run that produced the candidate.
+
+    Returns:
+        The work item and its review assignments, existing ones when repeated.
+
+    Raises:
+        ApiError: 409 when the frozen pool cannot supply the reviewers.
+    """
     if scope not in {"image", "candidate"}:
         raise ValueError("scope must be image or candidate")
     existing = await session.scalar(
@@ -150,6 +170,8 @@ async def create_review_work_item(
         scope=scope,
         source_run_number=source_input.run_number,
         candidate_context=candidate_context,
+        reason=reason,
+        run_id=run_id,
     )
     session.add(work_item)
     await session.flush()
@@ -168,3 +190,51 @@ async def create_review_work_item(
     session.add_all(assignments)
     await session.flush()
     return work_item, assignments
+
+
+async def create_expert_work_item(
+    session: AsyncSession,
+    source_input: ResolutionInput,
+    *,
+    candidate_key: str,
+    candidate_ordinal: int,
+    scope: str,
+    candidate_context: dict[str, Any],
+    reason: str,
+    run_id: str,
+) -> ResolutionWorkItem:
+    """Create a work item that goes straight to an owner or manager.
+
+    Used when review evidence was already collected, when a manual retry
+    still fails, and when a run fails permanently: no further reviewer
+    cohort is drawn.
+
+    Args:
+        session: Active database session.
+        source_input: Input snapshot of the run.
+        candidate_key: Deterministic candidate identity, ``image`` for a case
+            that covers the whole image.
+        candidate_ordinal: Stable ordinal of the candidate.
+        scope: ``image`` or ``candidate``.
+        candidate_context: Frozen context shown with the case.
+        reason: Why automatic acceptance failed.
+        run_id: Run that produced the case.
+
+    Returns:
+        The new work item in ``review_required``.
+    """
+    work_item = ResolutionWorkItem(
+        resolution_input_id=source_input.id,
+        batch_item_id=source_input.batch_item_id,
+        candidate_key=candidate_key,
+        candidate_ordinal=candidate_ordinal,
+        scope=scope,
+        source_run_number=source_input.run_number,
+        status=ResolutionWorkStatus.review_required,
+        candidate_context=candidate_context,
+        reason=reason,
+        run_id=run_id,
+    )
+    session.add(work_item)
+    await session.flush()
+    return work_item

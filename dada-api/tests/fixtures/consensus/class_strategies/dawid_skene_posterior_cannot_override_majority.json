@@ -1,0 +1,112 @@
+{
+  "name": "dawid_skene_posterior_cannot_override_majority",
+  "strategy": {
+    "strategy": "dawid_skene"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "cat",
+    "dog",
+    "no_object"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "cat"
+    },
+    {
+      "rater": "bia",
+      "outcome": "dog"
+    },
+    {
+      "rater": "caio",
+      "outcome": "dog"
+    }
+  ],
+  "calibration": {
+    "priors": {
+      "cat": 0.4,
+      "dog": 0.4,
+      "no_object": 0.2
+    },
+    "confusion": {
+      "ana": {
+        "cat": {
+          "cat": 0.98,
+          "dog": 0.01,
+          "no_object": 0.01
+        },
+        "dog": {
+          "cat": 0.01,
+          "dog": 0.98,
+          "no_object": 0.01
+        },
+        "no_object": {
+          "cat": 0.01,
+          "dog": 0.01,
+          "no_object": 0.98
+        }
+      },
+      "bia": {
+        "cat": {
+          "cat": 0.8,
+          "dog": 0.1,
+          "no_object": 0.1
+        },
+        "dog": {
+          "cat": 0.1,
+          "dog": 0.8,
+          "no_object": 0.1
+        },
+        "no_object": {
+          "cat": 0.1,
+          "dog": 0.1,
+          "no_object": 0.8
+        }
+      },
+      "caio": {
+        "cat": {
+          "cat": 0.05,
+          "dog": 0.9,
+          "no_object": 0.05
+        },
+        "dog": {
+          "cat": 0.05,
+          "dog": 0.9,
+          "no_object": 0.05
+        },
+        "no_object": {
+          "cat": 0.05,
+          "dog": 0.05,
+          "no_object": 0.9
+        }
+      }
+    },
+    "iterations": 12
+  },
+  "expected": {
+    "outcome": "cat",
+    "passed": false,
+    "reasons": [
+      "support_below_threshold"
+    ],
+    "metrics": {
+      "votes": {
+        "cat": 1,
+        "dog": 2,
+        "no_object": 0
+      },
+      "valid_votes": 3,
+      "support": {
+        "numerator": 1,
+        "denominator": 3
+      },
+      "margin": 1,
+      "normalized_entropy": 0.57938,
+      "posterior": 0.924286
+    }
+  }
+}

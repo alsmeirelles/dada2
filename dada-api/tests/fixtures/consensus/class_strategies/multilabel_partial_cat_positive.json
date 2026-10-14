@@ -1,0 +1,54 @@
+{
+  "name": "multilabel_partial_cat_positive",
+  "strategy": {
+    "strategy": "multilabel_binary_vote"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "positive",
+    "negative"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "positive"
+    },
+    {
+      "rater": "bia",
+      "outcome": "positive"
+    },
+    {
+      "rater": "caio",
+      "outcome": "negative"
+    },
+    {
+      "rater": "davi",
+      "outcome": "positive"
+    },
+    {
+      "rater": "eva",
+      "outcome": "positive"
+    }
+  ],
+  "expected": {
+    "outcome": "positive",
+    "passed": true,
+    "reasons": [],
+    "metrics": {
+      "votes": {
+        "positive": 4,
+        "negative": 1
+      },
+      "valid_votes": 5,
+      "support": {
+        "numerator": 4,
+        "denominator": 5
+      },
+      "margin": 3,
+      "normalized_entropy": 0.721928
+    }
+  }
+}

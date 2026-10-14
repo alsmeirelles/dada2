@@ -29,10 +29,9 @@ from dada_api.models.batch import (
     AnnotationItemAnnotator,
     AssignmentStatus,
     BatchItem,
-    BatchStatus,
     ItemStatus,
 )
-from dada_api.models.consensus import OutboxEvent
+from dada_api.models.consensus import INITIAL_EVIDENCE_READY_EVENT, OutboxEvent
 from dada_api.models.label_import import ImportedSeedDocument
 from dada_api.models.media import ContentObject, Media
 from dada_api.models.project import Project, ProjectClass
@@ -44,11 +43,11 @@ from dada_api.services import (
     batches,
     cohort_selection,
     datasets,
+    resolution_runs,
 )
 
 PAGE_SIZE = 50
 OPEN_STATUSES = (AssignmentStatus.pending, AssignmentStatus.in_progress)
-INITIAL_EVIDENCE_READY_EVENT = "consensus.initial_evidence_ready.v1"
 
 
 @dataclass(frozen=True)
@@ -60,6 +59,7 @@ class OpenedAssignment:
     media: Media
     content: ContentObject
     latest: AnnotationSubmission | None
+    resolution: ResolvedAnnotation | None
 
 
 async def list_queue(
@@ -234,7 +234,9 @@ async def open_assignment(
     """Return the caller's assignment with its image and current work.
 
     Opening changes nothing: it neither claims the image nor hides it from the
-    other annotators assigned to it.
+    other annotators assigned to it. Once the image is resolved, its current
+    canonical annotation is included, which reveals no peer, vote, or
+    diagnostic (P6-07).
 
     Args:
         session: Active database session.
@@ -243,7 +245,8 @@ async def open_assignment(
         assignment_id: Assignment being opened.
 
     Returns:
-        The assignment, its batch, its image, and its latest submission.
+        The assignment, its batch, its image, its latest submission, and the
+        image's current resolution once it is resolved.
     """
     assignment, item, batch = await _load_owned(
         session, user, project, assignment_id, lock=False
@@ -256,7 +259,12 @@ async def open_assignment(
         )
     ).one()
     latest = await _latest_submission(session, assignment)
-    return OpenedAssignment(assignment, batch, media, content, latest)
+    resolution = (
+        await resolution_runs.current_resolution(session, item.id)
+        if item.status == ItemStatus.resolved
+        else None
+    )
+    return OpenedAssignment(assignment, batch, media, content, latest, resolution)
 
 
 def _require_open(assignment: AnnotationAssignment) -> None:
@@ -424,7 +432,7 @@ async def submit(
         )
         item.status = ItemStatus.resolved
         await session.flush()
-        await _resolve_batch_if_done(session, batch)
+        await batches.refresh_status(session, batch)
     else:
         await _refresh_readiness(session, item, batch)
 
@@ -437,12 +445,22 @@ async def submit(
 async def _refresh_readiness(
     session: AsyncSession, item: BatchItem, batch: AnnotationBatch | None = None
 ) -> None:
-    """Mark an image ready and atomically emit its immutable readiness event."""
+    """Mark an image ready, emit its immutable readiness event, and refresh the
+    batch status."""
     if item.status in (ItemStatus.resolved, ItemStatus.cancelled):
         return
     if batch is None:
         batch = await session.get(AnnotationBatch, item.batch_id)
+    await _mark_readiness(session, item, batch)
+    await session.flush()
+    await batches.refresh_status(session, batch)
 
+
+async def _mark_readiness(
+    session: AsyncSession, item: BatchItem, batch: AnnotationBatch
+) -> None:
+    """Set an image ready once its exact cohort submitted, emitting its event
+    exactly once per evidence generation."""
     cohort = list(
         await session.scalars(
             select(AnnotationItemAnnotator)
@@ -462,12 +480,10 @@ async def _refresh_readiness(
         assignment = await session.get(AnnotationAssignment, member.assignment_id)
         if assignment is None or assignment.status != AssignmentStatus.submitted:
             item.status = ItemStatus.pending
-            batch.status = BatchStatus.annotating
             return
         submission = await _latest_submission(session, assignment)
         if submission is None:
             item.status = ItemStatus.pending
-            batch.status = BatchStatus.annotating
             return
         evidence.append(
             {
@@ -514,18 +530,6 @@ async def _refresh_readiness(
             )
         )
 
-    pending = await session.scalar(
-        select(func.count())
-        .select_from(BatchItem)
-        .where(
-            BatchItem.batch_id == batch.id,
-            BatchItem.id != item.id,
-            BatchItem.status == ItemStatus.pending,
-        )
-    )
-    if not pending:
-        batch.status = BatchStatus.resolving
-
 
 async def _advance_evidence_generation(
     session: AsyncSession,
@@ -534,7 +538,13 @@ async def _advance_evidence_generation(
     replaced_assignment_id: str | None = None,
     replacement: AnnotationAssignment | None = None,
 ) -> None:
-    """Copy a cohort into a new generation, optionally replacing one member."""
+    """Copy a cohort into a new generation, optionally replacing one member.
+
+    Every run, work item, and review of the earlier generation is retired in
+    the same transaction, so no result built on the old cohort can be
+    accepted.
+    """
+    await resolution_runs.invalidate_generation(session, item, datetime.now(UTC))
     current = list(
         await session.scalars(
             select(AnnotationItemAnnotator)
@@ -570,22 +580,6 @@ async def _advance_evidence_generation(
                 ordered_pool=member.ordered_pool,
             )
         )
-
-
-async def _resolve_batch_if_done(session: AsyncSession, batch: AnnotationBatch) -> None:
-    """Move an annotating batch to ``resolved`` once no image is left open."""
-    if batch.status != BatchStatus.annotating:
-        return
-    unresolved = await session.scalar(
-        select(func.count())
-        .select_from(BatchItem)
-        .where(
-            BatchItem.batch_id == batch.id,
-            BatchItem.status.not_in((ItemStatus.resolved, ItemStatus.cancelled)),
-        )
-    )
-    if not unresolved:
-        batch.status = BatchStatus.resolved
 
 
 async def list_batch_assignments(
@@ -708,7 +702,7 @@ async def reopen(
     _require_unresolved(item)
 
     latest = await _latest_submission(session, assignment)
-    if item.status == ItemStatus.awaiting_resolution:
+    if item.status != ItemStatus.pending:
         await _advance_evidence_generation(session, item)
     assignment.draft = list(latest.objects)
     assignment.draft_saved_at = datetime.now(UTC)
@@ -891,7 +885,8 @@ async def cancel_item(
     )
     item.status = ItemStatus.cancelled
     await session.flush()
-    await _resolve_batch_if_done(session, batch)
+    await session.flush()
+    await batches.refresh_status(session, batch)
 
     audit.record(
         session,

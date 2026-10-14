@@ -1,0 +1,62 @@
+{
+  "name": "reliability_weighted_passes",
+  "strategy": {
+    "strategy": "reliability_weighted_vote"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "cat",
+    "dog",
+    "no_object"
+  ],
+  "votes": [
+    {
+      "rater": "caio",
+      "outcome": "dog"
+    },
+    {
+      "rater": "ana",
+      "outcome": "cat"
+    },
+    {
+      "rater": "bia",
+      "outcome": "cat"
+    }
+  ],
+  "calibration": {
+    "weights": {
+      "ana": 1.2,
+      "bia": 1.0,
+      "caio": 0.8,
+      "davi": 1.0
+    }
+  },
+  "expected": {
+    "outcome": "cat",
+    "passed": true,
+    "reasons": [],
+    "metrics": {
+      "votes": {
+        "cat": 2,
+        "dog": 1,
+        "no_object": 0
+      },
+      "valid_votes": 3,
+      "support": {
+        "numerator": 2,
+        "denominator": 3
+      },
+      "margin": 1,
+      "normalized_entropy": 0.57938,
+      "weights": {
+        "ana": 1.2,
+        "bia": 1.0,
+        "caio": 0.8
+      },
+      "weighted_support": 0.733333
+    }
+  }
+}

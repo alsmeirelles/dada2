@@ -8,7 +8,11 @@ from pydantic import BaseModel, Field
 
 from dada_api.schemas.batch import BatchPurposeName
 from dada_api.schemas.project import TaskType
-from dada_api.services.annotation_documents import MAX_OBJECTS, MAX_RING_POINTS
+from dada_api.services.annotation_documents import (
+    MAX_CANONICAL_RING_POINTS,
+    MAX_OBJECTS,
+    MAX_RING_POINTS,
+)
 
 AssignmentStatusName = Literal[
     "pending", "in_progress", "submitted", "reassigned", "cancelled"
@@ -43,6 +47,29 @@ class AnnotationObject(BaseModel):
         | None
     )
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class CanonicalPolygonGeometry(PolygonGeometry):
+    """A polygon of a canonical document, which may trace a mask outline with
+    up to 10,000 points per ring (D14)."""
+
+    coordinates: list[
+        Annotated[
+            list[Coordinate],
+            Field(min_length=6, max_length=2 * MAX_CANONICAL_RING_POINTS),
+        ]
+    ] = Field(min_length=1)
+
+
+class CanonicalAnnotationObject(AnnotationObject):
+    """One object of a canonical document written by an expert."""
+
+    geometry: (
+        Annotated[
+            RectangleGeometry | CanonicalPolygonGeometry, Field(discriminator="type")
+        ]
+        | None
+    )
 
 
 class DocumentWrite(BaseModel):
@@ -98,12 +125,25 @@ class AssignmentMedia(BaseModel):
     image_url: str
 
 
+class FinalResolution(BaseModel):
+    """An image's accepted canonical annotation as its annotators may see it.
+
+    ``source`` says whether it came from the single submission, automatic
+    consensus, or an expert's adjudication; nothing about peers is included.
+    """
+
+    version: int
+    source: Literal["single_submission", "automatic_consensus", "expert_adjudication"]
+    objects: list[dict[str, Any]]
+
+
 class AssignmentDetail(BaseModel):
     """One assignment opened by its annotator.
 
     ``objects`` is the caller's draft while the work is open and their latest
     submission once it is submitted. ``seeded_from_import`` says the work began
-    from imported labels without exposing the import itself.
+    from imported labels without exposing the import itself. ``resolution``
+    is present only once the image is resolved.
     """
 
     id: UUID
@@ -119,6 +159,7 @@ class AssignmentDetail(BaseModel):
     draft_saved_at: datetime | None
     revision: int | None
     submitted_at: datetime | None
+    resolution: FinalResolution | None = None
 
 
 class DraftSaved(BaseModel):

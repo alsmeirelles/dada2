@@ -437,3 +437,863 @@ on-the-fly.
   consensus inputs.
 
 
+## Decisões
+
+Fechadas localmente em 2026-10-14, sob autorização explícita da Stephany, a
+partir das decisões P6-01..08 e A6-01..04 acima. A leitura adotada é a
+seguinte: todos os tópicos listados abaixo de cada decisão estão aprovados,
+porque nenhum tem o rótulo **pending confirmation**. As frases "remain
+pending" da P6-08 e o `[TO DECIDE: P6-05/P6-07]` dos requisitos ficam
+superados pelos próprios tópicos.
+
+O trabalho é feito na branch `phase-6`. Cada decisão registra o motivo e a
+alternativa rejeitada. **Continuam sujeitas à revisão do Meirelles.** O que
+segue apenas preenche o que os documentos deixaram em aberto.
+
+### Motor e infraestrutura
+
+#### D1 — Fronteira dos módulos
+
+**Escolha:**
+
+- **`dada_api/consensus/`** é um pacote puro, a porta do resolver. Contém:
+  - os tipos do protocolo e da configuração tipada (Pydantic, sem FastAPI);
+  - a aritmética exata;
+  - as estratégias de classe, a detecção, a segmentação, o STAPLE e o adaptador falso.
+  - Não importa ORM nem FastAPI. scipy, OpenCV e crowd-kit são importados
+    dentro das funções, então a API nunca os carrega.
+- **`dada_api/services/`** faz a orquestração com o banco.
+- **`dada_api/workers/`** guarda o app Celery e a tarefa de consenso.
+
+**Motivo:** o plano exige que objetos de FastAPI e de ORM não atravessem a
+porta. Um pacote próprio torna essa fronteira visível e importável só pelo
+worker.
+
+**Rejeitada:** deixar os módulos puros em `services/`. Funciona, mas esconde a
+porta.
+
+#### D2 — O estado do job fica em `resolution_runs`
+
+**Escolha:**
+
+- Uma linha por rodada, com as tentativas contadas na própria linha.
+- Um índice único parcial em `(batch_item_id, configuration_fingerprint)`,
+  válido enquanto o status é `queued` ou `running`, garante "um job ativo por
+  item e configuração" (P6-05).
+
+**Rejeitada:** uma tabela genérica `worker_jobs`. Os jobs de aprendizado são
+da Fase 7, que decide o próprio formato.
+
+#### D3 — O relay da outbox é um processo de linha de comando
+
+**Escolha:** `dada-api consensus-relay` executa `relay_once` a cada 2 s. Cada
+passada:
+
+1. Pega os eventos `consensus.initial_evidence_ready.v1` ainda não publicados
+   (`FOR UPDATE SKIP LOCKED`).
+2. Recusa as gerações obsoletas, como a 5.1 já faz.
+3. Cria a entrada da rodada 1 e uma rodada `queued`, e marca o evento como
+   publicado.
+4. Envia as rodadas na fila ao Celery, respeitando os limites por projeto (2
+   padrão e 1 máscara).
+5. Reenfileira as rodadas `running` que passaram do tempo-limite mais a
+   margem, o caso de um worker que caiu:
+   - espera 1 min antes da segunda tentativa e 5 min antes da terceira;
+   - são 3 tentativas no total; na terceira falha, a rodada vira
+     `worker_failed` permanente.
+
+**Motivo:** uma única função, fácil de testar, cobre o despacho, a entrega
+"pelo menos uma vez" e a recuperação de queda.
+
+**Rejeitada:** o Celery beat. Também é outro processo, e é mais difícil de
+testar.
+
+#### D4 — Execução no worker
+
+**A tarefa Celery** é um envoltório fino, com `acks_late=True` e
+`reject_on_worker_lost=True`:
+
+1. Carrega a entrada em dados simples.
+2. Chama o pipeline puro.
+3. Entrega o resultado à ingestão, numa única transação.
+
+**Filas:**
+
+| Fila | Tarefas | Tempo-limite | Memória |
+| --- | --- | --- | --- |
+| `consensus.standard` | classificação e detecção | 5 min | 1 GiB |
+| `consensus.mask` | segmentação | 15 min | 4 GiB |
+
+**Limites:**
+
+- O cancelamento cooperativo acontece 30 s antes do tempo-limite.
+- Uma verificação prévia de complexidade (pixels × máscaras, objetos, pontos)
+  falha logo, como `resource_limit` permanente.
+- A memória é limitada com `RLIMIT_AS` só no Linux. Em desenvolvimento no
+  Windows esse limite não vale.
+
+**Testes:**
+
+- Os testes chamam o corpo da tarefa diretamente, sem broker.
+- O adaptador falso só é registrado com `DADA_ENVIRONMENT=test`.
+
+#### D5 — Rodadas de evidência e rodadas de execução
+
+**Escolha:**
+
+- **`resolution_inputs.run_number` (5.1)** conta as rodadas de evidência: 1 é
+  a coorte; 2 é a coorte mais os revisores.
+- **`resolution_runs`** tem a própria sequência por item.
+- **Nova tentativa do gerente:** cria uma rodada nova sobre a evidência mais
+  recente.
+- **Rodada 2:**
+  - nasce quando todos os work items da rodada 1 estão `review_ready`;
+  - reaproveita os candidatos da rodada 1, sem casar de novo, e só soma as
+    observações dos revisores.
+- **O que falha na rodada 2 ou numa nova tentativa** vai direto ao
+  especialista, sem outra rodada de revisores.
+
+**Motivo:** a P6-05 prevê uma única rodada de revisão. Casar de novo poderia
+mudar quais caixas formam cada candidato.
+
+#### D6 — Estados de item e de lote
+
+**Escolha:**
+
+- **Item:** além de `pending`, `awaiting_resolution`, `resolved` e
+  `cancelled`, ganha `resolving`, `in_review` e `review_required`.
+  - Não existe `failed` no item: a falha permanente leva a `review_required`,
+    como pede a P6-05 ("moves the case to manual review or an explicit
+    retry").
+- **Lote:** o estado é derivado dos itens:
+  - `resolved` quando todo item não cancelado está resolvido;
+  - senão, `review_required` se algum item precisa de especialista;
+  - senão, `resolving` se algum item já saiu da coleta;
+  - senão, `annotating`.
+
+#### D7 — Reabrir ou reatribuir durante a resolução
+
+**Escolha:** quando a geração de evidência avança (5.1), a mesma transação
+cancela, da geração antiga:
+
+- as rodadas ativas;
+- os work items abertos;
+- as tarefas de revisão desses work items.
+
+Resultados que cheguem depois são descartados como obsoletos. A regra da Fase
+5 continua: só item não resolvido pode ser reaberto.
+
+#### D8 — Disponibilidade das capacidades
+
+**Escolha:**
+
+- A API decide se uma estratégia está disponível pelos metadados de
+  distribuição instalados (`importlib.metadata`) e pela tabela de quarentena.
+  Ela nunca importa a biblioteca.
+- Pin ausente ou incompatível vira `dependency_missing` ou
+  `dependency_incompatible`.
+
+**Suposição registrada:** API e workers rodam no mesmo ambiente ou imagem. A
+topologia de implantação é a P8-04.
+
+### Configuração
+
+#### D9 — Configuração tipada e capacidades
+
+**Escolha:**
+
+- **`parameters` e `review_thresholds`** passam a ser objetos fechados e
+  aninhados, discriminados pelo pipeline.
+- **`resolver_version`** é gravado como `"1.0.0"`.
+- **Formato dos limiares:** os de votos são frações exatas
+  `{"numerator": 2, "denominator": 3}`; os contínuos são números.
+- **Capacidades:** `consensus_resolvers` dá lugar a `consensus_pipelines`.
+  Para cada tarefa, descreve o pipeline e as subestratégias, com versão,
+  aplicabilidade, se é condicional, disponibilidade (e o motivo, quando
+  indisponível) e descritores tipados de cada parâmetro.
+  - Cada descritor tem: tipo, padrão, mínimo, máximo, inclusividade, opções,
+    unidade, se é avançado e ajuda.
+- **Pisos rígidos em todo salvamento e em toda nova tentativa:**
+  - limiar de votos estritamente acima de 1/2;
+  - nenhuma chave desconhecida;
+  - só estratégias do catálogo.
+- **Migração:**
+  - Os IDs provisórios são trocados nas políticas padrão **e** nos lotes:
+
+    | ID provisório | Pipeline definitivo |
+    | --- | --- |
+    | `majority_vote` | `statistical_class_consensus` |
+    | `two_stage_box_fusion` | `two_stage_detection_consensus` |
+    | `two_stage_mask_fusion` | `two_stage_segmentation_consensus` |
+
+  - Os parâmetros e limiares recebem os padrões da P6-02.
+  - O antigo `agreement` é descartado.
+
+**Motivo:** a P6-02 fixa padrões e faixas que precisam de um lugar validado. A
+A6-04 pede um formulário guiado por descritores tipados.
+
+**Efeito no contrato:** muda a forma das capacidades e da política. O App é
+ajustado na mesma fase.
+
+#### D10 — A classificação continua multi-rótulo
+
+**Escolha:** sem configuração nova, conforme a D6 da Fase 5.
+
+- A classificação usa `multilabel_binary_vote`, que é o padrão.
+- Também pode usar `dirichlet_vote`, `reliability_weighted_vote` ou
+  `dawid_skene`, sempre no modo binário por classe.
+- Os candidatos de detecção e segmentação usam `categorical_vote`, que é o
+  padrão, sobre as classes mais `no_object`. Também podem usar
+  `dirichlet_vote` e as estratégias condicionais.
+
+**Motivo:** a Fase 5 adiou a opção "um rótulo por imagem", e o catálogo da
+P6-01 continua completo sem ela.
+
+**Rejeitada:** um campo `classification_label_mode`. Mudaria a configuração do
+projeto, a política, os documentos e o assistente do App. **Ponto para o
+Meirelles confirmar.**
+
+#### D11 — Estratégias condicionais: snapshot de calibração congelado
+
+**Quando:**
+
+- No início do lote, se a estratégia for condicional, a API gera um snapshot
+  em `resolver_calibration_snapshots` e o liga ao lote.
+- Se os critérios falham, o início é recusado com
+  `422 resolver_unavailable`, junto com os pré-requisitos que faltam.
+
+**De onde vêm os dados (o corpus):** das resoluções já aceitas no projeto,
+para a mesma tarefa.
+
+- Para `dawid_skene`: as matrizes de observação persistidas.
+- Para `reliability_weighted_vote`: as observações de desempenho
+  `human_adjudication`.
+
+**`reliability_weighted_vote`:**
+
+- O peso de cada anotador é a acurácia suavizada com Beta(2,2), normalizada
+  para média 1 e cortada em [0,5, 2,0].
+- É elegível com 30 decisões por anotador e 5 observações por resultado. Todo
+  membro do pool precisa estar incluído.
+- **Leitura a confirmar:** "todo resultado usado pelo peso" é o conjunto de
+  resultados do projeto, ou seja, as classes, mais `no_object` em detecção e
+  segmentação.
+
+**`dawid_skene`:**
+
+- É elegível com 50 itens, cada um com 3 ou mais avaliadores; 20 observações
+  por anotador; e 5 por resultado. Todo membro do pool precisa estar incluído.
+- O ajuste começa pelo voto majoritário, usa suavização 1 e para em
+  tolerância 1e-6 ou em 100 iterações. Sem convergência, a estratégia fica
+  inelegível.
+
+**Rota:** `GET /projects/{id}/resolver-eligibility` informa o que falta para
+cada estratégia, como pede a A6-04.
+
+#### D12 — Detalhes numéricos que a P6-02 deixa abertos
+
+- **Suporte:** a contagem do vencedor sobre o número de observações válidas,
+  contando `no_object`. A comparação é por produto cruzado. Empate no topo
+  sempre vai para revisão.
+- **Regras de decisão:**
+  - `plurality`: há um único máximo;
+  - `strict_majority`: o vencedor tem mais que n/2;
+  - `supermajority`: o vencedor tem pelo menos `minimum_support`.
+  - As três também aplicam o critério de suporte. Como ele precisa passar de
+    1/2, as três só diferem nos diagnósticos, e isso fica documentado.
+- **Multi-rótulo:** a classe fica positiva se o suporte positivo for pelo
+  menos `minimum_support`, e negativa se o suporte negativo for pelo menos
+  esse valor. Fora disso, vai para revisão.
+- **Dirichlet:**
+  - a distribuição a posteriori é Dir(α + contagens);
+  - P(o vencedor é o máximo) é exata com Beta quando há dois resultados; com
+    mais de dois, é uma integral unidimensional na representação Gama
+    (scipy);
+  - também exige suporte bruto de pelo menos 2/3.
+- **Quantização:** `Decimal(repr(x))` com 6 casas e `ROUND_HALF_EVEN`. Valores
+  não finitos são recusados antes da comparação.
+- **Refinamento de caixas:**
+  - o padrão é `coordinate_median`;
+  - `trimmed_mean_box` tem `trim_fraction` 0,2, na faixa [0, 0,4];
+  - `weighted_box_fusion` usa pesos iguais, porque caixa humana não tem
+    confiança, e por isso equivale à média.
+- **Limiar de pixel:** crowd-kit MV e EM já devolvem máscaras binárias, então
+  o `pixel_threshold` vale só para o STAPLE. Os adaptadores do crowd-kit
+  registram o 0,5 embutido.
+- **Contagem de objetos:** não há critério separado. A divergência já aparece
+  nos votos `no_object`.
+
+### Algoritmos
+
+#### D13 — Casamento, agrupamento e identidade do candidato
+
+- **Arestas:**
+  - Para cada par de anotadores, um casamento húngaro
+    (`scipy.optimize.linear_sum_assignment`) maximiza a IoU quantizada.
+  - Só ficam os pares com IoU no limiar de casamento ou acima.
+  - Na segmentação, a medida é a IoU ou o Dice das máscaras. Os pares cujas
+    caixas envolventes não se cruzam são descartados antes.
+- **Agrupamento por ligação completa:**
+  - Os grupos começam unitários.
+  - As arestas são processadas da maior IoU para a menor. Empates são
+    ordenados pelas referências canônicas, o que só ordena e nunca decide.
+  - Dois grupos só se juntam se não tiverem anotador em comum **e** todo par
+    cruzado estiver no limiar ou acima.
+- **Ambiguidade:** se um objeto tem duas arestas de mesma pontuação para
+  grupos diferentes, e as duas junções seriam possíveis, todos os candidatos
+  envolvidos ficam `ambiguous_match` e vão para revisão.
+- **Duplicata do mesmo anotador:** uma caixa no limiar ou acima de outra caixa
+  do mesmo anotador, que está em outro grupo, vira `duplicate` e nunca forma
+  um candidato votante.
+- **Identidade do candidato:**
+  - chave: `c-` seguido dos 32 primeiros caracteres hexadecimais do sha256
+    das referências ordenadas;
+  - ordinal: a posição da chave em ordem crescente.
+  - A chave e o ordinal alimentam o `review_round_robin_v1`.
+
+#### D14 — Rasterização, poligonização e tamanho do anel canônico
+
+**Rasterização:** cada anel é preenchido com `cv2.fillPoly` no tamanho
+original, e os resultados são combinados por XOR. Isso implementa par-ímpar
+explicitamente, sem depender da convenção do OpenCV.
+
+**Poligonização:**
+
+- `cv2.findContours(RETR_CCOMP, CHAIN_APPROX_SIMPLE)`. É sem perda na grade
+  de pixels: só remove pontos do meio de trechos retos.
+- Os furos vêm da hierarquia de contornos.
+- A orientação é explícita: o anel externo em sentido anti-horário e os furos
+  em sentido horário.
+
+**Problema:** um contorno de máscara costuma ter mais de 1.000 pontos, o
+limite que a Fase 5 fixou para submissões. Uma borda inclinada vira uma
+escada de pixels.
+
+**Escolha:**
+
+- Limite canônico de 10.000 pontos por anel, só para a saída do worker e para
+  documentos de adjudicação.
+- A verificação de anel simples fica mais rápida, com particionamento espacial
+  em Python puro e sem dependência nova.
+- Submissões continuam com 1.000.
+
+**Rejeitadas:**
+
+- Manter 1.000: quase toda máscara real iria para o especialista.
+- Simplificar com `approxPolyDP` por padrão: contraria a P6-03 ("polygon
+  simplification disabled by default").
+
+**Ponto para o Meirelles confirmar.**
+
+#### D15 — `SegmentationRASA`
+
+**Escolha:** o adaptador é implementado e perfilado com uma fixture de
+referência, dentro dos limites da fila de máscaras. Só é anunciado se o perfil
+passar. Caso contrário, aparece como `unavailable: resource_profile_unvalidated`
+(P6-03).
+
+### Revisão e adjudicação
+
+#### D16 — Evidência e contexto do revisor
+
+**O que o revisor vê:**
+
+- **Detecção e segmentação:** a imagem de origem e uma `region`, a caixa que
+  cobre as geometrias do candidato, com 10% de margem e recortada aos limites
+  da imagem.
+- **Classificação:** a imagem inteira.
+- Nunca vê classes, votos, contagens ou identidades.
+
+**Evidência tipada** (substitui o `dict` livre da 5.1):
+
+- revisão de imagem na classificação: `{"class_ids": [...]}`, com uma ou mais
+  classes distintas;
+- candidato de detecção: `{"decision": "object", "class_id": …, "geometry": {retângulo}}` ou `{"decision": "no_object"}`;
+- candidato de segmentação: o mesmo, com polígono.
+- A evidência é validada com as regras do documento.
+
+**Na rodada 2:** cada revisor é mais uma observação na matriz de classes do
+candidato. A geometria do revisor entra no refinamento quando o candidato é
+aceito.
+
+**Motivo:** a região é o mínimo para o revisor saber onde olhar. Votos, classes
+e nomes ancorariam a resposta.
+
+#### D17 — Composição da resolução da imagem
+
+**A proposta:** cada rodada guarda uma proposta imutável. Ela traz a decisão de
+cada candidato (classe ou existência, geometria, métricas, motivo) e o
+documento da imagem.
+
+**Composição:**
+
+- Só acontece quando todos os candidatos estão fechados, seja por aceitação
+  automática na última rodada, seja por adjudicação.
+- Gera um documento canônico com os objetos em ordem de chave e novos ids
+  estáveis por versão.
+- O documento vira a versão n+1 de `resolved_annotations`:
+  - `source` é `automatic_consensus`, ou `expert_adjudication` se algum
+    candidato foi adjudicado;
+  - a versão anterior recebe `superseded_at`.
+
+**Garantias:**
+
+- Um índice único parcial garante uma única versão vigente por imagem.
+- A ingestão trava a linha da rodada e confere o status e as impressões
+  digitais.
+- Há uma única proposta por rodada, garantida por restrição única. Por isso,
+  um resultado duplicado não tem efeito.
+
+**Precedência:** uma rodada automática nunca substitui sozinha uma versão
+adjudicada. A proposta dela espera aceite explícito, com justificativa
+(P6-06).
+
+#### D18 — Versões esperadas em nova tentativa, aceite e adjudicação
+
+**Escolha:** os três pedidos levam:
+
+- `expected_evidence_generation`;
+- `expected_configuration_fingerprint`, a da última rodada, ou `null`;
+- `expected_resolution_version`, que é 0 quando não há versão.
+
+**Erros:**
+
+- `409 version_conflict`, para evidência ou resolução divergente;
+- `409 resolution_config_conflict`, para configuração divergente;
+- `409 resolution_in_progress`, quando há rodada ativa;
+- `409 resolution_not_ready`.
+
+Os três exigem `Idempotency-Key`.
+
+#### D19 — Configuração da nova tentativa
+
+**Escolha:**
+
+- O pedido pode trazer uma `configuration`; sem ela, vale o snapshot do lote.
+- Passa pelos mesmos esquemas e pisos.
+- Fica gravada na rodada e auditada.
+- Nunca altera o snapshot do lote.
+
+**Motivo:** a CE-F07 e o plano do App ("retry … with a new explicit
+configuration").
+
+**Rejeitada:** reutilizar sempre o snapshot. É mais simples, mas como o
+algoritmo é determinístico, repetir a mesma configuração só ajuda depois de uma
+falha.
+
+#### D20 — Independência do adjudicador (P6-04)
+
+**Escolha:**
+
+- `require_independent_adjudicator`, padrão `false`, vale na política padrão e
+  no snapshot do lote.
+- **Contribuinte** é quem anotou a geração atual do item, ou quem revisou
+  qualquer work item dele.
+- **Com `false`:** o contribuinte pode adjudicar, mas a resposta e a auditoria
+  registram `contributor_conflict: true`, e a justificativa é obrigatória.
+- **Com `true`:** o contribuinte recebe `403 adjudicator_not_independent`, e o
+  caso continua pendente.
+
+#### D21 — Leases de resolução (P6-08)
+
+**Rotas:**
+
+| Método | Rota | Uso |
+| --- | --- | --- |
+| `POST` | `/projects/{id}/resolution-work-items/{w}/lease` | adquirir ou renovar |
+| `DELETE` | `/projects/{id}/resolution-work-items/{w}/lease` | liberar |
+| `POST` | `/projects/{id}/resolution-work-items/{w}/lease/revoke` | revogar (dono ou gerente), com `reason` obrigatório e auditoria |
+
+**Tempos:**
+
+- o lease dura 15 min e é renovado a cada 5 min;
+- o teto é de 2 h;
+- a expiração é decidida pelo relógio do servidor a cada pedido, sem
+  varredura.
+
+**Regras:**
+
+- `edit_proposal`, `edit_submission` e `replace` exigem o lease de quem pede.
+- `accept_proposal` não exige, mas devolve `409 lease_held` enquanto outra
+  pessoa tiver o lease.
+- Nova tentativa e cancelamento seguem a mesma regra.
+
+#### D22 — Falha permanente e cancelamento
+
+**Escolha:** quando a falha é permanente ou o gerente cancela:
+
+- a rodada fica `failed` ou `cancelled`, com a evidência preservada;
+- o item fica `review_required`;
+- nasce um work item de imagem só para especialista, sem revisores.
+  - O motivo é `worker_failed`, `resolver_unavailable`,
+    `resolver_output_invalid` ou `expert_required`.
+
+O gerente pode então tentar de novo ou adjudicar. Isso exige
+`create_expert_work_item`, ao lado de `create_review_work_item`.
+
+#### D23 — O que o anotador vê depois da resolução (P6-07)
+
+**Escolha:**
+
+- `GET /assignments/{id}` passa a trazer
+  `resolution: {version, source, objects}`, só depois que a imagem é resolvida.
+- `source` é `single_submission`, `automatic_consensus` ou
+  `expert_adjudication`.
+- Nunca traz votos, colegas ou diagnósticos.
+
+#### D24 — Observações de desempenho e a rota agregada
+
+**Escolha:**
+
+- **Gravação:** as observações são gravadas na transação do aceite ou da
+  adjudicação.
+  - Uma chave única por resolução, objeto de origem e métrica torna as novas
+    tentativas inofensivas.
+  - Quando uma versão é substituída, suas observações recebem
+    `summary_eligible = false`. Nenhuma observação é reescrita.
+- **Leitura:** `GET /annotator-performance` agrega na hora da consulta.
+  - Uma linha nomeada com menos de 30 decisões é suprimida.
+  - Uma célula com menos de 5 observações é suprimida.
+
+**Rejeitada:** a tabela `annotator_performance_summaries`. O plano a chama de
+"cache regenerável", e nada precisa de cache neste tamanho. A estatística
+publicada é da Fase 7. **Ponto para o Meirelles confirmar.**
+
+#### D25 — Eventos
+
+**Escolha:** a outbox recebe `resolution.started`, `resolution.completed`,
+`resolution.review_required` e `resolution.adjudicated`, só com
+identificadores e estado. A entrega é da Fase 8.
+
+#### D26 — Autorização
+
+**Escolha:**
+
+- Entra `work_candidate_review` (dono, gerente e anotador), que o plano nomeia.
+  As quatro rotas do revisor passam a usá-la.
+- A matriz vai para 14 ações e 56 pares.
+- As rotas de evidência, nova tentativa, adjudicação, lease e desempenho usam
+  as quatro ações que já existiam sem uso.
+
+#### D27 — A fila do gerente
+
+**Escolha:** só a rota do plano,
+`GET /projects/{id}/batches/{batch_id}/resolutions`.
+
+- **Cada linha é um work item,** de imagem ou de candidato.
+- **Ordenação:** primeiro as falhas, depois os motivos de especialista, depois
+  os mais antigos.
+- **Paginação:** 50 por página.
+- **Filtros:** estado, motivo, estratégia e idade mínima.
+- **Os filtros "lote, finalidade e tarefa" da A6-01** viram o seletor de lote
+  do App, porque o projeto tem uma única tarefa.
+
+#### D28 — Rotas e comandos além da tabela do contrato
+
+**Escolha:**
+
+- **Rotas:**
+  - os leases (D21);
+  - `POST /projects/{id}/resolution-runs/{run_id}/cancel`;
+  - `GET /projects/{id}/resolver-eligibility` (D11);
+  - `GET /projects/{id}/annotation-policy/history`, montada a partir da
+    auditoria, para o histórico somente leitura da A6-04.
+- **Comandos:**
+  - `dada-api consensus-relay`;
+  - `dada-api resolver-quarantine list|release --reason`. A liberação exige
+    que a fixture de saúde passe.
+
+**Motivo:** o mesmo da Fase 4 (D7). O comportamento é da fase, e essas rotas
+são o único jeito de alcançá-lo.
+
+#### D29 — Dependências
+
+**Escolha:** um extra opcional `consensus`, com versões exatas: `numpy`,
+`scipy`, `opencv-python-headless`, `crowd-kit==1.4.2` e `pandas`.
+
+- O `uv.lock` é regenerado com `uv`, instalado por pip no ambiente `dada2`.
+- O CI passa a usar `uv sync --extra dev --extra consensus --frozen`.
+- Os testes de algoritmo são pulados, com o motivo explícito, quando o extra
+  não está instalado.
+
+**Ressalva registrada:** os requisitos base do crowd-kit 1.4.2 trazem
+`transformers`, `nltk`, `pyarrow` e `scikit-learn`, sem torch.
+
+### Decisões do App
+
+- **A-1, sobreposição somente leitura.**
+  - Um `EvidenceStage` desenha várias fontes em SVG na escala da imagem. Ele
+    reaproveita as primitivas de forma e de viewport do `ImageStage`, sem
+    estado de edição.
+  - A segmentação aparece como polígonos preenchidos, porque nossas máscaras
+    são polígonos, com controle de transparência.
+  - Cada fonte tem uma cor e um tracejado estáveis.
+  - O modo lado a lado entra abaixo de 1200 px ou com mais de quatro fontes.
+  - Uma tabela não visual está sempre presente.
+- **A-2, configuração do resolver.**
+  - Um `ResolverConfigForm` compartilhado, guiado pelos descritores da D9.
+  - Os controles avançados ficam recolhidos.
+  - Estratégias indisponíveis aparecem desabilitadas, com o motivo exato.
+  - É usado no assistente, nas configurações e na política do lote, e
+    substitui o campo `agreement`.
+- **A-3, revisor.**
+  - O `CandidateReviewPage` troca a caixa de JSON pelo `ImageStage`, limitado
+    a um objeto dentro da região.
+  - Há uma opção **Não existe**.
+  - A chave de recuperação é
+    `dada.review-recovery:{projectId}:{reviewAssignmentId}:{baseVersion}`.
+- **A-4, adjudicação.**
+  - O editor usa o `ImageStage` sobre a fonte escolhida: a proposta (padrão),
+    uma submissão bruta ou um documento em branco.
+  - O lease é renovado a cada 5 min, com aviso ao sair da página.
+  - A chave de recuperação é
+    `dada.adjudication-recovery:{projectId}:{workItemId}:{userId}:{baseVersion}`.
+  - Toda ação pede confirmação. Pedem justificativa a edição, a substituição,
+    a nova tentativa, a revogação e a autoadjudicação com conflito.
+  - Num `409`, o rascunho é preservado e o App mostra a comparação entre
+    origem, base e versão nova.
+- **A-5, rotas.**
+  - `/projects/:id/consensus`, `/consensus/images/:batchItemId` e
+    `/consensus/work-items/:workItemId`, como no plano do App.
+  - Os protótipos de agosto são substituídos.
+- **A-6, progresso.**
+  - As contagens de resolução aparecem em `ProjectBatchesPage` e num selo no
+    cartão do projeto.
+  - `ProjectActivityPage` fica como está (Fase 7).
+  - O workspace mostra a anotação final quando a D23 a fornece.
+- **A-7, I6-01.** O defeito é reproduzido no navegador antes de qualquer
+  mudança, e a resolução é registrada no arquivo de issues.
+
+## Implementação
+
+Status: API implementada em 2026-10-14, na branch `phase-6`, sem commit. O App
+fica para uma etapa seguinte. Tudo continua pendente da revisão do Meirelles.
+
+Guia de operação: [development.md](../development.md#consensus-engine-phase-6).
+Formas no contrato do App: `dada-app/docs/api-contract.md`, seção "Phase 6
+implemented shapes".
+
+### Persistência
+
+Migração `20261014_0010`, exercitada upgrade → downgrade → upgrade, com
+`alembic check` limpo.
+
+- **Tabelas novas:**
+  - `resolution_runs` e `resolution_proposals`;
+  - `resolution_object_evidence`;
+  - `adjudications` e `resolution_leases`;
+  - `performance_observations`;
+  - `resolver_quarantines` e `resolver_calibration_snapshots`.
+- **Colunas novas:**
+  - `resolved_annotations` ganhou a origem, a proposta, a execução, quem
+    aceitou e `superseded_at`, com um índice único parcial que garante
+    exatamente uma resolução corrente por imagem;
+  - política e lote ganharam `require_independent_adjudicator`;
+  - o lote ganhou `calibration_snapshot_id`.
+- **Migração de dados:** os identificadores provisórios (`majority_vote`,
+  `two_stage_box_fusion`, `two_stage_mask_fusion`) passaram para os três
+  pipelines, com a configuração padrão e `resolver_version = "1.0.0"`, nos
+  padrões de projeto e nos lotes.
+
+### Rotas e comandos
+
+| Rota ou comando | Função |
+| --- | --- |
+| `GET /projects/{id}/batches/{batch_id}/resolutions` | Fila do gerente, por gravidade e idade |
+| `GET /projects/{id}/batch-items/{item_id}/evidence` | Toda a evidência de uma imagem |
+| `POST /projects/{id}/batch-items/{item_id}/resolve` | Nova tentativa, com versões esperadas e configuração opcional |
+| `POST /projects/{id}/resolution-runs/{run_id}/cancel` | Cancela uma execução ativa |
+| `POST/DELETE /projects/{id}/resolution-work-items/{work_item_id}/lease` | Adquire, renova ou libera o lease de edição |
+| `POST /projects/{id}/resolution-work-items/{work_item_id}/lease/revoke` | Revoga um lease abandonado |
+| `POST /projects/{id}/resolution-work-items/{work_item_id}/adjudicate` | Decisão do especialista |
+| `GET /projects/{id}/annotator-performance` | Desempenho agregado, com supressão |
+| `GET /projects/{id}/resolver-eligibility` | Elegibilidade das estratégias condicionais |
+| `GET /projects/{id}/annotation-policy/history` | Histórico somente leitura da política |
+| `dada-api consensus-relay` | Relay do outbox: cria, recupera e despacha execuções |
+| `dada-api resolver-quarantine list\|add\|release` | Quarentena operada à mão |
+| `celery -A dada_api.workers.celery_app worker` | Worker das filas `consensus.standard` e `consensus.mask` |
+
+`/capabilities` trocou `consensus_resolvers` por `consensus_pipelines`. O
+`openapi.json` foi de 49 para 59 rotas e de 69 para 99 schemas.
+
+### Autorização
+
+A matriz foi para 14 ações e 56 pares com `work_candidate_review` (owner,
+manager e annotator), usada pelas rotas de revisão escopada. As rotas do
+gerente usam `read_annotation_evidence`, `run_resolution`, `adjudicate` e
+`read_annotator_performance`. A elegibilidade e o histórico da política usam
+`manage_annotation_policy`.
+
+### Desvios das decisões acima
+
+Cada desvio tem um motivo:
+
+- **D4 — adaptador falso.** Os testes instalam o falso em
+  `consensus.pipeline.ADAPTERS`, em vez de registrá-lo no ambiente `test`.
+  Registrado, ele apareceria em `/capabilities`.
+- **D4 — confirmação e novas tentativas.**
+  - O Celery confirma a mensagem cedo, e quem decide as novas tentativas é o
+    banco. Cada comando leva o número da tentativa; uma mensagem repetida
+    cuja tentativa não é mais a atual é ignorada.
+  - Motivo: o Redis reentrega mensagens não confirmadas depois do seu tempo de
+    visibilidade, mesmo com o worker ainda rodando. Com `acks_late`, isso
+    viraria execução duplicada.
+- **D4 — memória.** Não há `RLIMIT_AS`, porque ele conta a memória virtual que
+  as bibliotecas numéricas reservam ao importar. A memória é protegida por três
+  coisas:
+  - a estimativa prévia de complexidade;
+  - o teto de memória por filho do Celery, que os alvos `make worker-*`
+    passam a partir de `DADA_CONSENSUS_*_MEMORY_BYTES`;
+  - o limite do container do worker (P8-04).
+- **D6 — precedência do estado do lote.**
+  - A ordem é: `resolved`; depois `annotating`, enquanto houver imagem
+    `pending`; depois `review_required`; por fim `resolving`.
+  - Isso mantém a regra da Fase 5 de que o lote anota até a última imagem ser
+    entregue.
+- **D9 — formato das capabilities.**
+  - Cada entrada traz `unavailable_reason`, nulo quando disponível, em vez de
+    `availability: {available, reason}`.
+  - Não há `applicability`, porque os pipelines são indexados pelo tipo de
+    tarefa.
+  - Os campos de correspondência são planos (`matching_iou`, e
+    `matching_metric` com `matching_threshold`), e não o grupo
+    `matching: {metric, threshold}` do exemplo da D9.
+  - O App lê os descritores, então nenhum nome fica fixo no cliente.
+- **D17 — `superseded_by` removido.** O número da versão seguinte já
+  identifica a sucessora; `superseded_at` basta.
+- **D28 — quarentena.**
+  - Além de `list` e `release`, existe `add`, porque o texto do Meirelles diz
+    que operadores podem pôr em quarentena uma versão defeituosa.
+  - `--by` precisa nomear um administrador ativo, que fica registrado como
+    quem liberou.
+  - A "fixture de saúde" é empacotada em `consensus/health.py`, porque os
+    testes não vão para o pacote instalado. Três documentos idênticos precisam
+    virar a resposta conhecida, duas vezes de forma idêntica.
+  - Só pipelines instalados entram em quarentena manual. A quarentena
+    automática também é por pipeline.
+
+### Decisões novas na implementação
+
+- **D30 — ator do sistema na auditoria.**
+  - **O quê:** `audit_entries.actor_user_id` passou a aceitar nulo, e nulo
+    quer dizer que o sistema agiu sozinho.
+  - **Por quê:** a CE-F11 pede auditoria de resultados automáticos, falhas e
+    novas tentativas, e a P6-06 fala em "ator do sistema".
+  - **Precedente:** a D1 da Fase 4 tornou `project_id` anulável pelo mesmo
+    motivo.
+  - **Downgrade:** as entradas do sistema são apagadas.
+- **Estado do lote calculado num lugar só.** `batches.refresh_status`
+  substituiu `_resolve_batch_if_done`. A função antiga só resolvia lotes ainda
+  `annotating`, então um lote de consenso, que fica em `resolving`, nunca
+  fecharia.
+- **Reabrir durante a resolução.** Reabrir agora avança a geração de evidência
+  em todos os estados depois da coleta: `awaiting_resolution`, `resolving`,
+  `in_review` e `review_required`. Antes, só em `awaiting_resolution`.
+- **Anéis canônicos de até 10.000 pontos.** O contorno traçado de uma máscara
+  pode ter muito mais pontos que um polígono desenhado à mão, então o limite do
+  documento canônico é `MAX_CANONICAL_RING_POINTS = 10_000`. A verificação de
+  auto-interseção (`ring_is_simple`) passou a separar os segmentos por grade.
+  Foi conferida contra a versão força bruta em 3.000 anéis, e um anel de 9.000
+  pontos leva 0,28 s.
+- **Anel canônico inválido vai para revisão.** Se o contorno traçado se
+  auto-tocar, ou se o pós-processamento mudar a máscara materialmente, o
+  candidato falha com `topology_invalid`. Nada é corrigido em silêncio.
+- **RASA habilitado.** O perfil de recursos de `segmentation_rasa` foi medido
+  dentro dos limites da fila `consensus.mask`.
+
+### Interpretações nos módulos puros
+
+Os módulos de estratégias de classe e de geometria foram escritos por agentes
+a partir das fixtures. Estas são as leituras que eles fizeram onde o texto
+deixava espaço:
+
+- **Estratégias de classe:**
+  - o suporte é a fração exata dos votos, sem peso, que o vencedor recebeu.
+    Numa estratégia ponderada, o vencedor pode não ser o mais votado, e o
+    suporte registrado é o dele;
+  - um empate no topo dá só `class_tie`, e nada o desempata. Nos outros casos,
+    as razões seguem a ordem suporte, depois posterior;
+  - o portão da posterior existe só em `dirichlet_vote` e `dawid_skene`;
+  - as três regras do `categorical_vote` (`plurality`, `strict_majority` e
+    `supermajority`) chegam às mesmas decisões, porque o piso da política
+    mantém o suporte acima de 1/2. Só a regra registrada muda;
+  - os pesos de confiabilidade ficam entre 0,5 e 2,0, cortados sem
+    renormalizar;
+  - o Dawid-Skene usa só votos do pool e só itens com pelo menos três
+    avaliadores distintos.
+- **Correspondência e geometria:**
+  - a ambiguidade é marcada dentro de uma faixa de sobreposição igual. Um
+    empate entre os mesmos dois avaliadores não é marcado, porque essa imagem
+    já vai para revisão por outro motivo;
+  - um duplicado do mesmo avaliador é comparado com os objetos anteriores dele;
+  - nos anéis externos, a área pelo shoelace é positiva em coordenadas de
+    imagem (x para a direita, y para baixo), o que dá sentido horário na tela.
+    Os buracos têm área negativa;
+  - o preenchimento inclui os pixels por onde a borda passa, um viés de meio
+    pixel para fora;
+  - anéis degenerados no traçado são descartados e contados nos diagnósticos;
+  - `segmentation_majority_vote` com dois avaliadores dá a união, porque o
+    crowd-kit binariza em 0,5 inclusive;
+  - com dois avaliadores que discordam muito, `segmentation_em` pode dar quase
+    todo o peso a um deles.
+
+**Para o Meirelles conferir:**
+
+- **Buracos crescem 1 px.** Um buraco cresce cerca de um pixel a cada vez que
+  um contorno traçado é rasterizado de novo. É consequência de incluir os
+  pixels da borda no preenchimento.
+- **Dois avaliadores na máscara.** Com dois avaliadores, a votação por maioria
+  vira união. Pode ser preferível exigir três para máscaras.
+
+## Defeitos encontrados
+
+- **Corrida na revisão da 5.1.**
+  - Duas últimas revisões simultâneas podiam, cada uma, ver um revisor ainda
+    pendente, e nenhuma marcava o item pronto.
+  - A entrega da revisão agora trava o item de trabalho antes de contar, e a
+    passagem para a segunda rodada trava a imagem.
+  - Coberto por `test_concurrent_final_reviews_open_exactly_one_second_round`.
+- **Restrição da 5.1 sem a geração.**
+  - `uq_resolution_candidate_run` era única em
+    `(batch_item_id, candidate_key, source_run_number)` e ignorava a geração de
+    evidência.
+  - O caso de imagem tem sempre a chave `image`, então uma imagem reaberta que
+    voltasse à revisão na nova geração violava a restrição.
+  - Ela foi removida. `uq_resolution_candidate`, por entrada de resolução,
+    continua garantindo a unicidade dentro de cada geração.
+- **Auditoria sem ator do sistema.** `audit_entries.actor_user_id NOT NULL`
+  impedia auditar decisões automáticas (D30).
+
+## O que ficou de fora
+
+| Item | Motivo |
+| --- | --- |
+| App da Fase 6 (passos 15 a 22) | Combinado: API primeiro, com commit, e o App numa etapa seguinte |
+| Entrega dos eventos em tempo real | Fase 8; os eventos ficam no outbox com o formato sem identidade |
+| Política de retenção dos logs | Fase 8 |
+| Limite de memória no nível do container | P8-04 |
+| Modo de rótulo único para classificação | Adiado desde a D6 da Fase 5 |
+
+## Verificação
+
+Executado contra PostgreSQL e Redis reais dos containers do Compose, com o
+ambiente conda `dada2`.
+
+- `ruff check` e `ruff format --check`: limpos. `alembic check`: sem divergência.
+- Testes da API: **619 passaram** com integração habilitada, contra 316 no início.
+- `openapi.json` regenera de forma determinística.
+- O processo da API não importa numpy, SciPy, OpenCV, pandas nem crowd-kit.
+  Isso foi verificado em `dada_api.main` e em `dada_api.cli`.
+
+### Cobertura dos critérios de saída
+
+| Critério | Como foi provado |
+| --- | --- |
+| Fixtures douradas determinísticas nas três tarefas | `test_every_golden_case_replays_to_its_recorded_decision`, `test_any_vote_order_reaches_the_same_decision`, `test_replay_is_deterministic_and_order_independent` (classificação), `test_replay_is_byte_identical` (detecção e segmentação) |
+| As três estratégias iniciais passam nas fixtures da tarefa | Fixtures `categorical_*`, `multilabel_*` e `dirichlet_*`; `test_the_dirichlet_strategy_uses_the_posterior_gate`; `test_every_initial_strategy_combination_resolves_agreement` (detecção); `test_every_refinement_runs_after_the_class_decision` (segmentação) |
+| As condicionais passam com corpus elegível e inelegível | `test_calibration.py`, as fixtures `reliability_*` e `dawid_skene_*`, `test_conditional_strategies_report_and_enforce_their_evidence` e `test_reliability_weights_are_frozen_from_adjudicated_evidence` |
+| Baixa concordância chega à revisão | `test_low_agreement_reaches_a_reviewer_then_a_second_round`, `test_a_second_failure_goes_to_an_expert`, `test_classification_resolves_end_to_end_through_review`, `test_low_box_agreement_needs_review_despite_unanimous_class`, `test_low_mask_agreement_needs_review` |
+| Nenhuma submissão bruta é alterada | `test_an_expert_edits_from_a_raw_submission_without_changing_it`, e a comparação de submissões e revisões antes e depois do fluxo completo em `test_classification_resolves_end_to_end_through_review` |
+| Uma adjudicação fecha a imagem | `test_an_adjudication_closes_a_failed_image` (a imagem e o lote ficam `resolved`) |
+| Resultados duplicados não criam duas resoluções aceitas | `test_duplicate_stale_and_concurrent_results_accept_once` (repetido, atrasado e concorrente) |
+| Observações corretas, por projeto, sem duplicar em nova tentativa | `test_acceptance_records_observations_once_and_supersession_closes_them`, `test_an_adjudicated_classification_is_eligible_for_weighting`, `test_detection_resolves_with_box_agreement_observations`, `test_segmentation_resolves_with_mask_agreement_observations`, `test_a_reviewed_false_positive_is_recorded_without_a_zero_overlap`, e as observações únicas em `test_duplicate_stale_and_concurrent_results_accept_once` |

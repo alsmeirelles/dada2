@@ -1,0 +1,74 @@
+{
+  "name": "dawid_skene_tie",
+  "strategy": {
+    "strategy": "dawid_skene"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "positive",
+    "negative"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "positive"
+    },
+    {
+      "rater": "bia",
+      "outcome": "negative"
+    }
+  ],
+  "calibration": {
+    "priors": {
+      "positive": 0.5,
+      "negative": 0.5
+    },
+    "confusion": {
+      "ana": {
+        "positive": {
+          "positive": 0.8,
+          "negative": 0.2
+        },
+        "negative": {
+          "positive": 0.2,
+          "negative": 0.8
+        }
+      },
+      "bia": {
+        "positive": {
+          "positive": 0.8,
+          "negative": 0.2
+        },
+        "negative": {
+          "positive": 0.2,
+          "negative": 0.8
+        }
+      }
+    },
+    "iterations": 7
+  },
+  "expected": {
+    "outcome": null,
+    "passed": false,
+    "reasons": [
+      "class_tie"
+    ],
+    "metrics": {
+      "votes": {
+        "positive": 1,
+        "negative": 1
+      },
+      "valid_votes": 2,
+      "support": {
+        "numerator": 1,
+        "denominator": 2
+      },
+      "margin": 0,
+      "normalized_entropy": 1.0,
+      "posterior": 0.5
+    }
+  }
+}

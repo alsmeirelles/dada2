@@ -21,6 +21,9 @@ class AuditEntry(Base):
     ``project_id`` is null for global user administration, which belongs to no
     project. Those entries therefore survive a project deletion, which is what
     an installation-wide audit trail requires.
+
+    ``actor_user_id`` is null when the system acted on its own, such as an
+    automatic consensus acceptance or a worker failure.
     """
 
     __tablename__ = "audit_entries"
@@ -35,9 +38,10 @@ class AuditEntry(Base):
         index=True,
         nullable=True,
     )
-    actor_user_id: Mapped[str] = mapped_column(
+    actor_user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"),
         index=True,
+        nullable=True,
     )
     action: Mapped[str] = mapped_column(String(64), index=True)
     target_type: Mapped[str] = mapped_column(String(32))

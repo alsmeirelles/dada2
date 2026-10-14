@@ -5,11 +5,12 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dada_api.core.cursors import decode_cursor, encode_cursor
-from dada_api.core.errors import ApiError
+from dada_api.core.errors import ApiError, redact_validation_errors
 from dada_api.models.batch import AnnotationBatch, BatchItem
 from dada_api.models.consensus import (
     ResolutionInput,
@@ -20,11 +21,17 @@ from dada_api.models.consensus import (
     ReviewSubmission,
 )
 from dada_api.models.media import ContentObject, Media
-from dada_api.models.project import Project
+from dada_api.models.project import Project, ProjectClass
 from dada_api.models.user import User
-from dada_api.schemas.review_assignment import ReviewEvidenceWrite
+from dada_api.schemas.review_assignment import (
+    CandidateReviewEvidence,
+    ImageReviewEvidence,
+    ReviewEvidenceWrite,
+)
+from dada_api.services import annotation_documents, resolution_runs
 
 PAGE_SIZE = 50
+CANDIDATE_EVIDENCE = TypeAdapter(CandidateReviewEvidence)
 ACTIVE_STATUSES = (
     ReviewAssignmentStatus.pending,
     ReviewAssignmentStatus.in_progress,
@@ -196,6 +203,70 @@ async def save_draft(
     return assignment
 
 
+def _invalid(errors: list[dict]) -> ApiError:
+    """Return the 422 raised for evidence that breaks the review rules."""
+    return ApiError(
+        422,
+        "invalid_review_evidence",
+        "The review evidence does not fit this case.",
+        details={"errors": errors},
+    )
+
+
+async def _validate_evidence(
+    session: AsyncSession, project: Project, opened: OpenedReview, evidence: dict
+) -> dict:
+    """Check submitted evidence against its case's scope, classes, and image.
+
+    Args:
+        session: Active database session.
+        project: Project of the case.
+        opened: The review being submitted.
+        evidence: Submitted evidence.
+
+    Returns:
+        The evidence in its canonical form.
+
+    Raises:
+        ApiError: 422 ``invalid_review_evidence``.
+    """
+    class_ids = set(
+        await session.scalars(
+            select(ProjectClass.id).where(ProjectClass.project_id == project.id)
+        )
+    )
+    try:
+        if opened.work_item.scope == "image":
+            parsed = ImageReviewEvidence.model_validate(evidence)
+            unknown = sorted(set(parsed.class_ids) - class_ids)
+            if unknown or len(set(parsed.class_ids)) != len(parsed.class_ids):
+                raise _invalid([{"field": "class_ids", "code": "unknown_class"}])
+            return parsed.model_dump()
+        parsed = CANDIDATE_EVIDENCE.validate_python(evidence)
+    except ValidationError as error:
+        raise _invalid(redact_validation_errors(error.errors())) from error
+
+    canonical = parsed.model_dump()
+    if canonical["decision"] == "object":
+        errors = annotation_documents.validate_submission(
+            project.task_type,
+            [
+                {
+                    "id": "review",
+                    "class_id": canonical["class_id"],
+                    "geometry": canonical["geometry"],
+                    "attributes": {},
+                }
+            ],
+            class_ids,
+            opened.content.width,
+            opened.content.height,
+        )
+        if errors:
+            raise _invalid([{"field": "geometry", "code": errors[0].code}])
+    return canonical
+
+
 async def submit(
     session: AsyncSession,
     user: User,
@@ -203,10 +274,29 @@ async def submit(
     assignment_id: str,
     request: ReviewEvidenceWrite,
 ) -> tuple[ReviewAssignment, ReviewSubmission]:
+    """Record a reviewer's immutable evidence and, with the case's last
+    review, queue the second resolver round.
+
+    Args:
+        session: Active database session.
+        user: The reviewer.
+        project: Authorized project.
+        assignment_id: Review assignment being submitted.
+        request: Evidence and the version it was based on.
+
+    Returns:
+        The submitted assignment and its immutable submission.
+
+    Raises:
+        ApiError: 403 for another reviewer's assignment; 409 when stale or
+            no longer active; 422 when the evidence breaks the review rules.
+    """
     opened = await open_review(session, user, project, assignment_id, lock=True)
     assignment = opened.assignment
     _require_writable(assignment, request.version)
-    evidence = dict(request.evidence)
+    evidence = await _validate_evidence(
+        session, project, opened, dict(request.evidence)
+    )
     submission = ReviewSubmission(
         review_assignment_id=assignment.id,
         work_item_id=opened.work_item.id,
@@ -220,6 +310,7 @@ async def submit(
     assignment.status = ReviewAssignmentStatus.submitted
     assignment.version += 1
     await session.flush()
+    await session.refresh(opened.work_item, with_for_update=True)
     remaining = await session.scalar(
         select(func.count())
         .select_from(ReviewAssignment)
@@ -230,6 +321,10 @@ async def submit(
     )
     if not remaining:
         opened.work_item.status = ResolutionWorkStatus.review_ready
+        await session.flush()
+        await resolution_runs.on_review_ready(
+            session, opened.work_item, datetime.now(UTC)
+        )
     await session.commit()
     await session.refresh(assignment)
     await session.refresh(submission)

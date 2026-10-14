@@ -1,0 +1,54 @@
+{
+  "name": "categorical_rule_strict_majority",
+  "strategy": {
+    "strategy": "categorical_vote",
+    "decision_rule": "strict_majority"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "cat",
+    "dog",
+    "no_object"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "cat"
+    },
+    {
+      "rater": "bia",
+      "outcome": "cat"
+    },
+    {
+      "rater": "caio",
+      "outcome": "cat"
+    },
+    {
+      "rater": "davi",
+      "outcome": "dog"
+    }
+  ],
+  "expected": {
+    "outcome": "cat",
+    "passed": true,
+    "reasons": [],
+    "metrics": {
+      "votes": {
+        "cat": 3,
+        "dog": 1,
+        "no_object": 0
+      },
+      "valid_votes": 4,
+      "support": {
+        "numerator": 3,
+        "denominator": 4
+      },
+      "margin": 2,
+      "normalized_entropy": 0.51186,
+      "decision_rule": "strict_majority"
+    }
+  }
+}

@@ -30,7 +30,13 @@ from dada_api.models.media import Media
 from dada_api.models.project import ANNOTATION_ROLES, Project, ProjectMember
 from dada_api.models.user import User
 from dada_api.schemas.batch import BatchPolicyUpdate
-from dada_api.services import annotation_policy, audit, cohort_selection, selection
+from dada_api.services import (
+    annotation_policy,
+    audit,
+    calibration_snapshots,
+    cohort_selection,
+    selection,
+)
 
 PAGE_SIZE = 50
 
@@ -46,6 +52,9 @@ class BatchCounts:
     total_items: int
     resolved_items: int
     awaiting_resolution_items: int
+    resolving_items: int
+    in_review_items: int
+    review_required_items: int
     cancelled_items: int
     total_assignments: int
     available_assignments: int
@@ -67,6 +76,7 @@ async def _snapshot_policy(
     batch.resolver_version = policy.resolver_version
     batch.parameters = dict(policy.parameters)
     batch.review_thresholds = dict(policy.review_thresholds)
+    batch.require_independent_adjudicator = policy.require_independent_adjudicator
     batch.source_policy_version = policy.version
     await session.flush()
 
@@ -182,6 +192,9 @@ async def counts(session: AsyncSession, batch: AnnotationBatch) -> BatchCounts:
         total_items=sum(items.values()) - cancelled,
         resolved_items=items.get(ItemStatus.resolved, 0),
         awaiting_resolution_items=items.get(ItemStatus.awaiting_resolution, 0),
+        resolving_items=items.get(ItemStatus.resolving, 0),
+        in_review_items=items.get(ItemStatus.in_review, 0),
+        review_required_items=items.get(ItemStatus.review_required, 0),
         cancelled_items=cancelled,
         total_assignments=sum(
             assignments.get(status, 0) for status in ACTIVE_ASSIGNMENT_STATUSES
@@ -190,6 +203,41 @@ async def counts(session: AsyncSession, batch: AnnotationBatch) -> BatchCounts:
         in_progress_assignments=assignments.get(AssignmentStatus.in_progress, 0),
         submitted_assignments=assignments.get(AssignmentStatus.submitted, 0),
     )
+
+
+async def refresh_status(session: AsyncSession, batch: AnnotationBatch) -> None:
+    """Derive a started batch's status from its images.
+
+    The batch is ``resolved`` once every non-cancelled image is; until then it
+    is ``annotating`` while any image still collects submissions, then
+    ``review_required`` while an owner or manager must decide an image, and
+    ``resolving`` otherwise. Batches that are preparing, closed, or failed are
+    left alone.
+
+    Args:
+        session: Active database session, with item changes flushed.
+        batch: Batch to refresh.
+    """
+    if batch.status in (BatchStatus.preparing, BatchStatus.closed, BatchStatus.failed):
+        return
+    statuses = set(
+        await session.scalars(
+            select(BatchItem.status)
+            .where(
+                BatchItem.batch_id == batch.id,
+                BatchItem.status != ItemStatus.cancelled,
+            )
+            .distinct()
+        )
+    )
+    if statuses <= {ItemStatus.resolved}:
+        batch.status = BatchStatus.resolved
+    elif ItemStatus.pending in statuses:
+        batch.status = BatchStatus.annotating
+    elif ItemStatus.review_required in statuses:
+        batch.status = BatchStatus.review_required
+    else:
+        batch.status = BatchStatus.resolving
 
 
 async def annotation_members(session: AsyncSession, project: Project) -> list[str]:
@@ -356,7 +404,7 @@ async def update_policy(
 
     mode = AnnotationMode(request.mode)
     requested_ids = [str(user_id) for user_id in request.annotator_ids]
-    await annotation_policy.validate_policy(
+    configuration = await annotation_policy.validate_policy(
         session,
         project,
         mode,
@@ -364,11 +412,15 @@ async def update_policy(
         request.resolver,
         request.required_consensus_annotations,
         request.required_consensus_reviewers,
+        request.parameters,
+        request.review_thresholds,
     )
 
     before = {
         "mode": batch.mode,
         "resolver": batch.resolver,
+        "parameters": batch.parameters,
+        "review_thresholds": batch.review_thresholds,
         "annotator_ids": await annotator_ids(session, batch),
         "required_consensus_annotations": batch.required_consensus_annotations,
         "required_consensus_reviewers": batch.required_consensus_reviewers,
@@ -389,9 +441,11 @@ async def update_policy(
     batch.mode = mode.value
     batch.required_consensus_annotations = request.required_consensus_annotations
     batch.required_consensus_reviewers = request.required_consensus_reviewers
-    batch.resolver = request.resolver
-    batch.parameters = dict(request.parameters)
-    batch.review_thresholds = dict(request.review_thresholds)
+    batch.resolver = configuration.resolver
+    batch.resolver_version = configuration.resolver_version
+    batch.parameters = configuration.parameters
+    batch.review_thresholds = configuration.review_thresholds
+    batch.require_independent_adjudicator = request.require_independent_adjudicator
 
     audit.record(
         session,
@@ -403,7 +457,10 @@ async def update_policy(
         before=before,
         after={
             "mode": mode.value,
-            "resolver": request.resolver,
+            "resolver": configuration.resolver,
+            "parameters": configuration.parameters,
+            "review_thresholds": configuration.review_thresholds,
+            "require_independent_adjudicator": request.require_independent_adjudicator,
             "annotator_ids": requested_ids,
             "required_consensus_annotations": request.required_consensus_annotations,
             "required_consensus_reviewers": request.required_consensus_reviewers,
@@ -475,7 +532,11 @@ async def start(
         batch.resolver,
         batch.required_consensus_annotations,
         batch.required_consensus_reviewers,
+        batch.parameters,
+        batch.review_thresholds,
     )
+    if mode is AnnotationMode.consensus:
+        await calibration_snapshots.freeze(session, project, batch, group)
 
     items = (
         await session.execute(

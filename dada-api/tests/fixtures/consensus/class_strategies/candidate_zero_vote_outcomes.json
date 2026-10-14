@@ -1,0 +1,52 @@
+{
+  "name": "candidate_zero_vote_outcomes",
+  "strategy": {
+    "strategy": "categorical_vote",
+    "decision_rule": "supermajority"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "cat",
+    "dog",
+    "bird",
+    "no_object"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "cat"
+    },
+    {
+      "rater": "bia",
+      "outcome": "no_object"
+    },
+    {
+      "rater": "caio",
+      "outcome": "cat"
+    }
+  ],
+  "expected": {
+    "outcome": "cat",
+    "passed": true,
+    "reasons": [],
+    "metrics": {
+      "votes": {
+        "cat": 2,
+        "dog": 0,
+        "bird": 0,
+        "no_object": 1
+      },
+      "valid_votes": 3,
+      "support": {
+        "numerator": 2,
+        "denominator": 3
+      },
+      "margin": 1,
+      "normalized_entropy": 0.459148,
+      "decision_rule": "supermajority"
+    }
+  }
+}

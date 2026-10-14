@@ -683,9 +683,11 @@ async def _consensus_project(
             "annotator_ids": annotator_ids,
             "required_consensus_annotations": 2,
             "required_consensus_reviewers": 1,
-            "resolver": "two_stage_box_fusion",
+            "resolver": "two_stage_detection_consensus",
             "parameters": {},
-            "review_thresholds": {"agreement": 0.7},
+            "review_thresholds": {
+                "minimum_support": {"numerator": 3, "denominator": 4}
+            },
             "version": 1,
         },
     )
@@ -709,8 +711,11 @@ async def test_consensus_start_creates_one_assignment_per_group_member(
         batch = by_purpose["initial_training"]
         assert batch["mode"] == "consensus"
         assert batch["annotator_ids"] == project["annotator_ids"]
-        assert batch["resolver"] == "two_stage_box_fusion"
-        assert batch["review_thresholds"] == {"agreement": 0.7}
+        assert batch["resolver"] == "two_stage_detection_consensus"
+        assert batch["review_thresholds"] == {
+            "minimum_support": {"numerator": 3, "denominator": 4},
+            "minimum_median_iou": 0.5,
+        }
 
         started = await client.post(
             f"/api/v1/projects/{project['id']}/batches/{batch['id']}/start",
@@ -978,7 +983,7 @@ async def test_a_single_batch_project_annotates_every_image_once(
                 "annotator_ids": annotator_ids,
                 "required_consensus_annotations": 2,
                 "required_consensus_reviewers": 1,
-                "resolver": "two_stage_box_fusion",
+                "resolver": "two_stage_detection_consensus",
                 "parameters": {},
                 "review_thresholds": {},
                 "version": 1,

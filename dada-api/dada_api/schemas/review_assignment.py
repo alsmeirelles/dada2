@@ -1,18 +1,61 @@
 """Candidate-scoped review queue and immutable evidence schemas."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from dada_api.schemas.assignment import AssignmentMedia
+from dada_api.schemas.assignment import (
+    AssignmentMedia,
+    PolygonGeometry,
+    RectangleGeometry,
+)
 
 ReviewStatusName = Literal["pending", "in_progress", "submitted", "cancelled"]
 
 
+class ImageReviewEvidence(BaseModel):
+    """A reviewer's own label set for an image-level classification case."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    class_ids: list[str] = Field(min_length=1, max_length=1000)
+
+
+class ObjectReviewEvidence(BaseModel):
+    """A reviewer's statement that the candidate is an object, with its class
+    and geometry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["object"]
+    class_id: str = Field(min_length=1, max_length=36)
+    geometry: Annotated[
+        RectangleGeometry | PolygonGeometry, Field(discriminator="type")
+    ]
+
+
+class NoObjectReviewEvidence(BaseModel):
+    """A reviewer's statement that nothing exists at the candidate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["no_object"]
+
+
+CandidateReviewEvidence = Annotated[
+    ObjectReviewEvidence | NoObjectReviewEvidence, Field(discriminator="decision")
+]
+
+
 class ReviewEvidenceWrite(BaseModel):
-    """A complete private review draft or submission."""
+    """A private review draft or submission.
+
+    A draft may be incomplete. A submission must be an
+    :class:`ImageReviewEvidence` for an image case or a
+    :class:`CandidateReviewEvidence` for a candidate case (D16).
+    """
 
     version: int = Field(ge=1)
     evidence: dict[str, Any]
