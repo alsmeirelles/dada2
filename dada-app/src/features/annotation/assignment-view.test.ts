@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { submissionKey } from './annotation-api'
-import { filterAssignments, isEditable, neighbor, openWork, validateDocument } from './assignment-view'
+import { filterAssignments, finalDocument, isEditable, neighbor, openWork, validateDocument } from './assignment-view'
 import type { AnnotationDocument, AssignmentDetail, AssignmentQueueItem } from './types'
 
 function item(id: string, overrides: Partial<AssignmentQueueItem> = {}): AssignmentQueueItem {
@@ -17,6 +17,7 @@ function detail(overrides: Partial<AssignmentDetail> = {}): AssignmentDetail {
     id: 'assignment-1', project_id: 'project-1', batch_id: 'batch-1', batch_purpose: 'test', task_type: 'detection',
     status: 'in_progress', version: 3, objects: [], seeded_from_import: false, draft_saved_at: null, revision: null,
     submitted_at: null, media: { id: 'media-1', relative_path: 'a.png', width: 100, height: 80, image_url: 'http://api/a' },
+    resolution: null,
     ...overrides,
   }
 }
@@ -98,8 +99,25 @@ describe('submission', () => {
     )
   })
 
-  it('uses one idempotency key per assignment version', () => {
-    expect(submissionKey('assignment-1', 3)).toBe('submit:assignment-1:3')
-    expect(submissionKey('assignment-1', 4)).not.toBe(submissionKey('assignment-1', 3))
+  it('replays an identical submission and keys a corrected one anew', async () => {
+    const original = await submissionKey('assignment-1', { version: 3, objects: [] })
+
+    expect(await submissionKey('assignment-1', { version: 3, objects: [] })).toBe(original)
+    expect(await submissionKey('assignment-1', { version: 3, objects: [box] })).not.toBe(original)
+    expect(await submissionKey('assignment-1', { version: 4, objects: [] })).not.toBe(original)
+  })
+})
+
+describe('final annotation view', () => {
+  it('shows nothing before the image is resolved', () => {
+    expect(finalDocument(detail({ status: 'submitted' }))).toBeNull()
+  })
+
+  it('shows the final objects read-only beside the annotator\'s own submission', () => {
+    const final = { ...box, id: 'final-1', geometry: { type: 'rectangle' as const, coordinates: [2, 2, 3, 3] as [number, number, number, number] } }
+    const resolved = detail({ status: 'submitted', objects: [box], resolution: { version: 2, source: 'expert_adjudication', objects: [final] } })
+
+    expect(finalDocument(resolved)).toEqual({ media_id: 'media-1', task_type: 'detection', version: 3, objects: [final] })
+    expect(openWork(resolved, null)).toMatchObject({ document: { objects: [box] }, notice: 'Submission received. This image is resolved and read-only.' })
   })
 })

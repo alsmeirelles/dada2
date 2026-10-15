@@ -1,0 +1,54 @@
+{
+  "name": "multilabel_partial_bird_negative",
+  "strategy": {
+    "strategy": "multilabel_binary_vote"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "positive",
+    "negative"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "negative"
+    },
+    {
+      "rater": "bia",
+      "outcome": "negative"
+    },
+    {
+      "rater": "caio",
+      "outcome": "negative"
+    },
+    {
+      "rater": "davi",
+      "outcome": "negative"
+    },
+    {
+      "rater": "eva",
+      "outcome": "negative"
+    }
+  ],
+  "expected": {
+    "outcome": "negative",
+    "passed": true,
+    "reasons": [],
+    "metrics": {
+      "votes": {
+        "positive": 0,
+        "negative": 5
+      },
+      "valid_votes": 5,
+      "support": {
+        "numerator": 5,
+        "denominator": 5
+      },
+      "margin": 5,
+      "normalized_entropy": 0.0
+    }
+  }
+}

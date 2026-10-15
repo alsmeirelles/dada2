@@ -31,7 +31,9 @@ router = APIRouter()
 async def list_my_review_assignments(
     state: QueueStateName | None = Query(default=None),
     cursor: str | None = Query(default=None),
-    project: Project = Depends(require_project_action(ProjectAction.annotate)),
+    project: Project = Depends(
+        require_project_action(ProjectAction.work_candidate_review)
+    ),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ReviewQueuePage:
@@ -63,7 +65,9 @@ async def list_my_review_assignments(
 )
 async def get_my_review_assignment(
     assignment_id: str,
-    project: Project = Depends(require_project_action(ProjectAction.annotate)),
+    project: Project = Depends(
+        require_project_action(ProjectAction.work_candidate_review)
+    ),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ReviewAssignmentDetail:
@@ -105,7 +109,9 @@ async def get_my_review_assignment(
 async def save_review_draft(
     assignment_id: str,
     request: ReviewEvidenceWrite,
-    project: Project = Depends(require_project_action(ProjectAction.annotate)),
+    project: Project = Depends(
+        require_project_action(ProjectAction.work_candidate_review)
+    ),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ReviewDraftSaved:
@@ -127,7 +133,9 @@ async def save_review_draft(
 async def submit_review_assignment(
     assignment_id: str,
     request: ReviewEvidenceWrite,
-    project: Project = Depends(require_project_action(ProjectAction.annotate)),
+    project: Project = Depends(
+        require_project_action(ProjectAction.work_candidate_review)
+    ),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ReviewSubmissionReceived:

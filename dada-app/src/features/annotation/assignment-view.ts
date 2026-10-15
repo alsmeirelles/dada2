@@ -6,6 +6,7 @@ import type {
   AssignmentQueueItem,
   AssignmentStatus,
   QueueState,
+  ResolutionSource,
 } from './types'
 
 export const AUTOSAVE_MS = 10 * 60 * 1_000
@@ -16,6 +17,12 @@ export const STATUS_LABELS: Record<AssignmentStatus, string> = {
   submitted: 'Submitted',
   reassigned: 'Reassigned',
   cancelled: 'Cancelled',
+}
+
+export const RESOLUTION_SOURCE_LABELS: Record<ResolutionSource, string> = {
+  single_submission: 'Single submission',
+  automatic_consensus: 'Automatic consensus',
+  expert_adjudication: 'Expert adjudication',
 }
 
 export function isEditable(status: AssignmentStatus) {
@@ -46,6 +53,12 @@ export function toDocument(assignment: AssignmentDetail): AnnotationDocument {
   }
 }
 
+/** The image's final annotation as a read-only document, once the image is resolved. */
+export function finalDocument(assignment: AssignmentDetail): AnnotationDocument | null {
+  if (!assignment.resolution) return null
+  return { ...toDocument(assignment), objects: assignment.resolution.objects }
+}
+
 export type OpenedWork = {
   document: AnnotationDocument
   dirty: boolean
@@ -69,7 +82,10 @@ export function openWork(assignment: AssignmentDetail, local: RecoverySnapshot |
     return { document: server, dirty: false, conflict: null, notice: `A manager ${verb}.${kept}` }
   }
   if (assignment.status === 'submitted') {
-    return { document: server, dirty: false, conflict: null, notice: 'Submission received. This image is read-only.' }
+    const notice = assignment.resolution
+      ? 'Submission received. This image is resolved and read-only.'
+      : 'Submission received. This image is read-only.'
+    return { document: server, dirty: false, conflict: null, notice }
   }
   if (local && local.baseVersion === assignment.version) {
     return {

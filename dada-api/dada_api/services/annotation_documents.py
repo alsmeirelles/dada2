@@ -18,6 +18,7 @@ from dada_api.services.label_formats import ring_is_simple
 
 MAX_OBJECTS = 1000
 MAX_RING_POINTS = 1000
+MAX_CANONICAL_RING_POINTS = 10_000
 EMPTY_ALLOWED_TASKS = frozenset({"detection", "segmentation"})
 GEOMETRY_BY_TASK = {
     "classification": None,

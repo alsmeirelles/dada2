@@ -4,17 +4,21 @@ import argparse
 import asyncio
 import json
 import sys
+from datetime import UTC, datetime
 from getpass import getpass
 from pathlib import Path
 
 from dada_api.core.config import get_settings
 from dada_api.db.session import async_session_factory, close_database
 from dada_api.main import create_app
+from dada_api.services import resolution_runs, resolver_quarantines
 from dada_api.services.bootstrap import (
     BootstrapError,
     bootstrap_administrator,
     replace_bootstrap_administrator,
 )
+from dada_api.services.resolver_quarantines import QuarantineError
+from dada_api.workers.celery_app import send
 
 
 def export_openapi(output: Path) -> None:
@@ -110,6 +114,62 @@ async def run_bootstrap(replace: bool) -> str:
         await close_database()
 
 
+async def run_consensus_relay(interval_seconds: float) -> None:
+    """Run the consensus outbox relay until interrupted.
+
+    Each pass turns readiness events into runs, re-queues runs whose worker
+    vanished, and dispatches queued runs to Celery.
+
+    Args:
+        interval_seconds: Pause between passes.
+    """
+    try:
+        while True:
+            async with async_session_factory() as session:
+                await resolution_runs.relay_once(session, send, datetime.now(UTC))
+            await asyncio.sleep(interval_seconds)
+    finally:
+        await close_database()
+
+
+async def run_resolver_quarantine(
+    action: str, key: str | None, reason: str | None, username: str | None
+) -> str:
+    """List, add, or release resolver quarantines.
+
+    Args:
+        action: ``list``, ``add``, or ``release``.
+        key: ``identifier@version`` for ``add`` and ``release``.
+        reason: Audit reason for ``add`` and ``release``.
+        username: Active administrator recorded as the operator.
+
+    Returns:
+        A message describing the open quarantines or what changed.
+    """
+    try:
+        async with async_session_factory() as session:
+            now = datetime.now(UTC)
+            if action == "add":
+                await resolver_quarantines.quarantine(
+                    session, key, reason, username, now
+                )
+                return f"{key} quarantined."
+            if action == "release":
+                await resolver_quarantines.release(session, key, reason, username, now)
+                return f"{key} released; its health fixture passed."
+            entries = await resolver_quarantines.list_open(session)
+            return (
+                "\n".join(
+                    f"{entry.identifier}@{entry.version}\t{entry.reason}\t"
+                    f"{entry.triggered_at.isoformat()}"
+                    for entry in entries
+                )
+                or "No open quarantines."
+            )
+    finally:
+        await close_database()
+
+
 def main() -> None:
     """Dispatch operational commands."""
     parser = argparse.ArgumentParser(prog="dada-api")
@@ -126,10 +186,52 @@ def main() -> None:
         "replace-bootstrap-admin",
         help="Explicitly change which identity is the bootstrap administrator.",
     )
+    relay_parser = subparsers.add_parser(
+        "consensus-relay",
+        help="Dispatch consensus runs from the outbox until interrupted.",
+    )
+    relay_parser.add_argument(
+        "--interval", type=float, default=2.0, help="Seconds between passes."
+    )
+    quarantine_parser = subparsers.add_parser(
+        "resolver-quarantine",
+        help="List, add, or release resolver pipeline quarantines.",
+    )
+    quarantine_actions = quarantine_parser.add_subparsers(dest="action", required=True)
+    quarantine_actions.add_parser("list", help="Show open quarantines.")
+    for action, text in (
+        ("add", "Quarantine a faulty pipeline version."),
+        ("release", "Release a quarantine once its health fixture passes."),
+    ):
+        action_parser = quarantine_actions.add_parser(action, help=text)
+        action_parser.add_argument("key", help="Pipeline as identifier@version.")
+        action_parser.add_argument("--reason", required=True, help="Audit reason.")
+        action_parser.add_argument(
+            "--by", required=True, help="Username of the operating administrator."
+        )
     arguments = parser.parse_args()
 
     if arguments.command == "export-openapi":
         export_openapi(arguments.output)
+        return
+    if arguments.command == "consensus-relay":
+        asyncio.run(run_consensus_relay(arguments.interval))
+        return
+    if arguments.command == "resolver-quarantine":
+        try:
+            print(
+                asyncio.run(
+                    run_resolver_quarantine(
+                        arguments.action,
+                        getattr(arguments, "key", None),
+                        getattr(arguments, "reason", None),
+                        getattr(arguments, "by", None),
+                    )
+                )
+            )
+        except QuarantineError as error:
+            print(error, file=sys.stderr)
+            raise SystemExit(1) from error
         return
 
     replace = arguments.command == "replace-bootstrap-admin"

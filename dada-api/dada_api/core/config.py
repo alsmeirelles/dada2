@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     media_root: Path = Path("var/media")
     upload_parts_root: Path = Path("var/upload-parts")
     realtime_transport: str = "websocket"
+    consensus_standard_timeout_seconds: int = Field(default=300, ge=60, le=3600)
+    consensus_mask_timeout_seconds: int = Field(default=900, ge=60, le=3600)
+    consensus_standard_memory_bytes: int = Field(default=1024**3, gt=0)
+    consensus_mask_memory_bytes: int = Field(default=4 * 1024**3, gt=0)
     jwt_secret_key: SecretStr = Field(
         default=SecretStr("change-this-development-secret"),
         repr=False,

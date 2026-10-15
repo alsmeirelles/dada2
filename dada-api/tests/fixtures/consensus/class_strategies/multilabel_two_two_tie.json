@@ -1,0 +1,52 @@
+{
+  "name": "multilabel_two_two_tie",
+  "strategy": {
+    "strategy": "multilabel_binary_vote"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "positive",
+    "negative"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "positive"
+    },
+    {
+      "rater": "bia",
+      "outcome": "negative"
+    },
+    {
+      "rater": "caio",
+      "outcome": "negative"
+    },
+    {
+      "rater": "davi",
+      "outcome": "positive"
+    }
+  ],
+  "expected": {
+    "outcome": null,
+    "passed": false,
+    "reasons": [
+      "class_tie"
+    ],
+    "metrics": {
+      "votes": {
+        "positive": 2,
+        "negative": 2
+      },
+      "valid_votes": 4,
+      "support": {
+        "numerator": 2,
+        "denominator": 4
+      },
+      "margin": 0,
+      "normalized_entropy": 1.0
+    }
+  }
+}

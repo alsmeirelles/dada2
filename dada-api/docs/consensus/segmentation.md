@@ -48,14 +48,21 @@ unmatched masks are diagnostics, not automatic canonical instances.
 For each instance candidate, build a class-observation matrix from the frozen
 initial cohort. Matched masks contribute their selected class; a valid
 submission with no matching instance contributes `no_object`; missing
-assignments remain missing. Resolve class and
-existence with the user-selected registered Cleanlab adapter defined in
-[classification.md](classification.md).
+assignments remain missing. Resolve class and existence with the selected
+native statistical strategy defined in
+[classification.md](classification.md), using only this human-observation
+matrix. Model predictions, predicted probabilities, embeddings, and model
+seeds are excluded from the input.
+Segmentation may use `categorical_vote` or `dirichlet_vote`, and may use
+`reliability_weighted_vote` or `dawid_skene` when their Phase 6 eligibility
+gates pass. `multilabel_binary_vote` applies only to multi-label image
+classification.
 
 Only candidates meeting configured support/existence and class-quality
 thresholds proceed to mask refinement. Ambiguous instance matches, class ties,
-or unsupported object-count disagreement require manual review. This first
-stage ensures that crowd-kit only receives masks believed to belong to the same
+or unsupported object-count disagreement create candidate-scoped review work
+items while the image-level worker retains the complete case. This first stage
+ensures that crowd-kit receives only masks believed to belong to the same
 resolved instance and class.
 
 ## Stage 2: mask refinement with crowd-kit
@@ -70,6 +77,10 @@ as:
 - `SegmentationMajorityVote` for a thresholded pixel majority;
 - `SegmentationEM` for expectation-maximization aggregation; and
 - `SegmentationRASA` when its assumptions and resource profile are suitable.
+
+crowd-kit operates only on the geometry of an already accepted instance. Its
+output cannot select or change the instance class, decide existence, add a
+class vote, or alter class confidence.
 
 An optional `staple` adapter may be provided by DADA's own segmentation
 resolver when validated against reference fixtures. It is separate from
@@ -116,6 +127,8 @@ can influence that annotator's confidence weight.
 Golden fixtures must cover same instance/different class; adjacent touching
 instances; omitted instance; unmatched false positive; class tie; thin
 structures; holes; disconnected regions; low-Dice masks; each registered
-crowd-kit strategy; optional STAPLE; deterministic rasterize/polygonize replay;
-and manual adjudication. Include package-version compatibility tests so an
-upstream crowd-kit API change cannot silently alter consensus output.
+native class strategy/crowd-kit strategy combination; rejection of
+model-derived class inputs; optional STAPLE; deterministic
+rasterize/polygonize replay; and manual adjudication. Include package-version
+compatibility tests so an upstream crowd-kit API change cannot silently alter
+consensus output.

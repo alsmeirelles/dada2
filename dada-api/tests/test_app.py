@@ -1,6 +1,7 @@
 """Phase 0 HTTP application contract tests."""
 
 import json
+import os
 from collections.abc import AsyncIterator
 
 import httpx
@@ -31,12 +32,18 @@ async def test_health_is_dependency_free_and_traced(
     assert response.headers["x-trace-id"] == "test-trace-1234"
 
 
+@pytest.mark.skipif(
+    os.getenv("DADA_RUN_INTEGRATION") != "1",
+    reason="capabilities read open resolver quarantines from PostgreSQL",
+)
 async def test_capabilities_match_frontend_contract(
     client: httpx.AsyncClient,
 ) -> None:
     response = await client.get("/api/v1/capabilities")
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    pipelines = body.pop("consensus_pipelines")
+    assert body == {
         "supported_image_media_types": ["image/jpeg", "image/png", "image/webp"],
         "max_file_bytes": 104857600,
         "max_project_files": 100000,
@@ -45,12 +52,24 @@ async def test_capabilities_match_frontend_contract(
         "max_import_file_bytes": 52428800,
         "supported_task_types": ["classification", "detection", "segmentation"],
         "supported_annotation_modes": ["single", "consensus"],
-        "consensus_resolvers": {
-            "classification": ["majority_vote"],
-            "detection": ["two_stage_box_fusion"],
-            "segmentation": ["two_stage_mask_fusion"],
-        },
         "realtime_transport": "websocket",
+    }
+    assert {task: pipeline["id"] for task, pipeline in pipelines.items()} == {
+        "classification": "statistical_class_consensus",
+        "detection": "two_stage_detection_consensus",
+        "segmentation": "two_stage_segmentation_consensus",
+    }
+    assert [
+        strategy["id"] for strategy in pipelines["detection"]["class_strategies"]
+    ] == [
+        "categorical_vote",
+        "dirichlet_vote",
+        "reliability_weighted_vote",
+        "dawid_skene",
+    ]
+    assert pipelines["detection"]["review_thresholds"][0]["default"] == {
+        "numerator": 2,
+        "denominator": 3,
     }
 
 

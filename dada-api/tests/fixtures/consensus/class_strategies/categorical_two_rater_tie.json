@@ -1,0 +1,48 @@
+{
+  "name": "categorical_two_rater_tie",
+  "strategy": {
+    "strategy": "categorical_vote",
+    "decision_rule": "supermajority"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "cat",
+    "dog",
+    "no_object"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "cat"
+    },
+    {
+      "rater": "bia",
+      "outcome": "dog"
+    }
+  ],
+  "expected": {
+    "outcome": null,
+    "passed": false,
+    "reasons": [
+      "class_tie"
+    ],
+    "metrics": {
+      "votes": {
+        "cat": 1,
+        "dog": 1,
+        "no_object": 0
+      },
+      "valid_votes": 2,
+      "support": {
+        "numerator": 1,
+        "denominator": 2
+      },
+      "margin": 0,
+      "normalized_entropy": 0.63093,
+      "decision_rule": "supermajority"
+    }
+  }
+}

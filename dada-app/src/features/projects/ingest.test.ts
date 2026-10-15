@@ -28,11 +28,11 @@ describe('scanImageFiles', () => {
   })
 
   it('groups equal digests and sizes as duplicates', () => {
-    const base = { file: new File(['x'], 'x.jpg'), mediaType: 'image/jpeg', sizeBytes: 1, sha256: 'abc' }
+    const base = { file: new File(['x'], 'x.jpg'), mediaType: 'image/jpeg', sizeBytes: 1, sha256: 'abc', selectionRoot: null }
     const images: LocalImage[] = [
-      { ...base, clientFileId: '1', relativePath: 'a/x.jpg' },
-      { ...base, clientFileId: '2', relativePath: 'b/x.jpg' },
-      { ...base, clientFileId: '3', relativePath: 'c/x.jpg', sha256: 'def' },
+      { ...base, clientFileId: '1', relativePath: 'a/x.jpg', pathInSelection: 'a/x.jpg' },
+      { ...base, clientFileId: '2', relativePath: 'b/x.jpg', pathInSelection: 'b/x.jpg' },
+      { ...base, clientFileId: '3', relativePath: 'c/x.jpg', pathInSelection: 'c/x.jpg', sha256: 'def' },
     ]
     expect(findDuplicateGroups(images)).toHaveLength(1)
     expect(findDuplicateGroups(images)[0]).toHaveLength(2)
@@ -40,19 +40,35 @@ describe('scanImageFiles', () => {
 })
 
 describe('mergeSelections', () => {
-  it('adds a second folder to the first and skips a path already taken', () => {
-    const first = scanImageFiles([
-      fileAt('north/0001.jpg', 'a', 'image/jpeg'),
-      fileAt('north/day/0002.jpg', 'b', 'image/jpeg'),
-    ]).images
-    const second = scanImageFiles([
+  const north = () => scanImageFiles([
+    fileAt('north/0001.jpg', 'a', 'image/jpeg'),
+    fileAt('north/day/0002.jpg', 'b', 'image/jpeg'),
+  ]).images
+
+  it('sends one folder relative to its own root', () => {
+    expect(mergeSelections([], north()).images.map((image) => image.relativePath)).toEqual(['0001.jpg', 'day/0002.jpg'])
+  })
+
+  it('keeps every image of a second folder that reuses the first folder file names (I6-01)', () => {
+    const south = scanImageFiles([
       fileAt('south/0001.jpg', 'c', 'image/jpeg'),
       fileAt('south/0003.jpg', 'd', 'image/jpeg'),
     ]).images
 
-    const merged = mergeSelections(first, second)
+    const merged = mergeSelections(mergeSelections([], north()).images, south)
 
-    expect(merged.images.map((image) => image.relativePath)).toEqual(['0001.jpg', 'day/0002.jpg', '0003.jpg'])
-    expect(merged.rejected).toEqual([{ relativePath: '0001.jpg', reason: 'duplicate_path' }])
+    expect(merged.images.map((image) => image.relativePath)).toEqual(['north/0001.jpg', 'north/day/0002.jpg', 'south/0001.jpg', 'south/0003.jpg'])
+    expect(merged.rejected).toEqual([])
+  })
+
+  it('still skips a path that two selections share', () => {
+    const again = scanImageFiles([fileAt('north/0001.jpg', 'e', 'image/jpeg')]).images
+    const loose = scanImageFiles([new File(['f'], 'day.jpg', { type: 'image/jpeg' })]).images
+
+    const sameFolder = mergeSelections(north(), again)
+    const merged = mergeSelections(sameFolder.images, loose)
+
+    expect(sameFolder.rejected).toEqual([{ relativePath: '0001.jpg', reason: 'duplicate_path' }])
+    expect(merged.images.map((image) => image.relativePath)).toEqual(['0001.jpg', 'day/0002.jpg', 'day.jpg'])
   })
 })

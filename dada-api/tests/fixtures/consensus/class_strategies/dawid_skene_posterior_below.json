@@ -1,0 +1,88 @@
+{
+  "name": "dawid_skene_posterior_below",
+  "strategy": {
+    "strategy": "dawid_skene"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "positive",
+    "negative"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "positive"
+    },
+    {
+      "rater": "bia",
+      "outcome": "positive"
+    },
+    {
+      "rater": "caio",
+      "outcome": "negative"
+    }
+  ],
+  "calibration": {
+    "priors": {
+      "positive": 0.3,
+      "negative": 0.7
+    },
+    "confusion": {
+      "ana": {
+        "positive": {
+          "positive": 0.75,
+          "negative": 0.25
+        },
+        "negative": {
+          "positive": 0.25,
+          "negative": 0.75
+        }
+      },
+      "bia": {
+        "positive": {
+          "positive": 0.75,
+          "negative": 0.25
+        },
+        "negative": {
+          "positive": 0.25,
+          "negative": 0.75
+        }
+      },
+      "caio": {
+        "positive": {
+          "positive": 0.75,
+          "negative": 0.25
+        },
+        "negative": {
+          "positive": 0.25,
+          "negative": 0.75
+        }
+      }
+    },
+    "iterations": 9
+  },
+  "expected": {
+    "outcome": "positive",
+    "passed": false,
+    "reasons": [
+      "posterior_below_threshold"
+    ],
+    "metrics": {
+      "votes": {
+        "positive": 2,
+        "negative": 1
+      },
+      "valid_votes": 3,
+      "support": {
+        "numerator": 2,
+        "denominator": 3
+      },
+      "margin": 1,
+      "normalized_entropy": 0.918296,
+      "posterior": 0.5625
+    }
+  }
+}

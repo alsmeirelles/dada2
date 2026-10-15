@@ -401,8 +401,11 @@ def _segments_intersect(
 def ring_is_simple(points: Sequence[tuple[float, float]]) -> bool:
     """Return whether a closed ring never crosses or touches itself.
 
-    Every pair of non-adjacent edges is compared, which is quadratic in the
-    number of vertices and adequate for annotation polygons.
+    Two edges can only meet when their bounding boxes overlap, so every edge
+    is filed in the cells of a uniform grid its box covers, and only edges
+    sharing a cell are compared. That keeps traced mask outlines with
+    thousands of vertices fast while giving exactly the answer of comparing
+    every pair of non-adjacent edges (D14).
 
     Args:
         points: Ring vertices in order, without repeating the first point.
@@ -412,10 +415,36 @@ def ring_is_simple(points: Sequence[tuple[float, float]]) -> bool:
     """
     count = len(points)
     edges = [(points[i], points[(i + 1) % count]) for i in range(count)]
-    for i in range(count):
-        for j in range(i + 2, count):
-            if i == 0 and j == count - 1:
-                continue
-            if _segments_intersect(*edges[i], *edges[j]):
-                return False
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    span = max(max(xs) - min(xs), max(ys) - min(ys))
+    size = span / max(1, math.isqrt(count)) or 1.0
+    origin_x, origin_y = min(xs), min(ys)
+
+    cells: dict[tuple[int, int], list[int]] = {}
+    for index, (a, b) in enumerate(edges):
+        for cell_x in range(
+            int((min(a[0], b[0]) - origin_x) // size),
+            int((max(a[0], b[0]) - origin_x) // size) + 1,
+        ):
+            for cell_y in range(
+                int((min(a[1], b[1]) - origin_y) // size),
+                int((max(a[1], b[1]) - origin_y) // size) + 1,
+            ):
+                cells.setdefault((cell_x, cell_y), []).append(index)
+
+    compared: set[tuple[int, int]] = set()
+    for members in cells.values():
+        for position, i in enumerate(members):
+            for j in members[position + 1 :]:
+                pair = (min(i, j), max(i, j))
+                if (
+                    pair[1] - pair[0] < 2
+                    or (pair[0] == 0 and pair[1] == count - 1)
+                    or pair in compared
+                ):
+                    continue
+                compared.add(pair)
+                if _segments_intersect(*edges[pair[0]], *edges[pair[1]]):
+                    return False
     return True

@@ -9,10 +9,10 @@ import {
   X,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
-import { getCapabilities } from '../../api/capabilities'
+import { getCapabilities, type PipelineCapability } from '../../api/capabilities'
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
@@ -20,9 +20,12 @@ import { DatasetPreparationPanel } from './DatasetPreparationPanel'
 import {
   createProjectWithDataset,
   deleteProject,
+  minimumDatasetSize,
   resolveDraftSplitSize,
   resolvedFirstTrainingSize,
 } from './project-api'
+import { ResolverConfigForm } from './ResolverConfigForm'
+import { configurationIsValid, defaultConfiguration, summarizeSettings } from './resolver-config'
 import { resolverLabel } from './resolver-label'
 import { clearSetup, loadSetup } from './setup-recovery'
 import {
@@ -86,13 +89,20 @@ export function NewProjectPage() {
     queryFn: getCapabilities,
     staleTime: Infinity,
   })
-  const resolverOptions = capabilities.data?.consensus_resolvers[draft.taskType] ?? []
+  const pipeline = capabilities.data?.consensus_pipelines[draft.taskType]
   const eligibleAnnotators = [...new Set([
     ...(user ? [user.username] : []),
     ...draft.collaborators,
   ])]
 
-  const validationError = validateStep(step, draft, images)
+  const validationError = validateStep(step, draft, images, pipeline)
+
+  useEffect(() => {
+    if (!pipeline || draft.annotationPolicy.mode !== 'consensus' || draft.annotationPolicy.resolver === pipeline.id) return
+    setDraft((current) => current.annotationPolicy.mode === 'consensus'
+      ? { ...current, annotationPolicy: { ...current.annotationPolicy, resolver: pipeline.id, configuration: defaultConfiguration(current.taskType, pipeline) } }
+      : current)
+  }, [draft.annotationPolicy, pipeline])
 
   function updateDraft(patch: Partial<ProjectDraft>) {
     setDraft((current) => ({ ...current, ...patch }))
@@ -132,7 +142,7 @@ export function NewProjectPage() {
   }
 
   async function submit() {
-    if (!token || validateAll(draft, images)) return
+    if (!token || validateAll(draft, images, pipeline)) return
     setIsSubmitting(true)
     setError(null)
     const before = loadSetup()?.projectId
@@ -282,7 +292,7 @@ export function NewProjectPage() {
                 <span><strong>Single annotation</strong><small>One submission resolves each selected image.</small></span>
               </label>
               <label aria-label="Consensus annotation" htmlFor="annotation-mode-consensus" className={draft.annotationPolicy.mode === 'consensus' ? 'task-option selected' : 'task-option'}>
-                <input id="annotation-mode-consensus" type="radio" name="annotation-mode" checked={draft.annotationPolicy.mode === 'consensus'} onChange={() => updateDraft({ annotationPolicy: { mode: 'consensus', annotatorUsernames: eligibleAnnotators, requiredAnnotations: 2, requiredReviewers: 1, resolver: resolverOptions[0] ?? '', reviewThreshold: 0.75 } })} />
+                <input id="annotation-mode-consensus" type="radio" name="annotation-mode" checked={draft.annotationPolicy.mode === 'consensus'} onChange={() => updateDraft({ annotationPolicy: { mode: 'consensus', annotatorUsernames: eligibleAnnotators, requiredAnnotations: 2, requiredReviewers: 1, resolver: pipeline?.id ?? '', configuration: pipeline ? defaultConfiguration(draft.taskType, pipeline) : { parameters: {}, review_thresholds: {} }, requireIndependentAdjudicator: false } })} />
                 <span><strong>Consensus annotation</strong><small>A fixed cohort labels each image independently.</small></span>
               </label>
             </fieldset>
@@ -296,17 +306,19 @@ export function NewProjectPage() {
                 </label>
                 <NumberField label="Initial annotations per image" help="Exact number of independent full-image assignments." value={consensusPolicy.requiredAnnotations} onChange={(value) => updateDraft({ annotationPolicy: { ...consensusPolicy, requiredAnnotations: value } })} />
                 <NumberField label="Additional reviewers per escalated candidate" help="Created only when automatic resolution needs more evidence." value={consensusPolicy.requiredReviewers} onChange={(value) => updateDraft({ annotationPolicy: { ...consensusPolicy, requiredReviewers: value } })} />
-                <label className="field" htmlFor="consensus-resolver">Resolution method
-                  <select id="consensus-resolver" value={consensusPolicy.resolver} onChange={(event) => updateDraft({ annotationPolicy: { ...consensusPolicy, resolver: event.target.value } })}>
-                    {resolverOptions.map((identifier) => (
-                      <option key={identifier} value={identifier}>{resolverLabel(identifier)}</option>
-                    ))}
-                  </select>
-                  <small>Methods offered by the API for {draft.taskType} projects.</small>
-                </label>
-                <NumberField label="Review threshold" help="Items below this agreement level require review." value={Math.round(consensusPolicy.reviewThreshold * 100)} onChange={(value) => updateDraft({ annotationPolicy: { ...consensusPolicy, reviewThreshold: Math.min(1, Math.max(0, value / 100)) } })} />
               </div>
             )}
+            {consensusPolicy && (pipeline && consensusPolicy.resolver === pipeline.id
+              ? <ResolverConfigForm
+                taskType={draft.taskType}
+                pipeline={pipeline}
+                value={consensusPolicy.configuration}
+                onChange={(configuration) => updateDraft({ annotationPolicy: { ...consensusPolicy, configuration } })}
+                eligibility={{ status: 'no_project' }}
+                requireIndependentAdjudicator={consensusPolicy.requireIndependentAdjudicator}
+                onRequireIndependentAdjudicatorChange={(requireIndependentAdjudicator) => updateDraft({ annotationPolicy: { ...consensusPolicy, requireIndependentAdjudicator } })}
+              />
+              : <p className="notice">{capabilities.isError ? 'The resolver catalog could not be loaded from the API. Reload the page to try again.' : 'Loading the resolver catalog from the API…'}</p>)}
           </div>
         )}
 
@@ -353,8 +365,9 @@ export function NewProjectPage() {
               <ReviewItem label="Strategy" value={draft.annotationPolicy.mode === 'single' ? 'Single annotation' : 'Consensus'} detail={strategySummary(draft, images.length)} />
               {draft.annotationPolicy.mode === 'consensus' && <>
                 <ReviewItem label="Review escalation" value={`${draft.annotationPolicy.requiredReviewers} additional reviewer${draft.annotationPolicy.requiredReviewers === 1 ? '' : 's'} per candidate`} detail="Total review work depends on automatic resolution outcomes" />
-                <ReviewItem label="Resolver" value={resolverLabel(draft.annotationPolicy.resolver)} detail="Provisional API catalog entry" />
-                <ReviewItem label="Review threshold" value={`${Math.round(draft.annotationPolicy.reviewThreshold * 100)}%`} detail="Agreement below this value requires review" />
+                <ReviewItem label="Resolver" value={resolverLabel(draft.annotationPolicy.resolver)} detail={settingsLine(draft.annotationPolicy.configuration.parameters)} />
+                <ReviewItem label="Review thresholds" value={settingsLine(draft.annotationPolicy.configuration.review_thresholds)} detail="Results below these values go to review" />
+                <ReviewItem label="Adjudicator" value={draft.annotationPolicy.requireIndependentAdjudicator ? 'Must be independent' : 'Contributors may adjudicate'} detail={draft.annotationPolicy.requireIndependentAdjudicator ? 'Contributors to an image cannot decide it' : 'With a rationale; the conflict is recorded'} />
               </>}
             </div>
             {duplicateGroups.length > 0 && <p className="notice">{duplicateGroups.length} duplicate content group(s) will be reported to the API for deduplication.</p>}
@@ -374,7 +387,7 @@ export function NewProjectPage() {
           {step < PREPARE_STEP - 1 ? (
             <Button onClick={() => setStep((current) => current + 1)} disabled={Boolean(validationError) || hashProgress !== null}>Continue <ArrowRight size={17} /></Button>
           ) : (
-            <Button onClick={submit} disabled={Boolean(validateAll(draft, images)) || isSubmitting}>{isSubmitting ? 'Creating…' : 'Create and prepare'} <Check size={17} /></Button>
+            <Button onClick={submit} disabled={Boolean(validateAll(draft, images, pipeline)) || isSubmitting}>{isSubmitting ? 'Creating…' : 'Create and prepare'} <Check size={17} /></Button>
           )}
         </footer>}
       </section>
@@ -413,11 +426,15 @@ function Progress({ value, label }: { value: number; label: string }) {
   return <div className="progress-block"><div className="progress-label"><span>{label}</span><span>{value}%</span></div><progress max="100" value={value}>{value}%</progress></div>
 }
 
+function settingsLine(settings: Record<string, unknown>) {
+  return summarizeSettings(settings).map((line) => `${line.label}: ${line.value}`).join(' · ')
+}
+
 function parseCollaborators(value: string) {
   return [...new Set(value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))]
 }
 
-function validateStep(step: number, draft: ProjectDraft, images: LocalImage[]) {
+function validateStep(step: number, draft: ProjectDraft, images: LocalImage[], pipeline: PipelineCapability | undefined) {
   if (step === 0 && draft.name.trim().length < 3) return 'Use at least 3 characters for the project name.'
   if (step === 1) {
     if (draft.classes.some((item) => !item.name.trim())) return 'Every class needs a name.'
@@ -430,19 +447,26 @@ function validateStep(step: number, draft: ProjectDraft, images: LocalImage[]) {
     for (const [value, unit] of [[draft.testSetSize, draft.testSetUnit], [draft.validationSetSize, draft.validationSetUnit]] as const) {
       if (value <= 0 || (unit === 'count' && !Number.isInteger(value)) || (unit === 'percentage' && value >= 100)) return 'Validation and test sizes must be positive whole-image counts or percentages below 100.'
     }
+    if (minimumDatasetSize(draft) === null) return 'Together, the validation and test percentages must stay below 100% to leave room for training images.'
   }
   if (step === 3 && draft.annotationPolicy.mode === 'consensus') {
     if (!Number.isInteger(draft.annotationPolicy.requiredAnnotations) || draft.annotationPolicy.requiredAnnotations < 2) return 'Initial consensus annotations must be a whole number of at least two.'
     if (!Number.isInteger(draft.annotationPolicy.requiredReviewers) || draft.annotationPolicy.requiredReviewers < 1) return 'Additional reviewers must be a positive whole number.'
     if (draft.annotationPolicy.annotatorUsernames.length < draft.annotationPolicy.requiredAnnotations + draft.annotationPolicy.requiredReviewers) return 'The eligible pool must fit the initial annotators and distinct additional reviewers.'
-    if (!draft.annotationPolicy.resolver) return 'Choose a resolution method offered by the API.'
+    if (!pipeline || draft.annotationPolicy.resolver !== pipeline.id) return 'The resolver catalog has not loaded from the API yet.'
+    if (!configurationIsValid(draft.taskType, pipeline, draft.annotationPolicy.configuration)) return 'Fix the resolver settings marked above.'
   }
   if (step === 4) {
     if (!images.length) return 'Select a folder or files containing supported images.'
     if (draft.datasetLayout === 'split') {
-      const { validation, test, firstTraining } = initialSizes(draft, images.length)
-      const required = validation + test + firstTraining
-      if (required > images.length) return `The validation, test, and first training sets need ${required} images; ${images.length} are selected. Add another folder or more files.`
+      const minimum = minimumDatasetSize(draft)
+      if (minimum === null) return 'The validation and test percentages leave no room for training images. Lower them in step 3.'
+      if (minimum > images.length) {
+        const growing = draft.validationSetUnit === 'percentage' || draft.testSetUnit === 'percentage'
+          ? ' This already allows for the percentage-sized sets growing with the dataset.'
+          : ''
+        return `The validation, test, and first training sets need at least ${minimum} images; ${images.length} are selected. Add ${minimum - images.length} more from another folder or more files.${growing}`
+      }
     }
   }
   return ''
@@ -481,9 +505,9 @@ function trainingPoolSize(draft: ProjectDraft, totalMedia: number) {
   return Math.max(0, totalMedia - validation - test - firstTraining)
 }
 
-function validateAll(draft: ProjectDraft, images: LocalImage[]) {
+function validateAll(draft: ProjectDraft, images: LocalImage[], pipeline: PipelineCapability | undefined) {
   for (const candidate of [0, 1, 2, 3, 4]) {
-    const error = validateStep(candidate, draft, images)
+    const error = validateStep(candidate, draft, images, pipeline)
     if (error) return error
   }
   return ''

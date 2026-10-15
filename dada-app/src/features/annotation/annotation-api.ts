@@ -1,4 +1,5 @@
 import { apiRequest } from '../../api/client'
+import { requestKey } from '../../api/idempotency'
 import { config } from '../../config/env'
 import type { Page, Project, ProjectClassInput } from '../projects/types'
 import type {
@@ -57,23 +58,27 @@ export function saveDraft(
   })
 }
 
-export function submitAssignment(
+export async function submitAssignment(
   projectId: string,
   assignmentId: string,
   version: number,
   objects: AnnotationObject[],
   token: string,
 ) {
+  const body = { version, objects }
   return apiRequest<SubmissionReceived>(`/api/v1/projects/${projectId}/assignments/${assignmentId}/submit`, {
     method: 'POST', token,
-    headers: { 'Idempotency-Key': submissionKey(assignmentId, version) },
-    body: { version, objects },
+    headers: { 'Idempotency-Key': await submissionKey(assignmentId, body) },
+    body,
   })
 }
 
-/** One key per assignment version, so a retry after a lost response replays the original result. */
-export function submissionKey(assignmentId: string, version: number) {
-  return `submit:${assignmentId}:${version}`
+/**
+ * The same document at the same version replays the original result after a
+ * lost response; a corrected document is a new request (I6-02).
+ */
+export function submissionKey(assignmentId: string, body: { version: number; objects: AnnotationObject[] }) {
+  return requestKey(`submit:${assignmentId}`, body)
 }
 
 export function predictSegmentation(

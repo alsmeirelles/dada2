@@ -151,6 +151,7 @@ export function buildPolicyBody(
       resolver: null,
       parameters: {},
       review_thresholds: {},
+      require_independent_adjudicator: false,
       version,
     }
   }
@@ -163,8 +164,9 @@ export function buildPolicyBody(
     required_consensus_annotations: draft.annotationPolicy.requiredAnnotations,
     required_consensus_reviewers: draft.annotationPolicy.requiredReviewers,
     resolver: draft.annotationPolicy.resolver,
-    parameters: {},
-    review_thresholds: { agreement: draft.annotationPolicy.reviewThreshold },
+    parameters: draft.annotationPolicy.configuration.parameters,
+    review_thresholds: draft.annotationPolicy.configuration.review_thresholds,
+    require_independent_adjudicator: draft.annotationPolicy.requireIndependentAdjudicator,
     version,
   }
 }
@@ -190,6 +192,26 @@ export function resolveDraftSplitSize(
 /** The first training batch size the API will use for a split project. */
 export function resolvedFirstTrainingSize(draft: ProjectDraft) {
   return draft.initialTrainingSize ?? draft.iterationBatchSize
+}
+
+/**
+ * The smallest dataset that holds the validation, test, and first training
+ * sets, or null when the held-out percentages leave no room for training.
+ *
+ * A held-out set sized as a percentage grows with the dataset, so the count
+ * needed for the current selection is not a target the user can reach by
+ * adding exactly that many images (I6-01).
+ */
+export function minimumDatasetSize(draft: ProjectDraft) {
+  const heldOutPercentage = (draft.validationSetUnit === 'percentage' ? draft.validationSetSize : 0) +
+    (draft.testSetUnit === 'percentage' ? draft.testSetSize : 0)
+  if (heldOutPercentage >= 100) return null
+  const needed = (total: number) => resolveDraftSplitSize(total, draft.validationSetSize, draft.validationSetUnit) +
+    resolveDraftSplitSize(total, draft.testSetSize, draft.testSetUnit) +
+    resolvedFirstTrainingSize(draft)
+  let total = 1
+  while (needed(total) > total) total = needed(total)
+  return total
 }
 
 export function buildProjectCreateBody(draft: ProjectDraft) {

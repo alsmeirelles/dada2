@@ -17,10 +17,16 @@ export function getBatch(projectId: string, batchId: string, token: string) {
   )
 }
 
+/** The policy fields a batch snapshot carries; a default policy, a batch, or an edited copy of either. */
+export type BatchPolicySource = Pick<AnnotationPolicy,
+  'mode' | 'annotator_ids' | 'required_consensus_annotations' | 'required_consensus_reviewers' |
+  'resolver' | 'parameters' | 'review_thresholds' | 'require_independent_adjudicator'>
+
+/** Replaces the policy snapshot of a batch that is still preparing; an unknown independence flag takes the API default. */
 export function updateBatchPolicy(
   projectId: string,
   batchId: string,
-  policy: AnnotationPolicy,
+  policy: BatchPolicySource,
   token: string,
 ) {
   return apiRequest<AnnotationBatch>(
@@ -36,6 +42,7 @@ export function updateBatchPolicy(
         resolver: policy.resolver ?? null,
         parameters: policy.parameters ?? {},
         review_thresholds: policy.review_thresholds ?? {},
+        ...(policy.require_independent_adjudicator === undefined ? {} : { require_independent_adjudicator: policy.require_independent_adjudicator }),
       },
     },
   )

@@ -6,7 +6,11 @@ from dada_api.models.project import ProjectRole
 from dada_api.services.authorization import ProjectAction, role_allows
 
 MANAGER_DENIED = {ProjectAction.activate_project, ProjectAction.delete_project}
-ANNOTATOR_ALLOWED = {ProjectAction.read_project, ProjectAction.annotate}
+ANNOTATOR_ALLOWED = {
+    ProjectAction.read_project,
+    ProjectAction.annotate,
+    ProjectAction.work_candidate_review,
+}
 VIEWER_ALLOWED = {ProjectAction.read_project}
 
 EXPECTED_MATRIX = {
@@ -60,3 +64,8 @@ def test_manager_actions_added_in_phase_two() -> None:
         assert role_allows(ProjectRole.manager, action) is True
         assert role_allows(ProjectRole.annotator, action) is False
         assert role_allows(ProjectRole.viewer, action) is False
+
+
+def test_the_matrix_has_fourteen_actions() -> None:
+    assert len(ProjectAction) == 14
+    assert len(EXPECTED_MATRIX) == 56

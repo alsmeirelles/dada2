@@ -11,7 +11,7 @@ from dada_api.models.user import User
 
 def record(
     session: AsyncSession,
-    actor: User,
+    actor: User | None,
     project_id: str | None,
     action: str,
     target_type: str,
@@ -27,7 +27,7 @@ def record(
 
     Args:
         session: Active database session, committed by the caller.
-        actor: User performing the change.
+        actor: User performing the change, or None for the system.
         project_id: Project the change belongs to, or None for a global change.
         action: Stable name of the operation.
         target_type: Kind of resource that changed.
@@ -38,7 +38,7 @@ def record(
     session.add(
         AuditEntry(
             project_id=project_id,
-            actor_user_id=actor.id,
+            actor_user_id=actor.id if actor is not None else None,
             action=action,
             target_type=target_type,
             target_id=target_id,

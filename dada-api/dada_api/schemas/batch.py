@@ -1,7 +1,7 @@
 """Annotation batch request and response schemas."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -35,8 +35,9 @@ class BatchPolicyUpdate(BaseModel):
     required_consensus_annotations: int | None = Field(default=None, ge=1)
     required_consensus_reviewers: int | None = Field(default=None, ge=1)
     resolver: str | None = Field(default=None, max_length=64)
-    parameters: dict[str, float | int | str | bool] = Field(default_factory=dict)
-    review_thresholds: dict[str, float] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    review_thresholds: dict[str, Any] = Field(default_factory=dict)
+    require_independent_adjudicator: bool = False
 
 
 class BatchResponse(BaseModel):
@@ -59,8 +60,9 @@ class BatchResponse(BaseModel):
     required_consensus_reviewers: int | None
     resolver: str | None
     resolver_version: str | None
-    parameters: dict[str, float | int | str | bool]
-    review_thresholds: dict[str, float]
+    parameters: dict[str, Any]
+    review_thresholds: dict[str, Any]
+    require_independent_adjudicator: bool
     source_policy_version: int
     selection_strategy: str
     selection_seed: int
@@ -69,6 +71,9 @@ class BatchResponse(BaseModel):
     total_items: int
     resolved_items: int
     awaiting_resolution_items: int
+    resolving_items: int
+    in_review_items: int
+    review_required_items: int
     cancelled_items: int
     total_assignments: int
     available_assignments: int

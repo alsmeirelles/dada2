@@ -272,7 +272,7 @@ async def test_an_accepted_import_seeds_every_assignment_without_submitting(
                 "annotator_ids": annotator_ids,
                 "required_consensus_annotations": 2,
                 "required_consensus_reviewers": 1,
-                "resolver": "two_stage_box_fusion",
+                "resolver": "two_stage_detection_consensus",
                 "parameters": {},
                 "review_thresholds": {},
                 "version": 1,

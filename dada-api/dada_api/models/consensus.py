@@ -11,6 +11,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from dada_api.db.base import Base
 
+INITIAL_EVIDENCE_READY_EVENT = "consensus.initial_evidence_ready.v1"
+
 
 class ResolutionWorkStatus(StrEnum):
     pending_review = "pending_review"
@@ -93,18 +95,17 @@ class ResolutionInput(Base):
 
 
 class ResolutionWorkItem(Base):
-    """One image-level or candidate-level unit that needs more evidence."""
+    """One image-level or candidate-level unit that needs more evidence.
+
+    A candidate has at most one work item per input snapshot. A new evidence
+    generation has new inputs, so the same candidate key may appear again
+    after a manager reopens or reassigns the image.
+    """
 
     __tablename__ = "resolution_work_items"
     __table_args__ = (
         UniqueConstraint(
             "resolution_input_id", "candidate_key", name="uq_resolution_candidate"
-        ),
-        UniqueConstraint(
-            "batch_item_id",
-            "candidate_key",
-            "source_run_number",
-            name="uq_resolution_candidate_run",
         ),
     )
 
@@ -125,6 +126,13 @@ class ResolutionWorkItem(Base):
         String(32), default=ResolutionWorkStatus.pending_review, index=True
     )
     candidate_context: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("resolution_runs.id", ondelete="CASCADE"), nullable=True
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

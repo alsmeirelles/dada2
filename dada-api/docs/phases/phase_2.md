@@ -92,9 +92,11 @@ idempotência do `bootstrap-admin` normal não mudou.
    `two_stage_box_fusion` e `two_stage_mask_fusion` são valores provisórios
    persistidos por política e descobertos por capacidades; não são nomes que o
    App possa fixar. A Fase 6 os migrará para os IDs de pipeline
-   `cleanlab_multiannotator`, `two_stage_detection_consensus` e
+   `statistical_class_consensus`, `two_stage_detection_consensus` e
    `two_stage_segmentation_consensus`, respectivamente. `staple` continua uma
-   opção de refinamento de segmentação, nunca um resolver de topo.
+   opção de refinamento de segmentação, nunca um resolver de topo. O catálogo
+   estatístico nativo e livre de entradas de modelo está definido na decisão
+   `P6-01`.
 2. **Contrato transitório de parâmetros.** É fechado e mínimo: o App envia
    `parameters: {}` e pode expor apenas `review_thresholds.agreement`. Schemas,
    defaults e controles avançados por resolver pertencem à Fase 6.

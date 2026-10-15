@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { coordinatePairs, flattenPoints, normalizedBox } from './geometry'
+import { coordinatePairs, flattenPoints, normalizedBox, ringsPath } from './geometry'
 
 describe('annotation geometry', () => {
   it('normalizes boxes dragged in any direction', () => {
@@ -13,5 +13,9 @@ describe('annotation geometry', () => {
     const points = [{ x: 1.5, y: 2 }, { x: 8, y: 3 }, { x: 4, y: 9 }]
     expect(flattenPoints(points)).toEqual([1.5, 2, 8, 3, 4, 9])
     expect(coordinatePairs(flattenPoints(points))).toBe('1.5,2 8,3 4,9')
+  })
+
+  it('draws every ring of a polygon so holes stay visible', () => {
+    expect(ringsPath([[0, 0, 10, 0, 10, 10], [2, 2, 4, 2, 4, 4], [1, 1]])).toBe('M0,0L10,0L10,10ZM2,2L4,2L4,4Z')
   })
 })

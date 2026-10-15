@@ -1,0 +1,63 @@
+{
+  "name": "reliability_heavy_weight_cannot_override_majority",
+  "strategy": {
+    "strategy": "reliability_weighted_vote"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "cat",
+    "dog",
+    "no_object"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "dog"
+    },
+    {
+      "rater": "bia",
+      "outcome": "cat"
+    },
+    {
+      "rater": "caio",
+      "outcome": "cat"
+    }
+  ],
+  "calibration": {
+    "weights": {
+      "ana": 2.0,
+      "bia": 0.5,
+      "caio": 0.5
+    }
+  },
+  "expected": {
+    "outcome": "dog",
+    "passed": false,
+    "reasons": [
+      "support_below_threshold"
+    ],
+    "metrics": {
+      "votes": {
+        "cat": 2,
+        "dog": 1,
+        "no_object": 0
+      },
+      "valid_votes": 3,
+      "support": {
+        "numerator": 1,
+        "denominator": 3
+      },
+      "margin": 1,
+      "normalized_entropy": 0.57938,
+      "weights": {
+        "ana": 2.0,
+        "bia": 0.5,
+        "caio": 0.5
+      },
+      "weighted_support": 0.666667
+    }
+  }
+}

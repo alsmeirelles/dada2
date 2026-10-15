@@ -37,51 +37,83 @@ Record a stable `annotator_index`, class ordering, submission content hashes,
 and the exact matrix passed to the resolver. The index is internal provenance;
 it must not be returned to peer annotators.
 
-## User-selectable Cleanlab resolver
+## Native statistical class resolvers
 
-Cleanlab is the first adapter for class resolution. The API must expose only
-installed and validated resolver choices in `GET /api/v1/capabilities`, for
-example under `consensus_resolvers.classification`. The client sends a stable
-resolver identifier plus parameters; it never sends Python callables or package
-class names.
+Class resolution uses DADA-owned statistical implementations over human
+annotation observations. It has no trained-model dependency. Model
+predictions, predicted probabilities, embeddings, and model seeds are not
+resolver inputs and cannot increase confidence or break a tie.
 
-The initial supported Cleanlab adapter is a multi-annotator consensus/label
-quality resolver backed by Cleanlab's `multiannotator` functionality. It
-returns consensus labels and per-example quality information. Additional
-Cleanlab-supported strategies may be registered after they have a typed
-configuration schema, fixture tests, documented package version range, and a
-deterministic result adapter.
+`GET /api/v1/capabilities` exposes only implemented and validated strategies,
+for example under `consensus_resolvers.classification`. The client sends the
+stable `statistical_class_consensus` pipeline identifier plus a typed strategy
+configuration; it never sends Python callables, package class names, or an
+arbitrary parameter object.
 
-The configuration schema contains:
+The Phase 6 native catalog is:
+
+| Strategy | Use | Required behavior |
+| --- | --- | --- |
+| `categorical_vote` | Single-label observations | Selects by deterministic plurality, strict majority, or a configured supermajority. Ties and failed support gates require review. |
+| `multilabel_binary_vote` | Multi-label observations | Treats each class as an explicit positive/negative decision and records the result and uncertainty for every class. |
+| `dirichlet_vote` | Single-label or per-class binary observations | Uses a frozen prior and observed human counts to produce a posterior decision and uncertainty diagnostics. |
+| `reliability_weighted_vote` | Single-label or per-class binary observations | Uses frozen annotator weights only when they were derived from independent gold or expert-adjudicated evidence. |
+| `dawid_skene` | Single-label or per-class binary observations | Uses a sufficient multi-item human-label corpus to estimate annotator confusion and latent labels; the parameter snapshot is frozen for the batch. |
+
+The first three strategies operate directly on the current item's votes.
+`reliability_weighted_vote` and `dawid_skene` are conditional capabilities:
+they are unavailable unless the policy's minimum sample, class coverage,
+identifiability, and convergence rules pass. Automated consensus influenced by
+the same annotator is not independent evidence for that annotator's weight.
+GLAD and independent Bayesian classifier combination may be added later, after
+their stronger cross-item assumptions and operational gates are approved.
+Resolvers never silently fall back to another strategy.
+
+Phase 6 implements and fixture-tests all five listed strategies. The first
+three form the initial strategy set. The latter two are exposed with explicit
+eligibility metadata and may be selected only when the project/batch has the
+required frozen evidence snapshot. Their conditional availability is a runtime
+data constraint, not a later implementation phase.
+
+Each strategy has its own closed parameter schema. A categorical example is:
 
 ```json
 {
-  "resolver": "cleanlab_multiannotator",
-  "resolver_version": "adapter-semver",
-  "package_version": "installed-cleanlab-version",
+  "resolver": "statistical_class_consensus",
+  "resolver_version": "implementation-semver",
   "parameters": {
-    "pred_probs_source": "model_run_id-or-null",
-    "quality_threshold": 0.75
+    "strategy": "categorical_vote",
+    "decision_rule": "supermajority"
+  },
+  "review_thresholds": {
+    "minimum_support": 0.67,
+    "maximum_normalized_entropy": 0.7
   }
 }
 ```
 
-Model predicted probabilities are optional additional evidence. When supplied,
-they must come from a recorded model run over the exact media version and are
-never accepted from a browser request. The adapter must also support a
-crowd-only path when no trusted model probabilities exist.
+Unknown parameters are rejected. Priors, annotator-weight snapshots, and
+cross-item calibration-corpus identities are recorded when applicable. All
+calculations define numeric precision, convergence tolerance, maximum
+iterations, initialization, and tie behavior so replay is deterministic.
 
 ## Resolution rules
 
-1. Run the selected registered Cleanlab adapter on the normalized matrix.
-2. Convert its output to one canonical class (single-label) or a canonical set
+1. Validate that the selected native strategy applies to the task mode and that
+   every strategy-specific eligibility gate is met. An ineligible configured
+   strategy fails with `resolver_unavailable`; it does not create review work
+   or fall back to another strategy.
+2. Run the strategy on the normalized human-observation matrix.
+3. Convert its output to one canonical class (single-label) or a canonical set
    (multi-label), using an explicit threshold stored in the configuration.
-3. Persist vote distribution, consensus confidence/quality, adapter output,
-   input hashes, and any model-run identity.
-4. Send the item to `review_required` when the result is tied, below the
+4. Persist the vote distribution, support, uncertainty, algorithm diagnostics,
+   parameter snapshot, and input hashes.
+5. Send the item to `review_required` when the result is tied, below the
    configured quality threshold, incompatible with project constraints, or the
-   adapter reports an unusable/ambiguous output.
-5. Otherwise persist a new accepted resolved annotation. This is a new record;
+   strategy reports an ambiguous output. A numerical or convergence failure is
+   an invalid resolver output handled by the Phase 6 failure policy.
+6. Otherwise persist a resolution proposal for automatic acceptance under
+   `P6-06`. Acceptance creates a new immutable canonical record;
    it does not modify any submission.
 
 For a simple two-rater tie, the resolver must request review rather than using
@@ -92,8 +124,9 @@ breaker.
 
 The canonical document uses the existing classification shape: one object per
 accepted class with `geometry: null`. Store diagnostics including class vote
-distribution, entropy, selected-label support, Cleanlab quality score(s), and
-whether model probabilities were used.
+distribution, normalized entropy, selected-label support, vote margin, and the
+selected strategy's posterior, convergence, or weight diagnostics where
+applicable.
 
 Project statistics may aggregate agreement and review rates. They must not
 expose annotator-specific quality or ranking to ordinary annotators.
@@ -118,5 +151,9 @@ general implementation plan.
 
 Fixture tests must cover unanimous agreement, majority agreement, two-rater
 tie, multi-label partial agreement, malformed labels, missing data, a
-below-threshold result, model-probability provenance, duplicate worker results,
-and deterministic replay using the recorded package/adapter versions.
+below-threshold result, rejection of model-derived inputs, duplicate worker
+results, and deterministic replay using the recorded implementation and
+parameter-snapshot versions. Strategy tests also cover prior sensitivity,
+zero/low-support classes, invalid or biased weights, insufficient cross-item
+evidence, convergence failure, and stable results under equivalent input
+ordering.

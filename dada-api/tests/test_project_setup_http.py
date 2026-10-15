@@ -370,7 +370,7 @@ async def test_consensus_policy_requires_a_valid_group(database: None) -> None:
                 "annotator_ids": [ana.id],
                 "required_consensus_annotations": 2,
                 "required_consensus_reviewers": 1,
-                "resolver": "two_stage_box_fusion",
+                "resolver": "two_stage_detection_consensus",
                 "version": version,
             },
         )
@@ -382,7 +382,7 @@ async def test_consensus_policy_requires_a_valid_group(database: None) -> None:
                 "annotator_ids": [ana.id, outsider.id],
                 "required_consensus_annotations": 2,
                 "required_consensus_reviewers": 1,
-                "resolver": "two_stage_box_fusion",
+                "resolver": "two_stage_detection_consensus",
                 "version": version,
             },
         )
@@ -394,7 +394,7 @@ async def test_consensus_policy_requires_a_valid_group(database: None) -> None:
                 "annotator_ids": [ana.id, bruno.id],
                 "required_consensus_annotations": 2,
                 "required_consensus_reviewers": 1,
-                "resolver": "two_stage_box_fusion",
+                "resolver": "two_stage_detection_consensus",
                 "version": version,
             },
         )
@@ -406,7 +406,7 @@ async def test_consensus_policy_requires_a_valid_group(database: None) -> None:
                 "annotator_ids": [owner.id, ana.id, carla.id],
                 "required_consensus_annotations": 2,
                 "required_consensus_reviewers": 1,
-                "resolver": "majority_vote",
+                "resolver": "statistical_class_consensus",
                 "version": version,
             },
         )
@@ -448,13 +448,31 @@ async def test_consensus_policy_saves_and_rejects_a_stale_version(
             "annotator_ids": [owner.id, ana.id, carla.id],
             "required_consensus_annotations": 2,
             "required_consensus_reviewers": 1,
-            "resolver": "two_stage_box_fusion",
-            "review_thresholds": {"agreement": 0.75},
+            "resolver": "two_stage_detection_consensus",
+            "review_thresholds": {
+                "minimum_support": {"numerator": 3, "denominator": 4}
+            },
             "version": 1,
         }
         saved = await client.put(policy_url, headers=_auth(token), json=body)
         stale = await client.put(policy_url, headers=_auth(token), json=body)
         read_back = await client.get(policy_url, headers=_auth(token))
+        unknown_setting = await client.put(
+            policy_url,
+            headers=_auth(token),
+            json={**body, "review_thresholds": {"agreement": 0.75}, "version": 2},
+        )
+        weak_support = await client.put(
+            policy_url,
+            headers=_auth(token),
+            json={
+                **body,
+                "review_thresholds": {
+                    "minimum_support": {"numerator": 1, "denominator": 2}
+                },
+                "version": 2,
+            },
+        )
 
     assert saved.status_code == 200
     assert saved.json()["mode"] == "consensus"
@@ -464,7 +482,18 @@ async def test_consensus_policy_saves_and_rejects_a_stale_version(
     assert saved.json()["version"] == 2
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "version_conflict"
-    assert read_back.json()["review_thresholds"] == {"agreement": 0.75}
+    assert read_back.json()["resolver_version"] == "1.0.0"
+    assert read_back.json()["review_thresholds"] == {
+        "minimum_support": {"numerator": 3, "denominator": 4},
+        "minimum_median_iou": 0.5,
+    }
+    assert read_back.json()["parameters"]["box_refinement"] == {
+        "strategy": "coordinate_median"
+    }
+    assert unknown_setting.status_code == 422
+    assert unknown_setting.json()["error"]["code"] == "invalid_resolver_configuration"
+    assert weak_support.status_code == 422
+    assert weak_support.json()["error"]["code"] == "invalid_resolver_configuration"
 
     async with async_session_factory() as session:
         entry = await session.scalar(
@@ -484,7 +513,11 @@ async def test_single_mode_refuses_a_resolver(database: None) -> None:
         response = await client.put(
             f"/api/v1/projects/{project['id']}/annotation-policy",
             headers=_auth(token),
-            json={"mode": "single", "resolver": "majority_vote", "version": 1},
+            json={
+                "mode": "single",
+                "resolver": "statistical_class_consensus",
+                "version": 1,
+            },
         )
 
     assert response.status_code == 422
@@ -571,3 +604,53 @@ async def test_administrator_manages_a_project_without_membership(
 
     assert response.status_code == 201
     assert listed.json()["items"][0]["owner_id"] == project["owner_id"]
+
+
+async def test_policy_history_lists_changes_for_managers_only(database: None) -> None:
+    owner = await _create_user("owner")
+    ana = await _create_user("ana")
+    carla = await _create_user("carla")
+    token = await _token("owner")
+
+    async with _client() as client:
+        project = await _create_project(client, token)
+        members = f"/api/v1/projects/{project['id']}/members"
+        for username in ("ana", "carla"):
+            await client.post(
+                members,
+                headers=_auth(token),
+                json={"username": username, "role": "annotator"},
+            )
+        await client.put(
+            f"/api/v1/projects/{project['id']}/annotation-policy",
+            headers=_auth(token),
+            json={
+                "mode": "consensus",
+                "annotator_ids": [owner.id, ana.id, carla.id],
+                "required_consensus_annotations": 2,
+                "required_consensus_reviewers": 1,
+                "resolver": "two_stage_detection_consensus",
+                "version": 1,
+            },
+        )
+        history = await client.get(
+            f"/api/v1/projects/{project['id']}/annotation-policy/history",
+            headers=_auth(token),
+        )
+        hidden = await client.get(
+            f"/api/v1/projects/{project['id']}/annotation-policy/history",
+            headers=_auth(await _token("ana")),
+        )
+
+    assert history.status_code == 200, history.text
+    [change] = history.json()["items"]
+    assert change["version"] == 2
+    assert change["actor_name"] == "Owner"
+    assert change["resolver"] == "two_stage_detection_consensus"
+    assert change["resolver_version"] == "1.0.0"
+    assert change["changed_fields"]["mode"] == {
+        "before": "single",
+        "after": "consensus",
+    }
+    assert "version" not in change["changed_fields"]
+    assert hidden.status_code == 403

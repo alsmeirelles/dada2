@@ -71,6 +71,8 @@ polyline.shape-draft { fill: none; }
 .canvas-empty p { margin-bottom: 1.25rem; }
 .image-navigation { min-width: 0; display: grid; grid-template-columns: auto 1fr auto; align-items: center; border-top: 1px solid #30343d; background: #20242c; }
 .image-navigation span { overflow: hidden; color: #8f96a3; font-size: .7rem; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.resolution-banner { position: absolute; left: 50%; top: 58px; max-width: min(640px, calc(100% - 2rem)); transform: translateX(-50%); padding: .55rem .8rem; border: 1px solid #2f5d4a; border-radius: 8px; display: flex; align-items: center; gap: .6rem; color: #c7f0dc; background: #1d3b30; z-index: 4; font-size: .74rem; }
+.resolution-banner button { margin-left: auto; border: 0; color: #c7f0dc; background: transparent; cursor: pointer; text-decoration: underline; white-space: nowrap; }
 .workspace-notice { position: absolute; left: 50%; bottom: 58px; max-width: min(620px, calc(100% - 2rem)); transform: translateX(-50%); padding: .7rem .8rem; border: 1px solid #5d522f; border-radius: 8px; display: flex; align-items: center; gap: .55rem; color: #fcdca4; background: #3c321e; box-shadow: 0 10px 30px rgb(0 0 0 / 30%); z-index: 6; font-size: .75rem; }
 .workspace-notice button { margin-left: auto; border: 0; color: #fcdca4; background: transparent; cursor: pointer; text-decoration: underline; }
 .workspace-notice--conflict button + button { margin-left: .4rem; }

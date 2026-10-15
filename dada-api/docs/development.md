@@ -29,6 +29,9 @@ A freshly migrated database contains no users and exposes no route that can
 create one. `make bootstrap-admin` creates the initial administrator; see
 [Administrator bootstrap](#administrator-bootstrap) below.
 
+Consensus projects also need the outbox relay and the resolver workers; see
+[Consensus engine](#consensus-engine-phase-6).
+
 The default install deliberately excludes CUDA and model packages. When the
 concrete learning implementation is developed later, install its isolated
 dependency extra with `uv sync --extra learning`.
@@ -221,19 +224,33 @@ is missing before doing anything. See [Activation and batches](#activation-and-b
 
 ## Consensus resolvers
 
-`dada_api/services/resolvers.py` is the single registry of resolver identifiers
-advertised per task through `GET /api/v1/capabilities`. Clients may only choose
-an advertised identifier; anything else is `422 unsupported_resolver`.
+Each task has exactly one top-level resolver pipeline, advertised with its
+selectable strategies and typed parameter descriptors through
+`GET /api/v1/capabilities` (`consensus_pipelines`):
 
-The current identifiers are a **provisional catalog**. Clients discover and
-persist them without hard-coding behavior around their names. Phase 6 will
-migrate them to the target pipeline vocabulary: `cleanlab_multiannotator`,
-`two_stage_detection_consensus`, and `two_stage_segmentation_consensus`.
-`staple` remains a segmentation-refinement option, never a top-level resolver.
-The Phase 2 parameter contract is closed: clients send `parameters: {}` and
-may expose only `review_thresholds.agreement`. Resolver-specific schemas,
-defaults, package versions, and advanced controls belong to Phase 6; the API
-stores the fields opaquely until then.
+| Task | Pipeline |
+| --- | --- |
+| `classification` | `statistical_class_consensus` |
+| `detection` | `two_stage_detection_consensus` |
+| `segmentation` | `two_stage_segmentation_consensus` |
+
+`dada_api/consensus/catalog.py` is the single catalog. A consensus policy names
+the task's pipeline as `resolver`. Its `parameters` and `review_thresholds` are
+closed, typed configurations:
+
+- omitted values take their defaults;
+- unknown keys, out-of-bounds values, and vote thresholds at or below 1/2
+  return `422 invalid_resolver_configuration`;
+- `resolver_version` is written by the API.
+
+Migration `0010` moved the provisional Phase 2 identifiers (`majority_vote`,
+`two_stage_box_fusion`, `two_stage_mask_fusion`) onto these pipelines with
+their default configuration.
+
+A strategy whose dependency is missing or incompatible, whose resource profile
+is unvalidated, or that an operator quarantined stays listed with its
+`unavailable_reason`. Nothing is ever substituted for it. Decisions are
+recorded in [phase_6.md](phases/phase_6.md#decisões).
 
 ## Dataset ingestion
 
@@ -475,7 +492,8 @@ submitted empty; classification needs at least one class.
   `resolved_annotations` in the same transaction, and a batch whose every
   remaining image is resolved moves to `resolved`.
 - In consensus mode the image becomes `awaiting_resolution` once every active
-  assignment has submitted. The resolution itself is Phase 6.
+  assignment has submitted. The [consensus engine](#consensus-engine-phase-6)
+  resolves it.
 
 **Blindness.** Batch routes are a manager view (`manage_annotation_policy`):
 they name the group and count everyone's submissions. Annotators use their own
@@ -490,3 +508,115 @@ returns `403 invalid_media_url`.
 `acquisition_strategy` on `split` projects, and records the change in the
 audit log. A `single_batch` project returns
 `422 acquisition_strategy_not_allowed`.
+
+## Consensus engine (Phase 6)
+
+A consensus image is resolved outside the API process, by three processes:
+
+```
+API ──commit──> outbox event ──relay──> resolution run ──Celery/Redis──> worker
+ ^                                                                          |
+ └──────────── result ingested in a PostgreSQL transaction <────────────────┘
+```
+
+PostgreSQL holds every run, attempt, proposal, and resolution. Redis only
+transports commands, and losing it loses no state: the relay re-sends what was
+not finished.
+
+### Running it locally
+
+```bash
+make infra-up
+make migrate
+make run                                   # terminal 1: the API
+make relay                                 # terminal 2: the outbox relay
+make worker-standard CELERY_POOL=solo      # terminal 3: classification and detection
+make worker-mask CELERY_POOL=solo          # terminal 4: segmentation
+```
+
+Celery's default `prefork` pool does not run on Windows; use
+`CELERY_POOL=solo` there. With `solo`, the concurrency and per-child memory
+flags have no effect.
+
+Only the workers need the `consensus` extra (numpy, SciPy, OpenCV, pandas,
+crowd-kit, all exactly pinned); `make sync-dev` installs it. The API and the
+relay never import it.
+
+### What the relay does
+
+Every pass (`dada-api consensus-relay --interval 2`) does three things:
+
+1. **Creates runs.** It turns each `consensus.initial_evidence_ready.v1` event
+   into a first-round run.
+2. **Recovers vanished workers.** A run with no result 60 seconds after its
+   hard limit is re-queued. The backoff is 1 minute, then 5 minutes, and a
+   run fails `worker_failed` after 3 attempts.
+3. **Dispatches.** It sends queued runs while respecting the per-project caps:
+   2 standard runs and 1 mask run at a time.
+
+The database decides retries. Each command carries its attempt number, and
+Celery acknowledges early, so a redelivered or duplicate message whose attempt
+is no longer current is ignored.
+
+### Queues and limits
+
+| Queue | Tasks | Hard timeout | Memory | Worker concurrency |
+| --- | --- | --- | --- | --- |
+| `consensus.standard` | classification, detection | `DADA_CONSENSUS_STANDARD_TIMEOUT_SECONDS` (300) | `DADA_CONSENSUS_STANDARD_MEMORY_BYTES` (1 GiB) | 4 |
+| `consensus.mask` | segmentation | `DADA_CONSENSUS_MASK_TIMEOUT_SECONDS` (900) | `DADA_CONSENSUS_MASK_MEMORY_BYTES` (4 GiB) | 1 |
+
+Each run records the limits it ran under:
+
+- **Timeouts.** Cooperative cancellation arrives 30 seconds before the hard
+  limit.
+- **Memory.** It is guarded by three things:
+  - a pre-flight estimate, which fails `resource_limit` before any work starts;
+  - Celery's per-child memory ceiling, which the make targets set;
+  - the worker container's limit.
+
+  There is no `RLIMIT_AS`, because it counts the virtual memory numeric
+  libraries reserve at import.
+
+### Run outcomes
+
+- **Accepted.** A proposal that meets every frozen gate is accepted
+  automatically, in the same transaction that stores it.
+- **Escalated.** Otherwise the failing image or candidate cases go to scoped
+  reviewers, then a second round, then a manager.
+- **Permanent failures.** `invalid_input`, `resolver_output_invalid`,
+  `resolver_unavailable`, and `resource_limit` fail permanently at once, and
+  the image goes to a manager.
+- **Cancelled.** A cancelled run is force-failed 30 seconds after the request
+  when the worker has not stopped.
+
+Owners and managers work the cases through the resolution routes listed in
+`dada-app/docs/api-contract.md` ("Phase 6 implemented shapes"). Those routes
+cover the queue, the evidence, retries, run cancellation, edit leases,
+adjudication, annotator performance, and resolver eligibility.
+
+### Quarantine
+
+Five `resolver_output_invalid` or `resource_limit` failures of one pipeline
+version within ten minutes quarantine it. New runs then fail
+`resolver_unavailable`, and `/capabilities` reports `quarantined`.
+
+```bash
+uv run dada-api resolver-quarantine list
+uv run dada-api resolver-quarantine add two_stage_detection_consensus@1.0.0 \
+  --reason "Wrong boxes on the night set." --by admin
+uv run dada-api resolver-quarantine release two_stage_detection_consensus@1.0.0 \
+  --reason "Fixed in the deployed worker." --by admin
+```
+
+`--by` must name an active administrator. A release runs the pipeline's
+packaged health fixture first: three identical documents must resolve to the
+known answer, identically twice. If the fixture fails, the quarantine stays.
+Both commands write an audit entry.
+
+### Tests
+
+Integration tests call the worker's task body directly, with no broker. They
+install the scripted fake adapter (`dada_api.consensus.fake.ScriptedPipeline`)
+through `dada_api.consensus.pipeline.ADAPTERS`, or run the real pipelines.
+Pure pipeline tests replay the committed golden fixtures under
+`tests/fixtures/consensus/`.

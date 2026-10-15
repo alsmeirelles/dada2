@@ -37,6 +37,7 @@ async def _represent(
         resolver_version=batch.resolver_version,
         parameters=batch.parameters,
         review_thresholds=batch.review_thresholds,
+        require_independent_adjudicator=batch.require_independent_adjudicator,
         source_policy_version=batch.source_policy_version,
         selection_strategy=batch.selection_strategy,
         selection_seed=batch.selection_seed,

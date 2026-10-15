@@ -23,6 +23,7 @@ from dada_api.schemas.assignment import (
     BatchAssignmentPage,
     DocumentWrite,
     DraftSaved,
+    FinalResolution,
     QueueStateName,
     SubmissionReceived,
 )
@@ -131,6 +132,15 @@ async def get_my_assignment(
         draft_saved_at=assignment.draft_saved_at,
         revision=latest.revision if latest else None,
         submitted_at=latest.submitted_at if latest else None,
+        resolution=(
+            FinalResolution(
+                version=opened.resolution.version,
+                source=opened.resolution.source,
+                objects=opened.resolution.objects,
+            )
+            if opened.resolution is not None
+            else None
+        ),
     )
 
 

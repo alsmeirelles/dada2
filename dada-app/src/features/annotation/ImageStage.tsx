@@ -5,12 +5,13 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   type WheelEvent,
 } from 'react'
 
 import { Button } from '../../components/ui/Button'
 import type { ProjectClassInput } from '../projects/types'
-import { coordinatePairs, flattenPoints, normalizedBox, type Point } from './geometry'
+import { flattenPoints, normalizedBox, ringsPath, type Point } from './geometry'
 import type {
   AnnotationDocument,
   AnnotationObject,
@@ -34,6 +35,8 @@ type ImageStageProps = {
   onSelectObject: (id: string | null) => void
   onSamPoint: (point: Point) => void
   onNotice: (message: string) => void
+  /** Read-only SVG drawn beneath the objects in original-image pixels; it never takes pointer input. */
+  overlay?: ReactNode
 }
 
 export function ImageStage({
@@ -49,6 +52,7 @@ export function ImageStage({
   onSelectObject,
   onSamPoint,
   onNotice,
+  overlay,
 }: ImageStageProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState(1)
@@ -229,6 +233,7 @@ export function ImageStage({
           onPointerUp={interactive ? overlayPointerUp : undefined}
           onDoubleClick={tool === 'polygon' ? finishPolygon : undefined}
         >
+          {overlay && <g className="stage-overlay" pointerEvents="none">{overlay}</g>}
           {document.objects.map((object, index) => (
             <AnnotationShape
               key={object.id}
@@ -264,7 +269,7 @@ function AnnotationShape({ object, color, selected, index, onSelect }: { object:
     return <g><rect {...common} x={x} y={y} width={width} height={height} /><text className="shape-label" x={x + 4} y={Math.max(14, y + 14)}>{index}</text></g>
   }
   const ring = object.geometry.coordinates[0] ?? []
-  return <g><polygon {...common} points={coordinatePairs(ring)} /><text className="shape-label" x={ring[0] ?? 0} y={(ring[1] ?? 0) + 14}>{index}</text></g>
+  return <g><path {...common} d={ringsPath(object.geometry.coordinates)} fillRule="evenodd" /><text className="shape-label" x={ring[0] ?? 0} y={(ring[1] ?? 0) + 14}>{index}</text></g>
 }
 
 function addObject(document: AnnotationDocument, object: AnnotationObject): AnnotationDocument {

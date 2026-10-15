@@ -1,0 +1,60 @@
+{
+  "name": "categorical_three_of_five_below_support",
+  "strategy": {
+    "strategy": "categorical_vote",
+    "decision_rule": "supermajority"
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "cat",
+    "dog",
+    "no_object"
+  ],
+  "votes": [
+    {
+      "rater": "eva",
+      "outcome": "dog"
+    },
+    {
+      "rater": "ana",
+      "outcome": "cat"
+    },
+    {
+      "rater": "davi",
+      "outcome": "cat"
+    },
+    {
+      "rater": "bia",
+      "outcome": "dog"
+    },
+    {
+      "rater": "caio",
+      "outcome": "cat"
+    }
+  ],
+  "expected": {
+    "outcome": "cat",
+    "passed": false,
+    "reasons": [
+      "support_below_threshold"
+    ],
+    "metrics": {
+      "votes": {
+        "cat": 3,
+        "dog": 2,
+        "no_object": 0
+      },
+      "valid_votes": 5,
+      "support": {
+        "numerator": 3,
+        "denominator": 5
+      },
+      "margin": 1,
+      "normalized_entropy": 0.612602,
+      "decision_rule": "supermajority"
+    }
+  }
+}

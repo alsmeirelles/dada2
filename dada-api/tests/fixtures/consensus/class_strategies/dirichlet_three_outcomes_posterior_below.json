@@ -1,0 +1,57 @@
+{
+  "name": "dirichlet_three_outcomes_posterior_below",
+  "strategy": {
+    "strategy": "dirichlet_vote",
+    "alpha": 0.5,
+    "minimum_posterior": 0.9
+  },
+  "minimum_support": {
+    "numerator": 2,
+    "denominator": 3
+  },
+  "outcomes": [
+    "cat",
+    "dog",
+    "no_object"
+  ],
+  "votes": [
+    {
+      "rater": "ana",
+      "outcome": "cat"
+    },
+    {
+      "rater": "bia",
+      "outcome": "cat"
+    },
+    {
+      "rater": "caio",
+      "outcome": "dog"
+    },
+    {
+      "rater": "davi",
+      "outcome": "cat"
+    }
+  ],
+  "expected": {
+    "outcome": "cat",
+    "passed": false,
+    "reasons": [
+      "posterior_below_threshold"
+    ],
+    "metrics": {
+      "votes": {
+        "cat": 3,
+        "dog": 1,
+        "no_object": 0
+      },
+      "valid_votes": 4,
+      "support": {
+        "numerator": 3,
+        "denominator": 4
+      },
+      "margin": 2,
+      "normalized_entropy": 0.51186,
+      "posterior": 0.820681
+    }
+  }
+}

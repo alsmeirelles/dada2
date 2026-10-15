@@ -25,6 +25,7 @@ class ProjectAction(StrEnum):
     manage_classes = "manage_classes"
     manage_members = "manage_members"
     annotate = "annotate"
+    work_candidate_review = "work_candidate_review"
     manage_assignments = "manage_assignments"
     manage_annotation_policy = "manage_annotation_policy"
     read_annotation_evidence = "read_annotation_evidence"
@@ -42,6 +43,7 @@ ROLE_ACTIONS: dict[ProjectRole, frozenset[ProjectAction]] = {
             ProjectAction.manage_classes,
             ProjectAction.manage_members,
             ProjectAction.annotate,
+            ProjectAction.work_candidate_review,
             ProjectAction.manage_assignments,
             ProjectAction.manage_annotation_policy,
             ProjectAction.read_annotation_evidence,
@@ -54,6 +56,7 @@ ROLE_ACTIONS: dict[ProjectRole, frozenset[ProjectAction]] = {
         {
             ProjectAction.read_project,
             ProjectAction.annotate,
+            ProjectAction.work_candidate_review,
         }
     ),
     ProjectRole.viewer: frozenset({ProjectAction.read_project}),
