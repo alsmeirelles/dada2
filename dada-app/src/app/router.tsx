@@ -73,6 +73,24 @@ export const router = createBrowserRouter([
             }],
           },
           {
+            path: '/projects/:projectId/consensus',
+            lazy: async () => ({
+              Component: (await import('../features/consensus/ConsensusQueuePage')).ConsensusQueuePage,
+            }),
+          },
+          {
+            path: '/projects/:projectId/consensus/images/:batchItemId',
+            lazy: async () => ({
+              Component: (await import('../features/consensus/ImageEvidencePage')).ImageEvidencePage,
+            }),
+          },
+          {
+            path: '/projects/:projectId/consensus/work-items/:workItemId',
+            lazy: async () => ({
+              Component: (await import('../features/consensus/WorkItemPage')).WorkItemPage,
+            }),
+          },
+          {
             path: '/projects/:projectId/reviews',
             lazy: async () => ({
               Component: (await import('../features/consensus/CandidateReviewQueuePage')).CandidateReviewQueuePage,
@@ -82,18 +100,6 @@ export const router = createBrowserRouter([
             path: '/projects/:projectId/reviews/:reviewAssignmentId',
             lazy: async () => ({
               Component: (await import('../features/consensus/CandidateReviewPage')).CandidateReviewPage,
-            }),
-          },
-          {
-            path: '/projects/:projectId/consensus',
-            lazy: async () => ({
-              Component: (await import('../features/consensus/ConsensusReviewQueuePage')).ConsensusReviewQueuePage,
-            }),
-          },
-          {
-            path: '/projects/:projectId/consensus/:batchItemId',
-            lazy: async () => ({
-              Component: (await import('../features/consensus/ConsensusReviewPage')).ConsensusReviewPage,
             }),
           },
         ],

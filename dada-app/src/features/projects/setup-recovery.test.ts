@@ -35,6 +35,14 @@ describe('project setup recovery', () => {
     expect(loadSetup()).toBeNull()
   })
 
+  it('loads an older snapshot that still carries a retired policy field', () => {
+    sessionStorage.setItem(
+      'dada.project-setup',
+      JSON.stringify({ projectId: 'project-1', stage: 'policy', annotationPolicy: { mode: 'consensus', reviewThreshold: 0.75 } }),
+    )
+    expect(loadSetup()).toEqual({ projectId: 'project-1', stage: 'policy' })
+  })
+
   it('discards unreadable content', () => {
     sessionStorage.setItem('dada.project-setup', 'not json')
     expect(loadSetup()).toBeNull()

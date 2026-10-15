@@ -72,6 +72,17 @@ export type AssignmentDetail = {
   draft_saved_at: string | null
   revision: number | null
   submitted_at: string | null
+  /** Present only once the image is resolved; it never names peers or carries votes. */
+  resolution: FinalResolution | null
+}
+
+export type ResolutionSource = 'single_submission' | 'automatic_consensus' | 'expert_adjudication'
+
+/** The image's accepted canonical annotation as its annotators may see it. */
+export type FinalResolution = {
+  version: number
+  source: ResolutionSource
+  objects: AnnotationObject[]
 }
 
 export type DraftSaved = {

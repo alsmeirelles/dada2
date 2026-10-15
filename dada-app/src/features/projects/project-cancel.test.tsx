@@ -22,7 +22,7 @@ function payload(url: string) {
   if (url.endsWith('/annotation-policy')) return { mode: 'single', version: 1, annotator_ids: [] }
   if (url.endsWith('/members') || url.endsWith('/classes')) return { items: [], next_cursor: null }
   if (url.endsWith('/dataset-layout')) return { dataset_layout: 'split', prepared_at: null, train_size: 0, validation_size: 0, test_size: 0, first_training_batch_size: null, training_pool_size: 0, batch_ids: [], annotation_import_id: null }
-  if (url.endsWith('/capabilities')) return { consensus_resolvers: {} }
+  if (url.endsWith('/capabilities')) return { consensus_pipelines: {} }
   return project
 }
 

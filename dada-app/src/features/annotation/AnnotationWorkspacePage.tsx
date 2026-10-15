@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleHelp,
+  Eye,
   Hand,
   MousePointer2,
   Pentagon,
@@ -36,8 +37,10 @@ import {
 } from './annotation-api'
 import {
   AUTOSAVE_MS,
+  RESOLUTION_SOURCE_LABELS,
   STATUS_LABELS,
   filterAssignments,
+  finalDocument,
   isEditable,
   neighbor,
   openWork,
@@ -85,6 +88,7 @@ export function AnnotationWorkspacePage() {
   const [showClasses, setShowClasses] = useState(true)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [showFinal, setShowFinal] = useState(false)
   const classPanelRef = useRef<HTMLElement>(null)
 
   const bootstrap = useQuery({
@@ -168,6 +172,7 @@ export function AnnotationWorkspacePage() {
     setSelectedClassId(opened.document.objects[0]?.class_id ?? bootstrap.data?.classes[0]?.id ?? null)
     setTool(defaultTool(opened.document.task_type))
     setSaveState(opened.dirty ? 'dirty' : 'idle')
+    setShowFinal(false)
     setNotice(message ?? opened.notice)
   }, [bootstrap.data?.classes, projectId, setCurrentDocument])
 
@@ -372,6 +377,8 @@ export function AnnotationWorkspacePage() {
   if (bootstrap.isError) return <WorkspaceError error={bootstrap.error} />
   if (!bootstrap.data) return null
 
+  const finalView = showFinal && assignment ? finalDocument(assignment) : null
+  const shown = finalView ?? document
   const counts = queue.data?.counts ?? { pending: 0, in_progress: 0, submitted: 0 }
   const total = counts.pending + counts.in_progress + counts.submitted
   const purposes = [...new Set((queue.data?.items ?? []).map((item) => item.batch_purpose))]
@@ -433,16 +440,28 @@ export function AnnotationWorkspacePage() {
           <button onClick={redo} disabled={!redoStack.current.length || !editable} title="Redo (Ctrl Y)"><Redo2 size={18} /><span>Redo</span></button>
           <button onClick={removeSelected} disabled={!selectedObjectId || !editable} title="Delete selected"><Trash2 size={18} /><span>Delete</span></button>
           {!showClasses && <button onClick={() => setShowClasses(true)} title="Show classes (C)"><PanelRightOpen size={19} /><span>Classes</span></button>}
+          {assignment?.resolution && <>
+            <span className="tool-divider" />
+            <button className={showFinal ? 'active' : ''} onClick={() => setShowFinal((value) => !value)} aria-pressed={showFinal} title="Show the image's final annotation"><Eye size={18} /><span>Final</span></button>
+          </>}
         </div>
-        {assignment && document ? (
+        {assignment?.resolution && (
+          <div className="resolution-banner" role="status">
+            {showFinal
+              ? <span>Showing the final annotation · {RESOLUTION_SOURCE_LABELS[assignment.resolution.source]} · version {assignment.resolution.version}. Your submission is unchanged.</span>
+              : <span>This image is resolved by {RESOLUTION_SOURCE_LABELS[assignment.resolution.source].toLocaleLowerCase()}. You are viewing your own submission.</span>}
+            <button onClick={() => setShowFinal((value) => !value)}>{showFinal ? 'Show my submission' : 'Show final annotation'}</button>
+          </div>
+        )}
+        {assignment && shown ? (
           <ImageStage
             media={assignment.media}
-            document={document}
+            document={shown}
             classes={bootstrap.data.classes}
             tool={tool}
             selectedClassId={selectedClassId}
             selectedObjectId={selectedObjectId}
-            locked={!editable}
+            locked={!editable || Boolean(finalView)}
             samPending={sam.isPending}
             onChange={changeDocument}
             onSelectObject={setSelectedObjectId}
@@ -478,17 +497,17 @@ export function AnnotationWorkspacePage() {
           <div className="class-options">
             {bootstrap.data.classes.map((item, index) => (
               <button key={item.id} className={selectedClassId === item.id ? 'selected' : ''} onClick={() => selectClass(item.id)}>
-                <i style={{ background: item.color }} /><span><strong>{item.name}</strong><small>{bootstrap.data.project.task_type === 'classification' && document?.objects.some((object) => object.class_id === item.id) ? 'Assigned' : `Key ${index + 1}`}</small></span>{(selectedClassId === item.id || document?.objects.some((object) => object.class_id === item.id)) && <Check size={15} />}
+                <i style={{ background: item.color }} /><span><strong>{item.name}</strong><small>{bootstrap.data.project.task_type === 'classification' && shown?.objects.some((object) => object.class_id === item.id) ? 'Assigned' : `Key ${index + 1}`}</small></span>{(selectedClassId === item.id || shown?.objects.some((object) => object.class_id === item.id)) && <Check size={15} />}
               </button>
             ))}
           </div>
-          <div className="object-panel"><strong>{bootstrap.data.project.task_type === 'classification' ? 'Labels' : 'Objects'}</strong><span>{document?.objects.length ?? 0}</span>
+          <div className="object-panel"><strong>{finalView ? 'Final annotation' : bootstrap.data.project.task_type === 'classification' ? 'Labels' : 'Objects'}</strong><span>{shown?.objects.length ?? 0}</span>
             <div className="object-list">
-              {document?.objects.map((object, index) => {
+              {shown?.objects.map((object, index) => {
                 const objectClass = bootstrap.data.classes.find((item) => item.id === object.class_id)
                 return <button key={object.id} className={selectedObjectId === object.id ? 'selected' : ''} onClick={() => { setSelectedObjectId(object.id); setSelectedClassId(object.class_id) }}><i style={{ background: objectClass?.color }} /><span>{index + 1}. {objectClass?.name ?? 'Unknown class'}</span><small>{object.geometry?.type ?? 'label'}</small></button>
               })}
-              {!document?.objects.length && <p>No annotations yet.</p>}
+              {!shown?.objects.length && <p>{finalView ? 'The final annotation has no objects.' : 'No annotations yet.'}</p>}
             </div>
           </div>
         </aside>

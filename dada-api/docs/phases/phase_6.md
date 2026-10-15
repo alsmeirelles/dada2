@@ -1297,3 +1297,128 @@ ambiente conda `dada2`.
 | Uma adjudicação fecha a imagem | `test_an_adjudication_closes_a_failed_image` (a imagem e o lote ficam `resolved`) |
 | Resultados duplicados não criam duas resoluções aceitas | `test_duplicate_stale_and_concurrent_results_accept_once` (repetido, atrasado e concorrente) |
 | Observações corretas, por projeto, sem duplicar em nova tentativa | `test_acceptance_records_observations_once_and_supersession_closes_them`, `test_an_adjudicated_classification_is_eligible_for_weighting`, `test_detection_resolves_with_box_agreement_observations`, `test_segmentation_resolves_with_mask_agreement_observations`, `test_a_reviewed_false_positive_is_recorded_without_a_zero_overlap`, e as observações únicas em `test_duplicate_stale_and_concurrent_results_accept_once` |
+
+## Implementação do App
+
+Status: Passos 15 a 21 implementados em 2026-10-15, na branch `phase-6`, sem
+commit. O Passo 22 (verificação no navegador) fica para outra sessão, então o
+critério de saída do App ainda não foi percorrido ponta a ponta. Tudo continua
+pendente da revisão do Meirelles.
+
+### O que foi construído
+
+| Superfície | Onde (`dada-app/src/`) |
+| --- | --- |
+| Contrato: capabilities, política e lote tipados, tipos e cliente do gerente, evidência tipada do revisor, chaves de consulta | `api/capabilities.ts`, `api/client.ts`, `features/consensus/consensus-types.ts`, `consensus-api.ts`, `review-types.ts`, `review-api.ts` |
+| Chaves de idempotência com o hash do corpo | `api/idempotency.ts` |
+| Configuração do resolvedor guiada pelos descritores, no assistente, nas configurações e na política de cada lote; elegibilidade e histórico | `features/projects/ResolverConfigForm.tsx`, `resolver-config.ts`, `NewProjectPage.tsx`, `ProjectSettingsPage.tsx`, `ProjectBatchesPage.tsx` |
+| Tela do revisor: só a imagem e a região, uma caixa ou um polígono, ou **No object** | `features/consensus/CandidateReviewPage.tsx`, `review-draft.ts`, `review-recovery.ts` |
+| Fila do gerente, com filtros e paginação | `features/consensus/ConsensusQueuePage.tsx` |
+| Comparação de evidências, procedência das execuções, nova tentativa e cancelamento | `ImageEvidencePage.tsx`, `EvidenceStage.tsx`, `EvidenceShapes.tsx`, `SourceToggles.tsx`, `EvidenceTables.tsx`, `RetryDialog.tsx` |
+| Adjudicação com lease, recuperação local e reconciliação de `409` | `WorkItemPage.tsx`, `adjudication.ts`, `adjudication-recovery.ts`, `useEditLease.ts`, `ConfirmDialog.tsx` |
+| Contagens de resolução nos lotes, selo de revisão no card, anotação final no workspace | `ProjectBatchesPage.tsx`, `ProjectsPage.tsx`, `features/annotation/AnnotationWorkspacePage.tsx` |
+| Rotas do gerente | `app/router.tsx` |
+
+Os protótipos de agosto (`ConsensusReviewQueuePage`, `ConsensusReviewPage`)
+foram removidos, porque chamavam rotas que não existem (A-5).
+
+### Decisões tomadas na implementação
+
+- **Chave de idempotência com o hash do corpo (I6-02).**
+  - **O quê:** toda entrega, revisão, nova tentativa, cancelamento e
+    adjudicação usa `{escopo}:{id}:{hash do corpo}`.
+  - **Por quê:** a API guarda sob a chave toda resposta abaixo de 500, inclusive
+    um `422`. Com uma chave só por versão, um documento corrigido depois de um
+    `422` voltava como `409 idempotency_conflict`.
+  - **Efeito:** o mesmo corpo continua reaproveitando a resposta original
+    depois de uma resposta perdida.
+- **Nomes dos grupos de estratégia.**
+  - Os descritores listam as estratégias, mas não o grupo em que cada uma vai.
+  - O App guarda três constantes: `class_strategy` em todas as tarefas,
+    `box_refinement` na detecção e `mask_refinement` na segmentação.
+  - **Para o Meirelles:** o descritor poderia trazer esse nome.
+- **Padrão do Dice.**
+  - A API usa 2/3 em `matching_threshold` e `minimum_median_overlap` quando a
+    métrica é Dice e o campo é omitido. Os descritores não expressam esse
+    padrão condicional.
+  - O formulário espelha a regra: ao trocar a métrica, um campo ainda no padrão
+    da métrica anterior passa ao padrão da nova, e um valor escolhido pelo
+    usuário é mantido.
+  - **Para o Meirelles:** o descritor deveria trazer o padrão condicional.
+- **`ImageStage`.** Ganhou uma camada sobreposta somente leitura, usada para a
+  região do candidato e para o contexto da adjudicação. Também passou a
+  desenhar todos os anéis de um polígono, com os buracos, em vez de só o
+  primeiro.
+- **I6-01 substitui a decisão I5-03.**
+  - **Antes:** cada pasta selecionada era cortada na própria raiz, então
+    `norte/0001.jpg` e `sul/0001.jpg` colidiam, e a segunda era pulada.
+  - **Agora:** com duas ou mais pastas, cada imagem mantém o nome da sua pasta,
+    como se a pasta-mãe tivesse sido escolhida. Com uma pasta só, nada muda.
+  - **Por quê:** era isso que impedia a criação, como mostrou o teste que
+    reproduziu o I6-01. A mudança também deixa a importação de rótulos
+    coerente: ela aceita uma única pasta, então rótulos de várias pastas só
+    entravam pela pasta-mãe, com o nome da pasta no caminho.
+  - **Também:** a quantidade mínima exibida passou a incluir o crescimento do
+    percentual de validação e teste, e percentuais que somam 100% ou mais são
+    recusados.
+- **Contagens do card vêm dos lotes.** A API não devolve contagens no projeto,
+  e o card lia campos que nunca chegavam. O selo e o total resolvido vêm agora
+  de `GET /batches`. Um `403`, de quem não é owner ou manager, simplesmente os
+  esconde.
+- **`ApiError.details`.** O cliente passou a guardar os detalhes do erro, para
+  mostrar `details.errors` e os pré-requisitos ausentes (`details.missing`).
+- **Nova tentativa com configuração explícita (D19).** É opcional na
+  confirmação, parte da configuração da última execução e é validada pelos
+  mesmos descritores. A configuração do lote não muda.
+
+### Interpretações onde os documentos não diziam
+
+- **Link do caso.** Carrega `?item={batchItemId}`, porque nenhuma rota leva de
+  um caso à sua imagem. Sem o parâmetro, a página aponta para a fila.
+- **Chave de recuperação da adjudicação.** A versão-base é
+  `{geração}.{versão da resolução}`. A impressão digital da configuração vai
+  junto, para detectar conflito.
+- **Perda do lease.** A API recria o lease silenciosamente quando ele expirou.
+  Por isso, uma renovação que volta com outro lease conta como perda: o
+  rascunho fica, e a edição para até o gerente readquirir.
+- **Fila.** O filtro de estado nunca fica vazio, porque vazio significaria
+  `review_required` no servidor. A idade tem opções fixas (1 hora, 1 dia,
+  1 semana).
+- **Estratégias.**
+  - A primeira estratégia listada é o padrão, como no catálogo da API.
+  - "Mais estrito" é um limiar de revisão acima do padrão.
+  - "Muda a topologia" é qualquer passo de `post_processing` ligado.
+- **Edição de uma submissão bruta num caso de candidato.** O ponto de partida
+  são os objetos daquela submissão que pertencem ao candidato (`members`).
+- **Métricas.** Só as chaves que a API registra são mostradas. Na detecção,
+  isso é o IoU mediano por par, porque não há IoU por par individual.
+
+### O que ficou de fora
+
+| Item | Motivo |
+| --- | --- |
+| Pré-visualização em blocos ou reduzida para imagens grandes (A6-02) | Não há API de pré-visualização; o palco mostra a escala do zoom |
+| Miniaturas na fila | A fila não carrega imagens; mostra o caminho |
+| Foco preso no diálogo de confirmação | O foco entra no diálogo e Escape cancela, mas o foco não fica preso |
+| Versões de dependência e evidência de calibração no histórico da política (A6-04) | A rota de histórico não as devolve |
+| Quantidade de imagens no card (`media_count`) | A API não devolve; o card mostra "—". É anterior à fase 6 |
+
+### Verificação
+
+- `npm run check` verde: lint, **197 testes** em 37 arquivos (eram 67), build.
+- **Não verificado:** o navegador (Passo 22), com estes cenários:
+  - um resultado automático revisado e aceito;
+  - um caso forçado editado e adjudicado;
+  - um conflito de versão em duas abas;
+  - dois revisores em sessões separadas.
+- I6-01 e I6-02 recebem a declaração de resolução no arquivo de issues só
+  depois de confirmados ao vivo.
+
+### Cobertura do critério de saída do App (provisória)
+
+| Critério | Testes de componente | Navegador |
+| --- | --- | --- |
+| Um resultado automático pode ser revisado e aceito | `ImageEvidencePage.test.tsx`; `WorkItemPage.test.tsx` ("lets a plain acceptance go without a note") | Pendente |
+| Um caso forçado pode ser editado e adjudicado | `WorkItemPage.test.tsx` ("takes the lease, edits a raw submission, and records the decision with a rationale") | Pendente |
+| Versões desatualizadas preservam o trabalho local | `WorkItemPage.test.tsx` ("keeps the local draft through a version conflict…"), `CandidateReviewPage.test.tsx` ("keeps the local draft on a stale version…"), `adjudication-recovery.test.ts` | Pendente |
+| Issues pendentes resolvidos | I6-01: `NewProjectPage.test.tsx`, `ingest.test.ts`. I6-02: `idempotency.test.ts`, `assignment-view.test.ts`, `consensus-api.test.ts` | Pendente, com as declarações |

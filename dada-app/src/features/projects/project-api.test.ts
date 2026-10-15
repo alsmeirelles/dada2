@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildPolicyBody,
   buildProjectCreateBody,
+  minimumDatasetSize,
   resolveAnnotatorIds,
   resolveDraftSplitSize,
   resolvedFirstTrainingSize,
@@ -66,6 +67,15 @@ describe('split sizing', () => {
     expect(resolveDraftSplitSize(12, 20, 'percentage')).toBe(3)
     expect(resolveDraftSplitSize(12, 4, 'count')).toBe(4)
   })
+
+  it('finds the smallest dataset a percentage-sized held-out set can fit (I6-01)', () => {
+    const defaults: ProjectDraft = { ...baseDraft, initialTrainingSize: null, testSetSize: 10, testSetUnit: 'count', validationSetSize: 10, validationSetUnit: 'percentage', iterationBatchSize: 20 }
+
+    expect(minimumDatasetSize(defaults)).toBe(34)
+    expect(resolveDraftSplitSize(33, 10, 'percentage') + 10 + 20).toBeGreaterThan(33)
+    expect(minimumDatasetSize({ ...defaults, validationSetUnit: 'count' })).toBe(40)
+    expect(minimumDatasetSize({ ...defaults, testSetSize: 90, testSetUnit: 'percentage' })).toBeNull()
+  })
 })
 
 describe('dataset layout', () => {
@@ -112,11 +122,16 @@ describe('buildPolicyBody', () => {
       resolver: null,
       parameters: {},
       review_thresholds: {},
+      require_independent_adjudicator: false,
       version: 1,
     })
   })
 
-  it('sends resolved IDs, resolver, and thresholds in consensus mode', () => {
+  it('sends resolved IDs, the pipeline, and its typed configuration in consensus mode', () => {
+    const configuration = {
+      parameters: { class_strategy: { strategy: 'dirichlet_vote', alpha: 0.5, minimum_posterior: 0.9 }, matching_iou: 0.5, box_refinement: { strategy: 'coordinate_median' } },
+      review_thresholds: { minimum_support: { numerator: 3, denominator: 4 }, minimum_median_iou: 0.5 },
+    }
     const draft: ProjectDraft = {
       ...baseDraft,
       annotationPolicy: {
@@ -124,8 +139,9 @@ describe('buildPolicyBody', () => {
         annotatorUsernames: ['ana', 'bruno'],
         requiredAnnotations: 2,
         requiredReviewers: 1,
-        resolver: 'two_stage_box_fusion',
-        reviewThreshold: 0.75,
+        resolver: 'two_stage_detection_consensus',
+        configuration,
+        requireIndependentAdjudicator: true,
       },
     }
 
@@ -134,9 +150,10 @@ describe('buildPolicyBody', () => {
       annotator_ids: ['id-ana', 'id-bruno'],
       required_consensus_annotations: 2,
       required_consensus_reviewers: 1,
-      resolver: 'two_stage_box_fusion',
-      parameters: {},
-      review_thresholds: { agreement: 0.75 },
+      resolver: 'two_stage_detection_consensus',
+      parameters: configuration.parameters,
+      review_thresholds: configuration.review_thresholds,
+      require_independent_adjudicator: true,
       version: 3,
     })
   })

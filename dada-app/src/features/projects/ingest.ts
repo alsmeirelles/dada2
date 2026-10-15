@@ -9,7 +9,12 @@ const SUPPORTED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
 export type LocalImage = {
   clientFileId: string
   file: File
+  /** The path sent to the API; it depends on every folder selected so far. */
   relativePath: string
+  /** The selected folder's own name, or null for individually chosen files. */
+  selectionRoot: string | null
+  /** The path inside the selected folder. */
+  pathInSelection: string
   mediaType: string
   sizeBytes: number
   sha256?: string
@@ -36,6 +41,7 @@ export function selectedRelativePaths(files: Iterable<File>) {
   return candidates.map(({ file, sourcePath }) => ({
     file,
     sourcePath,
+    selectedRoot,
     relativePath: selectedRoot ? sourcePath.split('/').slice(1).join('/') : sourcePath,
   }))
 }
@@ -45,7 +51,7 @@ export function scanImageFiles(files: Iterable<File>): ScanResult {
   const rejected: RejectedLocalFile[] = []
   let totalBytes = 0
 
-  for (const { file, sourcePath, relativePath } of selectedRelativePaths(files)) {
+  for (const { file, sourcePath, selectedRoot, relativePath } of selectedRelativePaths(files)) {
     const segments = relativePath.split('/')
 
     if (!relativePath || segments.includes('..')) {
@@ -69,6 +75,8 @@ export function scanImageFiles(files: Iterable<File>): ScanResult {
       clientFileId: crypto.randomUUID(),
       file,
       relativePath,
+      selectionRoot: selectedRoot,
+      pathInSelection: relativePath,
       mediaType: inferMediaType(file),
       sizeBytes: file.size,
     })
@@ -81,20 +89,27 @@ export function scanImageFiles(files: Iterable<File>): ScanResult {
 /**
  * Adds another folder or file selection to the images already chosen.
  *
- * Each selection is relative to its own root, so two folders can both hold
- * `0001.jpg`. The API refuses two images at one path, so a later image whose
- * path is already taken is skipped and reported instead.
+ * One folder is sent relative to its own root, so its name never leaves the
+ * browser. Once images come from two or more folders, every folder image keeps
+ * its folder's name as the first path segment, as if their common parent had
+ * been selected; otherwise `north/0001.jpg` and `south/0001.jpg` would collide.
+ * A path that is still taken is skipped and reported, because the API refuses
+ * two images at one path.
  */
 export function mergeSelections(current: LocalImage[], added: LocalImage[]) {
-  const taken = new Set(current.map((image) => image.relativePath))
-  const images = [...current]
+  const roots = new Set([...current, ...added].map((image) => image.selectionRoot).filter(Boolean))
+  const taken = new Set<string>()
+  const images: LocalImage[] = []
   const rejected: RejectedLocalFile[] = []
-  for (const image of added) {
-    if (taken.has(image.relativePath)) {
-      rejected.push({ relativePath: image.relativePath, reason: 'duplicate_path' })
+  for (const image of [...current, ...added]) {
+    const relativePath = roots.size > 1 && image.selectionRoot
+      ? `${image.selectionRoot}/${image.pathInSelection}`
+      : image.pathInSelection
+    if (taken.has(relativePath)) {
+      rejected.push({ relativePath, reason: 'duplicate_path' })
     } else {
-      taken.add(image.relativePath)
-      images.push(image)
+      taken.add(relativePath)
+      images.push({ ...image, relativePath })
     }
   }
   return { images, rejected }

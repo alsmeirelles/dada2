@@ -1,8 +1,12 @@
-import { Activity, AlertCircle, FolderOpen, Layers3, PenLine, Plus, Settings, Users, Wrench } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Activity, AlertCircle, ClipboardCheck, FolderOpen, Layers3, PenLine, Plus, Settings, Users, Wrench } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
+import { useAuth } from '../auth/auth-context'
+import { listBatches } from './batch-api'
+import type { Project } from './types'
 import { useProjects } from './useProjects'
 
 const statusLabels = {
@@ -47,62 +51,87 @@ export function ProjectsPage() {
       )}
       {projects.data && projects.data.items.length > 0 && (
         <section className="project-grid" aria-label="Projects">
-          {projects.data.items.map((project) => (
-            <article className="project-card" key={project.id}>
-              <div className="project-card__top">
-                <span className={`status-badge status-badge--${project.status}`}>
-                  {statusLabels[project.status]}
-                </span>
-                <span className="task-label">{project.task_type}</span>
-              </div>
-              <h2>{project.name}</h2>
-              <p>{project.description || 'No description'}</p>
-              <dl>
-                <div><dt>Images</dt><dd>{project.media_count ?? '—'}</dd></div>
-                <div><dt>Resolved</dt><dd>{project.resolved_images ?? project.completed_annotations ?? '—'}</dd></div>
-                <div><dt>Batch</dt><dd>{project.iteration_batch_size ?? 'Static'}</dd></div>
-              </dl>
-              <nav className="project-card__actions" aria-label={`${project.name} actions`}>
-                {project.status === 'active' && (
-                  <Link className="project-card__action" to={`/projects/${project.id}/reviews`}>
-                    <Users size={16} aria-hidden="true" /> Open my candidate reviews
-                  </Link>
-                )}
-                {project.status === 'active' && (
-                  <Link className="project-card__action" to={`/projects/${project.id}/annotate`}>
-                    <PenLine size={16} aria-hidden="true" /> Open my assignments
-                  </Link>
-                )}
-                {(project.status === 'active' || project.status === 'ready') && (
-                  <Link className="project-card__action" to={`/projects/${project.id}/batches`}>
-                    <Layers3 size={16} aria-hidden="true" /> View annotation batches
-                  </Link>
-                )}
-                {project.status === 'draft' && (
-                  <Link className="project-card__action" to={`/projects/${project.id}/setup`}>
-                    <Wrench size={16} aria-hidden="true" /> Resume project setup
-                  </Link>
-                )}
-                <Link className="project-card__action" to={`/projects/${project.id}/settings`}>
-                  <Settings size={16} aria-hidden="true" /> Annotation settings
-                </Link>
-                {(project.status === 'training' || project.status === 'completed' || project.status === 'failed') && (
-                  <Link className="project-card__action" to={`/projects/${project.id}/activity`}>
-                    <Activity size={16} aria-hidden="true" /> View iteration activity
-                  </Link>
-                )}
-                {(project.review_required_count ?? 0) > 0 && (
-                  <Link className="project-card__action" to={`/projects/${project.id}/consensus`}>
-                    <Users size={16} aria-hidden="true" /> Review {project.review_required_count} consensus item{project.review_required_count === 1 ? '' : 's'}
-                  </Link>
-                )}
-              </nav>
-            </article>
-          ))}
+          {projects.data.items.map((project) => <ProjectCard key={project.id} project={project} />)}
         </section>
       )}
     </main>
   )
+}
+
+function ProjectCard({ project }: { project: Project }) {
+  const totals = useResolutionTotals(project.id, project.status === 'active')
+  return (
+    <article className="project-card">
+      <div className="project-card__top">
+        <span className={`status-badge status-badge--${project.status}`}>
+          {statusLabels[project.status]}
+        </span>
+        <span className="task-label">{project.task_type}</span>
+      </div>
+      <h2>{project.name}</h2>
+      <p>{project.description || 'No description'}</p>
+      {totals && totals.reviewRequired > 0 && (
+        <Link className="project-card__badge" to={`/projects/${project.id}/consensus`}>
+          <ClipboardCheck size={14} aria-hidden="true" /> {totals.reviewRequired} image{totals.reviewRequired === 1 ? '' : 's'} need{totals.reviewRequired === 1 ? 's' : ''} review
+        </Link>
+      )}
+      <dl>
+        <div><dt>Images</dt><dd>{project.media_count ?? '—'}</dd></div>
+        <div><dt>Resolved</dt><dd>{totals?.resolved ?? '—'}</dd></div>
+        <div><dt>Batch</dt><dd>{project.iteration_batch_size ?? 'Static'}</dd></div>
+      </dl>
+      <nav className="project-card__actions" aria-label={`${project.name} actions`}>
+        {project.status === 'active' && (
+          <Link className="project-card__action" to={`/projects/${project.id}/reviews`}>
+            <Users size={16} aria-hidden="true" /> Open my candidate reviews
+          </Link>
+        )}
+        {project.status === 'active' && (
+          <Link className="project-card__action" to={`/projects/${project.id}/annotate`}>
+            <PenLine size={16} aria-hidden="true" /> Open my assignments
+          </Link>
+        )}
+        {(project.status === 'active' || project.status === 'ready') && (
+          <Link className="project-card__action" to={`/projects/${project.id}/batches`}>
+            <Layers3 size={16} aria-hidden="true" /> View annotation batches
+          </Link>
+        )}
+        {project.status === 'draft' && (
+          <Link className="project-card__action" to={`/projects/${project.id}/setup`}>
+            <Wrench size={16} aria-hidden="true" /> Resume project setup
+          </Link>
+        )}
+        <Link className="project-card__action" to={`/projects/${project.id}/settings`}>
+          <Settings size={16} aria-hidden="true" /> Annotation settings
+        </Link>
+        {(project.status === 'training' || project.status === 'completed' || project.status === 'failed') && (
+          <Link className="project-card__action" to={`/projects/${project.id}/activity`}>
+            <Activity size={16} aria-hidden="true" /> View iteration activity
+          </Link>
+        )}
+      </nav>
+    </article>
+  )
+}
+
+/**
+ * Resolved and review-required images summed over a project's batches. The
+ * batches are an owner and manager view, so anyone else gets a `403` and sees
+ * neither number.
+ */
+function useResolutionTotals(projectId: string, enabled: boolean) {
+  const { token } = useAuth()
+  const batches = useQuery({
+    queryKey: ['project-batches', projectId],
+    queryFn: () => listBatches(projectId, token!),
+    enabled: Boolean(token && enabled),
+    retry: (failures, error) => !(error instanceof ApiError && error.status === 403) && failures < 3,
+  })
+  if (!batches.data) return null
+  return {
+    resolved: batches.data.items.reduce((total, batch) => total + batch.resolved_items, 0),
+    reviewRequired: batches.data.items.reduce((total, batch) => total + batch.review_required_items, 0),
+  }
 }
 
 function errorMessage(error: Error) {

@@ -1,3 +1,5 @@
+import type { ResolverConfiguration } from './resolver-config'
+
 export type TaskType = 'classification' | 'detection' | 'segmentation'
 export type ProjectStatus =
   | 'draft'
@@ -28,9 +30,6 @@ export type Project = {
   created_at: string
   updated_at: string
   media_count?: number
-  completed_annotations?: number
-  resolved_images?: number
-  review_required_count?: number
 }
 
 export type AcquisitionStrategy = 'random' | 'active_learning'
@@ -46,10 +45,17 @@ export type AnnotationPolicyDraft =
       annotatorUsernames: string[]
       requiredAnnotations: number
       requiredReviewers: number
+      /** The task's pipeline ID; empty until the capabilities have loaded. */
       resolver: string
-      reviewThreshold: number
+      configuration: ResolverConfiguration
+      requireIndependentAdjudicator: boolean
     }
 
+/**
+ * `parameters` and `review_thresholds` are the pipeline's closed, typed
+ * configuration; `/capabilities` describes every field. The API fills omitted
+ * values with their defaults.
+ */
 export type AnnotationPolicy = {
   mode: AnnotationMode
   version: number
@@ -58,9 +64,12 @@ export type AnnotationPolicy = {
   required_consensus_reviewers: number | null
   resolver?: string | null
   resolver_version?: string | null
-  parameters?: Record<string, number | string | boolean>
-  review_thresholds?: Record<string, number>
+  parameters?: ResolverSettings
+  review_thresholds?: ResolverSettings
+  require_independent_adjudicator?: boolean
 }
+
+export type ResolverSettings = Record<string, unknown>
 
 export type ProjectClassInput = {
   id: string
@@ -120,8 +129,9 @@ export type AnnotationBatch = {
   required_consensus_reviewers: number | null
   resolver: string | null
   resolver_version: string | null
-  parameters: Record<string, number | string | boolean>
-  review_thresholds: Record<string, number>
+  parameters: ResolverSettings
+  review_thresholds: ResolverSettings
+  require_independent_adjudicator: boolean
   source_policy_version: number
   selection_strategy: string
   selection_seed: number
@@ -130,6 +140,9 @@ export type AnnotationBatch = {
   total_items: number
   resolved_items: number
   awaiting_resolution_items: number
+  resolving_items: number
+  in_review_items: number
+  review_required_items: number
   cancelled_items: number
   total_assignments: number
   available_assignments: number

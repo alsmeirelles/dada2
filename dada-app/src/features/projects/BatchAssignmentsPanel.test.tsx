@@ -31,7 +31,8 @@ function batch(purpose: BatchPurpose): AnnotationBatch {
     required_consensus_annotations: null, required_consensus_reviewers: null,
     resolver: null, resolver_version: null, parameters: {}, review_thresholds: {}, source_policy_version: 1,
     selection_strategy: 'random', selection_seed: 1, selection_input_fingerprint: 'f', requested_size: 1,
-    total_items: 1, resolved_items: 0, awaiting_resolution_items: 0, cancelled_items: 0, total_assignments: 1,
+    require_independent_adjudicator: false, total_items: 1, resolved_items: 0, awaiting_resolution_items: 0,
+    resolving_items: 0, in_review_items: 0, review_required_items: 0, cancelled_items: 0, total_assignments: 1,
     available_assignments: 0, in_progress_assignments: 0, submitted_assignments: 1, started_at: null,
     created_at: '2026-09-30T12:00:00Z', updated_at: '2026-09-30T12:00:00Z',
   }

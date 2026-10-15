@@ -7,6 +7,7 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code?: string,
     readonly traceId?: string,
+    readonly details?: unknown,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -43,6 +44,7 @@ export async function apiRequest<T>(
       response.status,
       payload?.error?.code,
       payload?.error?.trace_id,
+      payload?.error?.details,
     )
   }
 
