@@ -4,15 +4,9 @@ Python API for the DADA annotation App and active-learning system. The service
 is developed independently from the browser App while sharing the versioned v1
 contract.
 
-Phase 0 provides the FastAPI application foundation, PostgreSQL/Alembic
-persistence boundary, Redis connectivity, health/readiness probes, structured
-errors and tracing, CORS, durable idempotency, capability discovery, and the
-generated OpenAPI artifact.
-
-Phase 1 adds the identity layer: an idempotent administrator bootstrap command,
-refresh-token rotation with replay detection, logout and revocation, and
-centralized project-role authorization. Active-learning algorithms are deferred
-behind a later worker adapter.
+The service includes the FastAPI application foundation, PostgreSQL/Alembic
+persistence, Redis connectivity, identity and project authorization, dataset
+ingestion, annotation batches, and the consensus-resolution engine.
 
 See:
 
@@ -28,8 +22,18 @@ make sync-dev
 make infra-up
 make migrate
 make bootstrap-admin
-make run
 ```
+
+Then run:
+
+```bash
+make run                              # terminal 1: the API
+make consensus                        # terminal 2: relay and both worker queues
+```
+
+The consensus target supervises the outbox relay plus the standard and mask
+worker queues; press `Ctrl-C` to stop all three. On Windows, use `make
+consensus CELERY_POOL=solo`.
 
 To discard an incompatible local development database and migrate a fresh one,
 run `make rebuild`, then rerun `make bootstrap-admin`. The rebuild command

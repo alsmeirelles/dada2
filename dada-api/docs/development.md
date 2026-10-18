@@ -2,9 +2,10 @@
 
 This guide covers the Phase 0 service foundation, the Phase 1 identity, session,
 and authorization layer, the Phase 2 project setup, membership, and annotation
-policy, the Phase 3 ingestion and media store, and the Phase 4 user
-administration, activation, and annotation batches. Concrete active-learning and
-GPU workers are intentionally not part of these phases.
+policy, the Phase 3 ingestion and media store, the Phase 4 user administration,
+activation, and annotation batches, and the Phase 6 consensus-resolution engine.
+Concrete active-learning and GPU workers are intentionally not part of these
+phases.
 
 ## Prerequisites
 
@@ -22,7 +23,13 @@ make sync-dev
 make infra-up
 make migrate
 make bootstrap-admin
-make run
+```
+
+Then run the API and consensus processes in separate terminals:
+
+```bash
+make run                              # terminal 1: the API
+make consensus                        # terminal 2: relay and both worker queues
 ```
 
 A freshly migrated database contains no users and exposes no route that can
@@ -528,14 +535,14 @@ not finished.
 ```bash
 make infra-up
 make migrate
-make run                                   # terminal 1: the API
-make relay                                 # terminal 2: the outbox relay
-make worker-standard CELERY_POOL=solo      # terminal 3: classification and detection
-make worker-mask CELERY_POOL=solo          # terminal 4: segmentation
+make run                              # terminal 1: the API
+make consensus                        # terminal 2: relay and both worker queues
 ```
 
-Celery's default `prefork` pool does not run on Windows; use
-`CELERY_POOL=solo` there. With `solo`, the concurrency and per-child memory
+`make consensus` supervises the outbox relay, classification/detection worker,
+and segmentation worker in one process. Press `Ctrl-C` to stop all three.
+Celery's default `prefork` pool does not run on Windows; use `make consensus
+CELERY_POOL=solo` there. With `solo`, the concurrency and per-child memory
 flags have no effect.
 
 Only the workers need the `consensus` extra (numpy, SciPy, OpenCV, pandas,

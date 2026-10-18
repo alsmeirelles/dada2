@@ -29,6 +29,7 @@ help:
 	  'migration-check  Fail if ORM metadata differs from migration head.' \
 	  'bootstrap-admin  Create the initial administrator. Safe to rerun.' \
 	  'run              Run the API; does not migrate or seed the database.' \
+	  'consensus        Run the consensus relay and both worker queues together.' \
 	  'relay            Run the consensus outbox relay.' \
 	  'worker-standard  Run the classification and detection consensus worker.' \
 	  'worker-mask      Run the segmentation consensus worker.' \
@@ -84,6 +85,20 @@ worker-standard:
 
 worker-mask:
 	uv run celery -A dada_api.workers.celery_app worker -Q consensus.mask -n 'mask@%h' --pool '$(CELERY_POOL)' -c 1 --max-memory-per-child $$(( $(DADA_CONSENSUS_MASK_MEMORY_BYTES) / 1024 ))
+
+.PHONY: consensus
+consensus:
+	@pids=(); \
+	cleanup() { \
+		trap - EXIT INT TERM; \
+		kill "$${pids[@]}" 2>/dev/null || true; \
+		wait "$${pids[@]}" 2>/dev/null || true; \
+	}; \
+	trap cleanup EXIT INT TERM; \
+	( exec uv run dada-api consensus-relay ) & pids+=($$!); \
+	( exec uv run celery -A dada_api.workers.celery_app worker -Q consensus.standard -n 'standard@%h' --pool '$(CELERY_POOL)' -c 4 --max-memory-per-child $$(( $(DADA_CONSENSUS_STANDARD_MEMORY_BYTES) / 1024 )) ) & pids+=($$!); \
+	( exec uv run celery -A dada_api.workers.celery_app worker -Q consensus.mask -n 'mask@%h' --pool '$(CELERY_POOL)' -c 1 --max-memory-per-child $$(( $(DADA_CONSENSUS_MASK_MEMORY_BYTES) / 1024 )) ) & pids+=($$!); \
+	wait -n "$${pids[@]}"
 
 .PHONY: openapi
 openapi:
