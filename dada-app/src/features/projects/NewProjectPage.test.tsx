@@ -31,7 +31,15 @@ function readyCount() {
 }
 
 function renderWizard(stepsAfterClasses = 3) {
-  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ consensus_pipelines: consensusPipelines }), { status: 200, headers: { 'Content-Type': 'application/json' } }))))
+  vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => Promise.resolve(new Response(JSON.stringify(
+    url.includes('/users/eligible-annotators')
+      ? { items: [
+          { id: 'owner', username: 'owner', display_name: 'Owner' },
+          { id: 'ana-id', username: 'ana', display_name: 'Ana' },
+          { id: 'bruno-id', username: 'bruno', display_name: 'Bruno' },
+        ], next_cursor: null }
+      : { consensus_pipelines: consensusPipelines },
+  ), { status: 200, headers: { 'Content-Type': 'application/json' } }))))
   const context: AuthContextValue = {
     user: { id: 'owner', username: 'owner', display_name: 'Owner', is_administrator: false, is_active: true, version: 1, created_at: '2026-09-30T12:00:00Z' },
     token: 'token', isLoading: false, login: vi.fn(), logout: vi.fn(),
@@ -77,9 +85,24 @@ describe('I6-01: selecting images from several folders', () => {
 })
 
 describe('consensus resolution settings in the wizard', () => {
+  it('selects project annotators from active users returned by the API', async () => {
+    renderWizard(2)
+
+    expect(screen.queryByLabelText(/Annotator usernames/)).not.toBeInTheDocument()
+    const ana = await screen.findByRole('checkbox', { name: /Ana.*@ana/ })
+    const bruno = screen.getByRole('checkbox', { name: /Bruno.*@bruno/ })
+    fireEvent.click(ana)
+    fireEvent.click(bruno)
+
+    expect(ana).toBeChecked()
+    expect(bruno).toBeChecked()
+    expect(screen.queryByRole('checkbox', { name: /Owner.*@owner/ })).not.toBeInTheDocument()
+  })
+
   it('configures the task pipeline from the catalog and summarizes it before creation', HASHING_TIMEOUT, async () => {
     renderWizard(2)
-    fireEvent.change(screen.getByLabelText(/Annotator usernames/), { target: { value: 'ana, bruno' } })
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Ana.*@ana/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Bruno.*@bruno/ }))
     fireEvent.click(screen.getByLabelText('Consensus annotation'))
 
     expect(await screen.findByText('Two stage detection consensus')).toBeInTheDocument()

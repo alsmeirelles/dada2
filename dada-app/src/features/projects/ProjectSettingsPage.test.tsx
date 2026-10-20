@@ -73,7 +73,7 @@ describe('default policy settings', () => {
 
     expect(await screen.findByRole('radio', { name: /Dirichlet vote/ })).toBeChecked()
     expect(screen.getByLabelText('Minimum posterior')).toHaveValue(0.95)
-    expect(await screen.findByText('Not enough project evidence: calibration items (required 50, found 12).')).toBeInTheDocument()
+    expect(await screen.findByText('Available after this project has 50 resolved images annotated by at least three selected annotators.')).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: /Reliability weighted vote/ })).toBeEnabled()
     expect(screen.getByRole('radio', { name: /Dawid skene/ })).toBeDisabled()
     expect(await screen.findByText(/2 batches are still preparing and keep their current snapshots/)).toBeInTheDocument()

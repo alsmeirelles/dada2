@@ -45,6 +45,13 @@
 .team-callout { display: flex; gap: 1rem; padding: 1.2rem; border-radius: 10px; color: #3c3489; background: #f3f1ff; }
 .team-callout svg { flex: 0 0 auto; }
 .team-callout p { margin: .3rem 0 0; color: #625b8c; }
+.user-picker { margin: 0; padding: 0; border: 0; display: grid; gap: .55rem; }
+.user-picker legend { margin-bottom: .25rem; font-size: .875rem; font-weight: 700; }
+.user-picker > label { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .7rem; padding: .7rem .8rem; border: 1px solid var(--line); border-radius: 9px; cursor: pointer; }
+.user-picker > label:has(input:checked) { border-color: var(--brand); background: #faf9ff; }
+.user-picker input { accent-color: var(--brand); }
+.user-picker span { display: grid; gap: .1rem; }
+.user-picker small, .user-picker p { margin: 0; color: var(--muted); font-weight: 400; }
 .folder-drop { min-height: 220px; border: 2px dashed #cbd2da; border-radius: 12px; display: grid; place-content: center; justify-items: center; gap: .65rem; color: var(--muted); background: #fafbfc; cursor: pointer; }
 .folder-drop:hover { border-color: var(--brand); background: #faf9ff; }
 .folder-drop strong { color: var(--ink); font-size: 1rem; }

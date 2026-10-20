@@ -20,6 +20,7 @@ import { DatasetPreparationPanel } from './DatasetPreparationPanel'
 import {
   createProjectWithDataset,
   deleteProject,
+  listEligibleAnnotators,
   minimumDatasetSize,
   resolveDraftSplitSize,
   resolvedFirstTrainingSize,
@@ -72,7 +73,6 @@ export function NewProjectPage() {
   const [serverProjectId, setServerProjectId] = useState<string | null>(null)
   const [step, setStep] = useState(0)
   const [draft, setDraft] = useState(initialDraft)
-  const [collaboratorInput, setCollaboratorInput] = useState('')
   const [images, setImages] = useState<LocalImage[]>([])
   const [rejected, setRejected] = useState<RejectedLocalFile[]>([])
   const [hashProgress, setHashProgress] = useState<number | null>(null)
@@ -90,7 +90,15 @@ export function NewProjectPage() {
     staleTime: Infinity,
   })
   const pipeline = capabilities.data?.consensus_pipelines[draft.taskType]
-  const eligibleAnnotators = [...new Set([
+  const users = useQuery({
+    queryKey: ['eligible-annotators'],
+    queryFn: () => listEligibleAnnotators(token!),
+    enabled: Boolean(token),
+    staleTime: 60_000,
+  })
+  const selectableAnnotators = (users.data ?? []).filter((candidate) => candidate.id !== user?.id)
+  const usersByUsername = new Map((users.data ?? []).map((candidate) => [candidate.username, candidate]))
+  const consensusUsernames = [...new Set([
     ...(user ? [user.username] : []),
     ...draft.collaborators,
   ])]
@@ -111,6 +119,23 @@ export function NewProjectPage() {
   function updateClass(id: string, patch: Partial<ProjectClassInput>) {
     updateDraft({
       classes: draft.classes.map((item) => item.id === id ? { ...item, ...patch } : item),
+    })
+  }
+
+  function toggleCollaborator(username: string, selected: boolean) {
+    setDraft((current) => {
+      const collaborators = selected
+        ? [...new Set([...current.collaborators, username])]
+        : current.collaborators.filter((candidate) => candidate !== username)
+      const annotationPolicy = current.annotationPolicy.mode === 'consensus'
+        ? {
+            ...current.annotationPolicy,
+            annotatorUsernames: selected
+              ? [...new Set([...current.annotationPolicy.annotatorUsernames, username])]
+              : current.annotationPolicy.annotatorUsernames.filter((candidate) => candidate !== username),
+          }
+        : current.annotationPolicy
+      return { ...current, collaborators, annotationPolicy }
     })
   }
 
@@ -282,17 +307,25 @@ export function NewProjectPage() {
           <div className="wizard-section">
             <div><p className="eyebrow">Step 4</p><h2 id="step-3-title">Team and annotation strategy</h2><p className="muted">Invite existing DADA users, then choose independent single or consensus annotation.</p></div>
             <div className="team-callout"><Users aria-hidden="true" /><div><strong>Independent assignments</strong><p>Consensus members annotate the same images independently. Ambiguous results are sent to manager review.</p></div></div>
-            <label className="field">Annotator usernames <span className="optional">Optional</span>
-              <textarea value={collaboratorInput} onChange={(e) => { setCollaboratorInput(e.target.value); updateDraft({ collaborators: parseCollaborators(e.target.value) }) }} placeholder={'ana\nbruno'} />
-              <small>Enter one username per line or separate them with commas.</small>
-            </label>
+            <fieldset className="user-picker"><legend>Project annotators <span className="optional">Optional</span></legend>
+              {users.isPending && <p className="muted">Loading active users…</p>}
+              {users.isError && <p className="form-error" role="alert">Active users could not be loaded. Reload the page to try again.</p>}
+              {users.isSuccess && selectableAnnotators.length === 0 && <p className="muted">There are no other active users to add.</p>}
+              {selectableAnnotators.map((candidate) => (
+                <label key={candidate.id}>
+                  <input type="checkbox" aria-label={`${candidate.display_name} (@${candidate.username})`} checked={draft.collaborators.includes(candidate.username)} onChange={(event) => toggleCollaborator(candidate.username, event.target.checked)} />
+                  <span><strong>{candidate.display_name}</strong><small>@{candidate.username}</small></span>
+                </label>
+              ))}
+              <small>Only active DADA users are shown. Selected users join the project as annotators.</small>
+            </fieldset>
             <fieldset className="task-picker"><legend>Annotation strategy</legend>
               <label aria-label="Single annotation" htmlFor="annotation-mode-single" className={draft.annotationPolicy.mode === 'single' ? 'task-option selected' : 'task-option'}>
                 <input id="annotation-mode-single" type="radio" name="annotation-mode" checked={draft.annotationPolicy.mode === 'single'} onChange={() => updateDraft({ annotationPolicy: { mode: 'single' } })} />
                 <span><strong>Single annotation</strong><small>One submission resolves each selected image.</small></span>
               </label>
               <label aria-label="Consensus annotation" htmlFor="annotation-mode-consensus" className={draft.annotationPolicy.mode === 'consensus' ? 'task-option selected' : 'task-option'}>
-                <input id="annotation-mode-consensus" type="radio" name="annotation-mode" checked={draft.annotationPolicy.mode === 'consensus'} onChange={() => updateDraft({ annotationPolicy: { mode: 'consensus', annotatorUsernames: eligibleAnnotators, requiredAnnotations: 2, requiredReviewers: 1, resolver: pipeline?.id ?? '', configuration: pipeline ? defaultConfiguration(draft.taskType, pipeline) : { parameters: {}, review_thresholds: {} }, requireIndependentAdjudicator: false } })} />
+                <input id="annotation-mode-consensus" type="radio" name="annotation-mode" checked={draft.annotationPolicy.mode === 'consensus'} onChange={() => updateDraft({ annotationPolicy: { mode: 'consensus', annotatorUsernames: consensusUsernames, requiredAnnotations: 2, requiredReviewers: 1, resolver: pipeline?.id ?? '', configuration: pipeline ? defaultConfiguration(draft.taskType, pipeline) : { parameters: {}, review_thresholds: {} }, requireIndependentAdjudicator: false } })} />
                 <span><strong>Consensus annotation</strong><small>A fixed cohort labels each image independently.</small></span>
               </label>
             </fieldset>
@@ -300,7 +333,7 @@ export function NewProjectPage() {
               <div className="field-grid">
                 <label className="field" htmlFor="consensus-annotators">Consensus annotators
                   <select id="consensus-annotators" multiple value={consensusPolicy.annotatorUsernames} onChange={(event) => updateDraft({ annotationPolicy: { ...consensusPolicy, annotatorUsernames: [...event.currentTarget.selectedOptions].map((option) => option.value) } })}>
-                    {eligibleAnnotators.map((username) => <option key={username} value={username}>{username}{username === user?.username ? ' (you, owner)' : ''}</option>)}
+                    {consensusUsernames.map((username) => <option key={username} value={username}>{username === user?.username ? `${username} (you, owner)` : `${usersByUsername.get(username)?.display_name ?? username} (@${username})`}</option>)}
                   </select>
                   <small>The pool must fit the initial cohort and distinct review cohort. You, as the project owner, may annotate too.</small>
                 </label>
@@ -428,10 +461,6 @@ function Progress({ value, label }: { value: number; label: string }) {
 
 function settingsLine(settings: Record<string, unknown>) {
   return summarizeSettings(settings).map((line) => `${line.label}: ${line.value}`).join(' · ')
-}
-
-function parseCollaborators(value: string) {
-  return [...new Set(value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))]
 }
 
 function validateStep(step: number, draft: ProjectDraft, images: LocalImage[], pipeline: PipelineCapability | undefined) {

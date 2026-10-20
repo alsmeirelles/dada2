@@ -127,10 +127,21 @@ class Settings(BaseSettings):
     def resolve_storage_root(cls, value: Path) -> Path:
         """Resolve a storage root, treating a relative path as package-relative.
 
+        GNU Make preserves quotes when it includes a dotenv file, while dotenv
+        parsers treat them as syntax. Accept a matching outer quote pair so a
+        value exported by ``make`` resolves to the same path as a value loaded
+        directly from ``.env``.
+
         Resolving is unconditional so that the containment check guarding every
         storage path compares two paths in the same canonical form.
         """
-        return (value if value.is_absolute() else PACKAGE_ROOT / value).resolve()
+        raw = str(value).strip()
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {'"', "'"}:
+            raw = raw[1:-1]
+        normalized = Path(raw)
+        return (
+            normalized if normalized.is_absolute() else PACKAGE_ROOT / normalized
+        ).resolve()
 
     @field_validator("refresh_cookie_samesite")
     @classmethod

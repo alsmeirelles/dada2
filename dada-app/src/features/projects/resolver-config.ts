@@ -218,12 +218,30 @@ export function strategyBlock(strategy: StrategyCapability, eligibility: Eligibi
   const verdict = eligibility.report.strategies.find((item) => item.strategy === strategy.id)
   if (!verdict) return 'The API reported no eligibility for this strategy.'
   if (verdict.eligible) return null
-  return `Not enough project evidence: ${verdict.missing.map(gapText).join('; ')}.`
+  const guidance = evidenceGuidance(strategy.id, verdict.missing)
+  return `Available after this project has ${guidance}.`
 }
 
-function gapText({ requirement, ...details }: { requirement: string; [detail: string]: unknown }) {
-  const entries = Object.entries(details).map(([name, value]) => `${name} ${formatSetting(value)}`)
-  return `${resolverLabel(requirement).toLocaleLowerCase()}${entries.length ? ` (${entries.join(', ')})` : ''}`
+function evidenceGuidance(strategy: string, missing: { requirement: string; [detail: string]: unknown }[]) {
+  const requirements = new Map(missing.map((gap) => [gap.requirement, gap.required]))
+  const count = (requirement: string) => typeof requirements.get(requirement) === 'number'
+    ? String(requirements.get(requirement))
+    : 'enough'
+  const phrases = strategy === 'reliability_weighted_vote'
+    ? [
+        requirements.has('decisions_per_rater') ? `${count('decisions_per_rater')} reference decisions for each selected annotator` : null,
+        requirements.has('observations_per_outcome') ? `${count('observations_per_outcome')} reference decisions for every class from each selected annotator` : null,
+      ]
+    : [
+        requirements.has('calibration_items') ? `${count('calibration_items')} resolved images annotated by at least three selected annotators` : null,
+        requirements.has('observations_per_rater') ? `${count('observations_per_rater')} observations from each selected annotator` : null,
+        requirements.has('observations_per_outcome') ? `${count('observations_per_outcome')} observations for every class` : null,
+        requirements.has('convergence') ? 'evidence that produces a stable estimate' : null,
+      ]
+  const visible = phrases.filter((phrase): phrase is string => phrase !== null)
+  if (!visible.length) return 'enough resolved images from every selected annotator and class'
+  if (visible.length === 1) return visible[0]
+  return `${visible.slice(0, -1).join(', ')}, and ${visible.at(-1)}`
 }
 
 /** Notices shown before saving: more review, mask topology, and strategies that cannot run as configured. */

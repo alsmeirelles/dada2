@@ -166,13 +166,27 @@ describe('strategy availability', () => {
     expect(strategyBlock(detection.class_strategies[0]!, noProject)).toBeNull()
   })
 
-  it('names the exact missing prerequisites the API reports', () => {
+  it('turns raw missing prerequisites into concise user guidance', () => {
     const eligibility: EligibilityState = {
       status: 'ready',
-      report: { strategies: [{ strategy: 'dawid_skene', eligible: false, missing: [{ requirement: 'calibration_items', required: 50, found: 12 }], report: {} }] },
+      report: { strategies: [{ strategy: 'dawid_skene', eligible: false, missing: [{ requirement: 'observations_per_outcome', rater: 'internal-user-id', outcome: 'internal-class-id', required: 5, found: 0 }], report: {} }] },
     }
-    expect(strategyBlock(conditional, eligibility)).toBe('Not enough project evidence: calibration items (required 50, found 12).')
+    expect(strategyBlock(conditional, eligibility)).toBe('Available after this project has 5 observations for every class.')
     expect(strategyBlock(conditional, { status: 'ready', report: { strategies: [{ strategy: 'dawid_skene', eligible: true, missing: [], report: {} }] } })).toBeNull()
+  })
+
+  it('combines repeated per-rater diagnostics into one requirement', () => {
+    const reliability = detection.class_strategies.find((item) => item.id === 'reliability_weighted_vote')!
+    const eligibility: EligibilityState = {
+      status: 'ready',
+      report: { strategies: [{ strategy: 'reliability_weighted_vote', eligible: false, missing: [
+        { requirement: 'decisions_per_rater', rater: 'internal-user-1', required: 30, found: 0 },
+        { requirement: 'decisions_per_rater', rater: 'internal-user-2', required: 30, found: 0 },
+        { requirement: 'observations_per_outcome', rater: 'internal-user-1', outcome: 'internal-class-1', required: 5, found: 0 },
+      ], report: {} }] },
+    }
+
+    expect(strategyBlock(reliability, eligibility)).toBe('Available after this project has 30 reference decisions for each selected annotator, and 5 reference decisions for every class from each selected annotator.')
   })
 
   it('shows the exact reason a strategy is unavailable, and never substitutes it', () => {

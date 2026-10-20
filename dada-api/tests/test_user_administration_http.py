@@ -497,6 +497,35 @@ async def test_global_user_routes_refuse_every_non_administrator(
     assert [response.status_code for response in responses] == [403] * 6
 
 
+async def test_project_creator_lists_only_active_eligible_annotators(
+    database: None,
+) -> None:
+    owner = await _create_user("owner")
+    active = await _create_user("active")
+    inactive = await _create_user("inactive")
+    async with async_session_factory() as session:
+        stored = await session.get(User, inactive.id)
+        assert stored is not None
+        stored.is_active = False
+        await session.commit()
+    token = await _token(owner.username)
+
+    async with _client() as client:
+        response = await client.get(
+            "/api/v1/users/eligible-annotators",
+            headers=_auth(token),
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "items": [
+            {"id": active.id, "username": "active", "display_name": "Active"},
+            {"id": owner.id, "username": "owner", "display_name": "Owner"},
+        ],
+        "next_cursor": None,
+    }
+
+
 async def test_any_user_changes_their_own_password(database: None) -> None:
     await _create_user("annie")
 

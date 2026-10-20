@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   buildPolicyBody,
   buildProjectCreateBody,
+  listEligibleAnnotators,
   minimumDatasetSize,
   resolveAnnotatorIds,
   resolveDraftSplitSize,
@@ -10,6 +11,8 @@ import {
   type ProjectMember,
 } from './project-api'
 import type { ProjectDraft } from './types'
+
+afterEach(() => vi.unstubAllGlobals())
 
 const members: ProjectMember[] = [
   { user_id: 'id-owner', username: 'owner', display_name: 'Owner', role: 'owner' },
@@ -33,6 +36,27 @@ const baseDraft: ProjectDraft = {
   collaborators: ['ana', 'bruno'],
   annotationPolicy: { mode: 'single' },
 }
+
+describe('eligible annotators', () => {
+  it('loads every page of active users', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{ id: 'id-ana', username: 'ana', display_name: 'Ana' }],
+        next_cursor: 'next page',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{ id: 'id-bruno', username: 'bruno', display_name: 'Bruno' }],
+        next_cursor: null,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(listEligibleAnnotators('token')).resolves.toEqual([
+      { id: 'id-ana', username: 'ana', display_name: 'Ana' },
+      { id: 'id-bruno', username: 'bruno', display_name: 'Bruno' },
+    ])
+    expect(fetch).toHaveBeenNthCalledWith(2, expect.stringContaining('cursor=next%20page'), expect.anything())
+  })
+})
 
 describe('resolveAnnotatorIds', () => {
   it('maps usernames to persisted member IDs in order', () => {

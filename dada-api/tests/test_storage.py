@@ -2,7 +2,7 @@
 
 import pytest
 
-from dada_api.core.config import get_settings
+from dada_api.core.config import Settings, get_settings
 from dada_api.services import storage
 from dada_api.services.ingestion import normalize_relative_path
 
@@ -60,3 +60,18 @@ def test_configured_roots_are_absolute_and_distinct() -> None:
     assert settings.media_root.is_absolute()
     assert settings.upload_parts_root.is_absolute()
     assert settings.media_root != settings.upload_parts_root
+
+
+def test_storage_roots_exported_by_make_ignore_dotenv_quotes(tmp_path) -> None:
+    media_root = tmp_path / "media"
+    parts_root = tmp_path / "parts"
+
+    settings = Settings(
+        _env_file=None,
+        media_root=f'"{media_root}"',
+        upload_parts_root=f'"{parts_root}"',
+    )
+
+    assert settings.media_root == media_root
+    assert settings.upload_parts_root == parts_root
+    assert '"' not in str(settings.media_root)

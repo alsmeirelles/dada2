@@ -62,3 +62,20 @@ class UserPage(BaseModel):
 
     items: list[UserRead]
     next_cursor: str | None = None
+
+
+class EligibleAnnotatorRead(BaseModel):
+    """Minimal active-user identity exposed to project creators."""
+
+    id: str
+    username: str
+    display_name: str
+
+    model_config = {"from_attributes": True}
+
+
+class EligibleAnnotatorPage(BaseModel):
+    """Cursor-paginated users who may be added to an annotation project."""
+
+    items: list[EligibleAnnotatorRead]
+    next_cursor: str | None = None

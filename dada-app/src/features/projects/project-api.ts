@@ -47,8 +47,29 @@ export type ProjectMember = {
   role: string
 }
 
+export type EligibleAnnotator = {
+  id: string
+  username: string
+  display_name: string
+}
+
 export async function listProjects(token: string): Promise<Page<Project>> {
   return apiRequest('/api/v1/projects', { token })
+}
+
+export async function listEligibleAnnotators(token: string): Promise<EligibleAnnotator[]> {
+  const users: EligibleAnnotator[] = []
+  let cursor: string | null = null
+  do {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
+    const page: Page<EligibleAnnotator> = await apiRequest(
+      `/api/v1/users/eligible-annotators${query}`,
+      { token },
+    )
+    users.push(...page.items)
+    cursor = page.next_cursor
+  } while (cursor)
+  return users
 }
 
 export function getProject(projectId: string, token: string) {
