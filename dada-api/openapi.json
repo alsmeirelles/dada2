@@ -1691,6 +1691,58 @@
         "title": "DraftSaved",
         "type": "object"
       },
+      "EligibleAnnotatorPage": {
+        "description": "Cursor-paginated users who may be added to an annotation project.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EligibleAnnotatorRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "EligibleAnnotatorPage",
+        "type": "object"
+      },
+      "EligibleAnnotatorRead": {
+        "description": "Minimal active-user identity exposed to project creators.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name"
+        ],
+        "title": "EligibleAnnotatorRead",
+        "type": "object"
+      },
       "ErrorBody": {
         "description": "Stable machine- and human-readable error details.",
         "properties": {
@@ -11073,6 +11125,91 @@
           }
         ],
         "summary": "Create User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/eligible-annotators": {
+      "get": {
+        "description": "List active users that an authenticated project creator may select.\n\nThe project creation flow is available to every active user, so this route\nuses the same authorization boundary and exposes only identity fields\nneeded by the selector. Global user administration remains administrator\nonly.\n\nArgs:\n    cursor: Opaque cursor from a previous page.\n    _: Authenticated active user.\n    session: Active database session.\n\nReturns:\n    One page of active users ordered by username.",
+        "operationId": "list_eligible_annotators_api_v1_users_eligible_annotators_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EligibleAnnotatorPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Eligible Annotators",
         "tags": [
           "users"
         ]

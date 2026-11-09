@@ -3,7 +3,7 @@
 This document is a **blocking requirement for App Phase 7 implementation**.
 App Phase 7 code must not start until every issue below is marked **RESOLVED**
 in this file with the implemented change and verification evidence. This gate is
-in addition to resolving and approving `P7-01`–`P7-05` and `A7-01`–`A7-03` in
+in addition to resolving and approving `P7-01`–`P7-06` and `A7-01`–`A7-03` in
 the canonical [Phase 7 decision record](../../dada-api/docs/phases/phase_7.md).
 
 An issue is resolved only when this document records its root cause, affected
@@ -15,6 +15,9 @@ workaround or an unverified observation does not satisfy the gate.
 | `I7-01` | Annotator selection in project creation | Replace ambiguous typed usernames with selection from existing eligible users | **RESOLVED** |
 | `I7-02` | Annotation settings: class strategy availability | Present concise, actionable availability guidance without internal IDs or raw evidence diagnostics | **RESOLVED** |
 | `I7-03` | `dada-api` quote-named directory replication | Identify and remove the configuration/command path that creates the spurious directory hierarchy; verify `make infra-up` no longer creates it | **RESOLVED** |
+| `I7-04` | `dada-app` image position in annotation canvas | images should be displayed in the center of the canvas | **PENDING** |
+| `I7-05` | `dada-app` Unauthorized requests | If user session has expired or anauthorized responses arrive, go to login | **PENDING** |
+
 
 ## I7-01
 
@@ -96,3 +99,15 @@ roots; all 17 storage tests passed; API lint and format checks passed; from an
 artifact-free `dada-api` directory, `make infra-up` brought PostgreSQL and Redis
 to healthy state and no `"` directory existed afterward. Owner: DADA API
 maintainers. Completed: 2026-10-20.
+
+
+## I7-04
+
+When clicking an image from the assignment set in the annotation canvas, it sometimes is displayed displaced down on the
+screen, requiring a zoom out and the use of the "Pan" function to properly place it at the center of the canvas. When 
+initially displaying an image it should always be centered and occupying the full canvas width. The zoom in/out should 
+keep its position and only make the zoom in/out from the position the mouse is placed over the image.
+
+## I7-05
+
+If a user session has timed-out and the user starts getting 401 unauthorized responses, redirect to the login page again.

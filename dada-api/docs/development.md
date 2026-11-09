@@ -345,10 +345,13 @@ provenance, not a request parameter. The candidate order is
 selection input is something a client can already read.
 
 An acquisition batch is created only after all initial image batch items have
-accepted consensus resolutions. Random acquisition may then select from the
+accepted resolutions. Those may come directly from single-mode submissions or
+from consensus/adjudication. Random acquisition may then select from the
 eligible train pool; active learning additionally needs a trained/evaluated
-model. The learning port delivers that orchestration, and the `purpose` column
-already carries the acquisition value.
+model. Classification active learning selects media; detection and segmentation
+select model-proposed object targets within media. The learning port delivers
+that orchestration, and the `purpose` column already carries the acquisition
+value.
 
 ## Deletion and retention
 

@@ -215,9 +215,12 @@ Required invariants:
 
 ### CE-F08a — resolution work items and optional leases
 
-- An annotation batch item is always one complete image. A resolver may derive
-  a `resolution_work_item` for an image-level case or for a detection/
-  segmentation object or instance that needs manual review.
+- Phase 6 annotation batch items are complete images. Phase 7 may introduce a
+  model-guided detection/segmentation object-target acquisition item; it uses
+  the same single/consensus evidence rules, but its model target cue is not
+  evidence or a vote. A resolver may derive a `resolution_work_item` for an
+  image-level case or for a detection/segmentation object or instance that
+  needs manual review.
 - Derived work items retain a parent image batch-item ID, resolution-run ID,
   deterministic candidate identity, evidence mapping, state, and provenance.
   They do not replace or mutate annotation assignments or raw image documents.

@@ -47,7 +47,9 @@ unavailable. A `429` or `503` should include `Retry-After` where meaningful.
 
 The capability response must include `supported_image_media_types`,
 `max_file_bytes`, `max_project_files`, `upload_chunk_bytes`,
-`supported_task_types`, and `realtime_transport`.
+`supported_task_types`, and `realtime_transport`. Phase 7 adds `image/heic` and
+`image/heif`; this list is the App's authority for which entries from its shared
+MIME/extension registry are selectable.
 
 ## User administration and credentials — Phase 4
 
@@ -210,6 +212,24 @@ Rejection reasons are `invalid_relative_path`, `unsupported_media_type`, and
 `file_too_large`. Deduplication is scoped to one project: identical content is
 stored once and may be referenced by more than one relative path.
 
+Phase 7 accepts `.heic` and `.heif` as `image/heic` and `image/heif`. The App
+uploads and hashes the original bytes; it does not decode or transcode them.
+The API verifies the actual format, retains that content-addressed source, and
+creates one atomic, versioned lossless WebP sidecar from the oriented primary
+image before marking media usable. Sequence formats remain unsupported.
+
+The sidecar uses a deterministic 8-bit sRGB RGB or RGBA representation and
+lossless WebP encoding so it adds no compression damage to small visual
+targets. Its pixel width and height exactly equal those of the oriented primary
+HEIC/HEIF image. It is never resized, cropped, padded, or rotated a second time.
+Encoded byte sizes may differ. The media `width` and `height` and all annotation
+geometry use this canonical pixel plane.
+
+Completion reports `invalid_image` when bytes cannot be decoded as the declared
+supported format or exceed decoder security limits, and
+`image_conversion_failed` when a valid decoded source cannot be written as the
+required lossless rendition. Neither failure creates usable media.
+
 Upload status is `pending`, `uploading`, `processing`, `completed`, or `failed`.
 The App must wait for `completed` before activating the project. A failed
 session includes a structured `error` and remains queryable for recovery.
@@ -339,7 +359,11 @@ not assignments, submissions, consensus votes, or canonical resolutions.
 The API creates immutable train/validation/test membership when a project is
 activated. All three initial sets must have accepted image resolutions before
 the first acquisition may start; validation and test remain excluded from
-acquisition. Every iteration records its selection strategy and model/run
+acquisition. Internal active-learning manifests use accepted
+`initial_training` plus prior accepted acquisition data, validation is
+evaluation-only, and test is final-evaluation-only. These runs exist only to
+select later annotation targets; production-model training and export are out
+of scope. Every iteration records its selection strategy and model/run
 identifiers for reproducibility. The initial-training batch is not an
 acquisition iteration, and the final acquisition batch may be smaller than
 `iteration_batch_size`.
@@ -369,9 +393,15 @@ work is outstanding.
 ## Image annotation assignments — Phase 5 target
 
 The existing global `/api/v1/queue/next` placeholder is superseded by scoped
-direct image-assignment endpoints. An annotation batch item is always one
-complete image; each annotator submits one complete-image document. Annotation
-assignments are not claimed or leased.
+direct image-assignment endpoints. In the Phase 5 full-image workflow, each
+annotation batch item is one complete image and each annotator submits one
+complete-image document. Annotation assignments are not claimed or leased.
+
+For Phase 7 model-guided detection/segmentation acquisition, this full-image
+contract is extended by a target-scoped assignment. The detail still contains
+the source image and a model-generated target box or mask, but the annotator
+may label only that target. The target cue is never a submission or consensus
+vote. Its final request shape and context-area rule are defined by `P7-02`.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -570,7 +600,11 @@ type SubmissionReceived = {
 **Image URL.** `image_url` is a path relative to the API origin:
 `/api/v1/media/{media_id}/content?expires=…&signature=…`. It is valid for one
 hour and needs no bearer, so it works in an `<img>` or SVG `<image>`. The App
-prefixes it with `VITE_API_BASE_URL`.
+prefixes it with `VITE_API_BASE_URL`. For an HEIC/HEIF source this route returns
+the lossless sidecar with `Content-Type: image/webp` and its own
+`Content-Length`. The response pixels have the intrinsic `media.width` and
+`media.height`; the App must not apply EXIF/HEIF orientation or alter that
+coordinate plane.
 
 **Submitting.** Send `Idempotency-Key: submit:{assignment_id}:{version}`, so a
 retry after a lost response replays the original result.

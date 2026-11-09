@@ -92,9 +92,10 @@ Add these contract concepts:
   training, validation, test, and acquisition selections.
 - `DatasetLayout = 'split' | 'single_batch'`; `single_batch` is available only
   for random projects and has one static all-images annotation batch.
-- `AnnotationBatchItem` with one `media_id`; it is always a complete image.
-- `AnnotationAssignment` with `assignment_id`, `media_id`, and caller-specific
-  status. It has no lease information.
+- `AnnotationBatchItem` with one `media_id`; Phase 7 model-guided detection/
+  segmentation acquisition additionally carries one selected object target.
+- `AnnotationAssignment` with `assignment_id`, `media_id`, target scope when
+  applicable, and caller-specific status. It has no lease information.
 - `ResolutionWorkItem` for an image-level consensus case or a derived
   detection/segmentation object/instance review case. It is separate from an
   annotation batch item and may expose a resolution lease only in manual review.
@@ -598,8 +599,10 @@ both prerequisites are satisfied.
   Do not show model-ranking language, scores, or training prerequisites for
   that acquisition path.
 - When active learning is selected, explain that acquisition uses the
-  configured learning adapter after the Phase 7 learning boundary is
-  available.
+  configured adapter after the Phase 7 internal active-learning boundary is
+  available. Explain that it selects images for classification and object
+  targets within images for detection/segmentation; this is separate from the
+  project's single or consensus annotation mode.
 - Convert queue, draft, completion, navigation, and recovery behavior to
   direct complete-image assignments. Do not expose annotation lease controls.
 - Revise progress language and add blindness tests.
@@ -631,17 +634,34 @@ low-agreement case can be edited/adjudicated, and stale versions preserve the
 manager's local work. All issues identified in the pending issues section of this document should be
 addressed.
 
-### Phase 7: learning and quality metrics
+### Phase 7: active-learning activity and quality metrics
 
-**Start gate:** resolve shared decisions `P7-01`–`P7-05` and App decisions
-`A7-01`–`A7-03` in `dada-api/docs/phases/phase_7.md`.
+**Start gate:** resolve shared decisions `P7-01`–`P7-06` and App decisions
+`A7-01`–`A7-03` in `dada-api/docs/phases/phase_7.md`, and resolve and verify
+every blocking item in [Phase 7 App issues](issues_before_phase7.md).
 
-- Display training/export progress only after all required resolutions exist.
+- Implement approved HEIC/HEIF decision `P7-06`. Use one shared format registry
+  for MIME types, extensions, both dataset file inputs, and visible format help;
+  filter it with the API capability response. Upload original HEIC/HEIF bytes
+  without browser transcoding and render the API's lossless WebP sidecar through
+  the existing signed image URL.
+- Treat the API-provided `width` and `height` as the canonical oriented pixel
+  plane. The canvas and every review/evidence overlay must use those intrinsic
+  dimensions without client-side orientation, resize, crop, or padding so boxes,
+  polygons, and masks map directly to the retained HEIC/HEIF source.
+- Display internal active-learning progress only after all required resolutions
+  exist, and expose final annotated-dataset export availability separately.
 - Add agreement/review statistics and assisted-segmentation contract changes.
+- For model-guided detection/segmentation acquisition, show the source image
+  with the selected model box or mask highlighted and limit the annotation to
+  that target. Keep the context-area rule deferred to the Phase 7 active-
+  learning decision.
 
 Exit gate: unresolved submissions are never represented as training data in
-the UI, and assisted segmentation remains scoped to the active assignment. All issues identified in the pending issues 
-section of this document should be addressed.
+the UI, assisted segmentation remains scoped to the active assignment, and a
+HEIC/HEIF fixture can be selected, uploaded, annotated, reloaded, and reviewed
+in Chrome and Firefox without any dimension or geometry change. All issues
+identified in the pending issues section of this document should be addressed.
 
 ### Phase 8: real-time and production hardening
 
@@ -677,9 +697,9 @@ and also block the App phase that references them.
 
 | ID | Pending App decision | Required documented outcome |
 | --- | --- | --- |
-| `A7-01` | Learning and random-mode activity UX | Status vocabulary and progress for model-guided versus random acquisition, unavailable-adapter behavior, cancellation/retry actions, and ETA presentation |
-| `A7-02` | Quality and performance presentation | Charts/tables, filters, role visibility, minimum-sample suppression, export affordances, accessibility equivalents, and prohibition on annotator-facing rankings |
-| `A7-03` | Assisted-segmentation UX | Trigger/preview/accept/reject flow, latency/offline behavior, provenance display, keyboard behavior, and recovery interaction |
+| `A7-01` | Acquisition activity UX | User-visible random/active-learning states, failure message, and retry action |
+| `A7-02` | Quality presentation | Manager-visible values, suppression display, accessible table, and no annotator ranking |
+| `A7-03` | Assisted-segmentation UX | Trigger, preview, accept/discard/edit, and safe failure without changing the draft |
 | `A8-01` | Connection and recovery UX | Offline/reconnecting indicators, polling cadence visibility, sequence-gap refresh behavior, duplicate-notification suppression, and actions during degraded service |
 | `A8-02` | Real-time cache and privacy boundaries | Query-key ownership, evidence eviction on role/project changes, event-to-query invalidation, cross-tab behavior, and logout cleanup |
 | `A8-03` | Load and accessibility budgets | Page-size defaults, lazy-loading thresholds, canvas/evidence limits, 200% zoom layouts, reduced-motion behavior, and measurable performance budgets |
@@ -691,6 +711,10 @@ are maintained in the canonical [Phase 5 decision record](../../dada-api/docs/ph
 
 Phase 6 App decisions `A6-01`–`A6-04` and API decisions `P6-01`–`P6-08`
 are maintained in the canonical [Phase 6 decision record](../../dada-api/docs/phases/phase_6.md).
+
+Shared decision `P7-06` is approved in the canonical
+[Phase 7 decision record](../../dada-api/docs/phases/phase_7.md). App decisions
+`A7-01`–`A7-03` remain pending there.
 
 ## Test plan
 
@@ -707,6 +731,8 @@ are maintained in the canonical [Phase 6 decision record](../../dada-api/docs/ph
 - Evidence overlay toggles, metrics formatting, and adjudication payloads.
 - Error-code mapping and permission-aware content.
 - Event-to-query invalidation and sequence-gap recovery.
+- HEIC/HEIF MIME and extension inference, capability filtering, shared file-input
+  accept values, and preservation of API-provided intrinsic dimensions.
 
 ### Browser contract scenarios
 
@@ -731,6 +757,9 @@ are maintained in the canonical [Phase 6 decision record](../../dada-api/docs/ph
     assignment distribution; verify that each annotator receives editable seed
     content, saved work is attributed to that annotator, and consensus receives
     only the saved submissions.
+13. Upload portrait and landscape HEIC/HEIF fixtures, annotate small edge
+    objects in Chrome and Firefox, reload and review them, and verify unchanged
+    intrinsic dimensions and geometry coordinates.
 
 Run the existing `npm run lint`, `npm test`, and `npm run build` gates for each
 App phase. The coordinated release suite must use the candidate API with no
@@ -750,7 +779,7 @@ Detailed issues are in [Phase 6 issues](issues_before_phase6.md).
 
 #### Phase 7
 
-Not available yet.
+Detailed blocking issues are in [Phase 7 App issues](issues_before_phase7.md).
 
 #### Phase 8
 
@@ -769,6 +798,8 @@ Not available yet.
 | `src/features/projects/types.ts` | Add local policy draft and policy/batch view models |
 | `src/features/projects/NewProjectPage.tsx` | Add mode, group, resolver, thresholds, acquisition strategy, cost, and resumable setup UX |
 | `src/features/projects/project-api.ts` | Persist acquisition strategy, resolve member IDs, save versioned policy, and resume ordered setup operations |
+| `src/features/projects/ingest.ts` | Centralize supported MIME/extension mappings, capability filtering, accept values, and HEIC/HEIF inference while uploading original bytes |
+| `src/features/projects/DraftProjectSetupPage.tsx` | Reuse the shared capability-filtered image format registry for resumed uploads |
 | `src/features/projects/ProjectSettingsPage.tsx` | Manage members and default policy; link draft projects to editable setup/recovery flow |
 | `src/features/projects/ProjectsPage.tsx` | Show resolved counts and manager review badges/actions |
 | `src/features/annotation/types.ts` | Add assignments, separate submission/resolution state, batches, and events |

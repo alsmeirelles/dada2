@@ -69,12 +69,14 @@ training, or evaluation.
    adjudication.
    - With random acquisition, select the first training acquisition batch from
      the eligible train pool at that point.
-   - With active learning, first train and evaluate from the accepted initial
-     resolutions, then select the first model-guided training acquisition
-     batch.
+   - With active learning, first train from accepted `initial_training`
+     resolutions and evaluate on accepted validation resolutions, then select
+     the first model-guided acquisition batch.
 7. Each acquisition iteration creates one training batch from the eligible
-   unlabeled training pool. It uses `iteration_batch_size` as its requested
-   size. The initial training batch is not counted as an acquisition iteration.
+   unlabeled training pool. Classification selects media; Phase 7 detection and
+   segmentation select model-proposed object targets inside media. It uses
+   `iteration_batch_size` as its requested size. The initial training batch is
+   not counted as an acquisition iteration.
 8. A final training batch smaller than `iteration_batch_size` is allowed when
    fewer eligible training items remain.
 9. An item that has not been fully annotated when its training batch is
@@ -89,11 +91,14 @@ training, or evaluation.
     validation-metric stopping threshold remains a Phase 7 active-learning
     decision; it must be documented before that work begins.
 
-Each annotation batch item is one complete image. Every assigned annotator
-annotates the full image without claiming or leasing it. Detection and
-segmentation objects are entries in that image-level submission. Consensus may
-derive object/instance-level `resolution_work_item` records for manual review;
-only those resolution work items may use a lease, under the Phase 6 policy.
+Initial and random-acquisition batch items are one complete image. Every
+assigned annotator annotates the full image without claiming or leasing it.
+Detection and segmentation objects are entries in that image-level submission.
+Phase 7 model-guided detection/segmentation acquisition is the exception: it
+creates an object-target assignment in the source image and the annotator labels
+only that target. Consensus may derive object/instance-level
+`resolution_work_item` records for manual review; only those resolution work
+items may use a lease, under the Phase 6 policy.
 
 ## Label import and seeded annotation work
 
