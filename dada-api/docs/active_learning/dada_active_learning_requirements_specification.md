@@ -19,7 +19,7 @@ However, in large computer vision datasets (originally observed by Meirelles et 
    As the model evaluates items $x \in S_U$ to compute scalar uncertainty scores $U(x)$, DADA simultaneously extracts high-level semantic feature vectors $\mathbf{z} \in \mathbb{R}^D$ from the penultimate layer (last convolutional/neck layer) of the network.
 
 3. **Unsupervised Dimensionality Reduction (PCA):**
-   Because raw deep feature vectors $\mathbf{z}$ have high dimensionality ($D \in [512, 4608]$), Euclidean distance metrics degrade during clustering. DADA applies Principal Component Analysis (PCA) to project $\mathbf{z}$ into a compact orthogonal manifold $\mathbf{z}' \in \mathbb{R}^d$ (typically $d = 50$).
+   Because raw deep feature vectors $\mathbf{z}$ have high dimensionality ( $D \in [512, 4608]$), Euclidean distance metrics degrade during clustering. DADA applies Principal Component Analysis (PCA) to project $\mathbf{z}$ into a compact orthogonal manifold $\mathbf{z}' \in \mathbb{R}^d$ (typically $d = 50$).
 
 4. **Feature Space Clustering (`MiniBatchKMeans`):**
    The projected items in $S_U$ are partitioned into $K$ homogeneous visual clusters $\{C_1, C_2, \dots, C_K\}$ (typically $K \in [20, 80]$) using Mini-Batch $k$-means for fast runtime execution.
@@ -43,7 +43,7 @@ However, in large computer vision datasets (originally observed by Meirelles et 
 
 ### 1.3 Network Auto-Reduction (NAR) in Original DADA
 
-To further accelerate the AL loop, Meirelles et al. (2023) introduced **Network Auto-Reduction (NAR)**. Inspired by EfficientNet compound scaling, NAR scales *down* the target CNN’s depth ($d = \alpha^{-\phi}$), width ($w = \beta^{-\phi}$), and input resolution ($r = \gamma^{-\phi}$) controlled by a single hyperparameter $\phi$. The lightweight reduced network acts as a proxy during the AL loop to train rapidly and select informative samples, which are then used to train the full-scale target architecture.
+To further accelerate the AL loop, Meirelles et al. (2023) introduced **Network Auto-Reduction (NAR)**. Inspired by EfficientNet compound scaling, NAR scales *down* the target CNN’s depth ( $d = \alpha^{-\phi}$), width ( $w = \beta^{-\phi}$), and input resolution ( $r = \gamma^{-\phi}$) controlled by a single hyperparameter $\phi$. The lightweight reduced network acts as a proxy during the AL loop to train rapidly and select informative samples, which are then used to train the full-scale target architecture.
 
 ---
 
@@ -54,7 +54,7 @@ To generalize DADA from patch-level classification to an industry-grade, multi-t
 | Original DADA Component | Adaptation in This Specification | Engineering Rationale |
 | :--- | :--- | :--- |
 | **NAR Custom Model Pruning** ($\phi$ scaling on CNN blocks) | **Native Architecture Family Proxy Scaling** (Defaults: `efficientnet_b1` proxy / `efficientnet_b5` target for Classification; `yolo26n`/`s`, `yolo12n`/`s`, or `yolo11n`/`s` proxy for `l`/`x` target; user-configurable) | Eliminates writing custom graph-pruning code for every new architecture while preserving structural feature alignment. Keeps original resolution input size. |
-| **MC Dropout ($F=20$) / Full Ensembles ($N=3$)** | **Classification:** Deep Ensemble ($N=3$ proxies) or Multi-View TTA ($T=5$ passes). **Detection/Segmentation:** Single-Pass Pre-NMS Proposal Cluster Variance (+ YOLO26 Dual-Head Disagreement) or 3-Pass TTA Jitter. | Avoids modifying model architectures to inject inference dropout and eliminates $20\times$ forward-pass bottlenecks on dense detectors. |
+| **MC Dropout ($F=20$) / Full Ensembles ($N=3$)** | **Classification:** Deep Ensemble ( $N=3$ proxies) or Multi-View TTA ( $T=5$ passes). **Detection/Segmentation:** Single-Pass Pre-NMS Proposal Cluster Variance (+ YOLO26 Dual-Head Disagreement) or 3-Pass TTA Jitter. | Avoids modifying model architectures to inject inference dropout and eliminates $20\times$ forward-pass bottlenecks on dense detectors. |
 | **Single-Tier Image Subpool** ($S_U$) | **Two-Tier Dynamic Subpooling** (Image Subpool $S_{\text{img}}$ + Object Gatekeeper $S_{\text{obj}}$) + **Multi-Scale GPU `RoIAlign` Hooks** | Prevents memory explosions when $2,000$ images yield $>50,000$ candidate object boxes/masks; extracts L2-normalized per-object embeddings across `P3–P5` in milliseconds. |
 | **Fully Labeled Patch Dataset** | **Partially Annotated Image (PAI) Schema & Region-Aware Training** | Because users only annotate selected uncertain objects, images contain unqueried objects. Mode 1 (Region-Aware Loss Masking) enforces exact zero background gradient on unqueried regions. |
 
@@ -176,7 +176,7 @@ Every evaluated unit (a whole image for classification, or a candidate bounding 
 * `mask_rle`: `Optional[dict]` (COCO RLE polygon/mask for segmentation)
 * `pred_class_probs`: `np.ndarray` of shape `(C,)`
 * `cls_uncertainty`: `float` (Strictly bounded in $[0, 1]$)
-* `spatial_uncertainty`: `float` ($0.0$ for classification; strictly bounded in $[0, 1]$)
+* `spatial_uncertainty`: `float` ( $0.0$ for classification; strictly bounded in $[0, 1]$)
 * `total_uncertainty`: `float` (Strictly bounded in $[0, 1]$)
 * `feature_vector`: `np.ndarray` of shape `(D,)`
 
@@ -191,7 +191,7 @@ DADA implements the [shared batch selection contract](active_learning_requiremen
 Supports image classification architectures via `timm` (PyTorch Image Models) or custom PyTorch modules (`models/custom_model_name.py` providing both proxy and target definitions):
 
 * **Configurable Defaults (`EfficientNet-B1` / `EfficientNet-B5`):**
-  * By default, `proxy_model_name = "efficientnet_b1"` ($\phi = 1$) and `target_model_name = "efficientnet_b5"` ($\phi = 5$). Because NAR was originally derived from EfficientNet compound scaling equations ($d = \alpha^\phi, w = \beta^\phi, r = \gamma^\phi$), `EfficientNet-B1` provides a native $\approx 6.5\times$ FLOPS reduction while sharing the exact MBConv block topology of `EfficientNet-B5`.
+  * By default, `proxy_model_name = "efficientnet_b1"` ( $\phi = 1$) and `target_model_name = "efficientnet_b5"` ( $\phi = 5$). Because NAR was originally derived from EfficientNet compound scaling equations ( $d = \alpha^\phi, w = \beta^\phi, r = \gamma^\phi$), `EfficientNet-B1` provides a native $\approx 6.5\times$ FLOPS reduction while sharing the exact MBConv block topology of `EfficientNet-B5`.
   * Both `proxy_model_name` and `target_model_name` are user-configurable via `DADAAlConfig` (e.g., allowing users to switch to `convnext_tiny` / `convnext_base` or `resnet18` / `resnet50`).
 * **PyTorch Forward Hooks for Feature Extraction:**
   * Register a forward hook on the global average pooled output of the penultimate layer (`model.global_pool` in `timm`, immediately after the final convolutional head `conv_head` and prior to the linear `classifier`). For `EfficientNet-B1`, this yields a vector $\mathbf{z}^{(n)} \in \mathbb{R}^{1280}$ per forward pass.
@@ -241,11 +241,11 @@ To guarantee rapid, mathematically valid uncertainty scores bounded strictly in 
 Supports both **Option 1 (`DEEP_ENSEMBLE`)** and **Option 2 (`TTA_MULTIVIEW`)** selectable via `config.uncertainty_method`:
 
 * **Option 1: Deep Ensemble (`DEEP_ENSEMBLE`, Default for Classification):**
-  * Train $N = \text{cls\_ensemble\_size}$ (default $N = 3$) independent instances of `proxy_model_name` (`efficientnet_b1`) using distinct random seeds (`seed = 1..N`) for weight initialization and mini-batch shuffling.
+  * Train $N = \text{cls_ensemble_size}$ (default $N = 3$) independent instances of `proxy_model_name` (`efficientnet_b1`) using distinct random seeds (`seed = 1..N`) for weight initialization and mini-batch shuffling.
   * During acquisition inference on $S_{\text{img}}$, evaluate each image $x$ across all $N$ proxy models to obtain $N$ categorical Softmax probability vectors $\mathbf{p}^{(1)}, \dots, \mathbf{p}^{(N)} \in \Delta^{C-1}$.
 * **Option 2: Multi-View TTA Ensemble (`TTA_MULTIVIEW`):**
   * Train $1$ instance of `proxy_model_name` (`efficientnet_b1`).
-  * During acquisition inference on $S_{\text{img}}$, evaluate each image $x$ across $T = \text{cls\_tta\_views}$ (default $T = 5$) deterministic geometric transformations:
+  * During acquisition inference on $S_{\text{img}}$, evaluate each image $x$ across $T = \text{cls_tta_views}$ (default $T = 5$) deterministic geometric transformations:
     1. Original identity view $x$.
     2. Horizontally flipped view $\operatorname{HFlip}(x)$.
     3. Center zoom crop at $0.90\times$ scale resized to input resolution.
@@ -261,7 +261,7 @@ Supports both **Option 1 (`DEEP_ENSEMBLE`)** and **Option 2 (`TTA_MULTIVIEW`)** 
   $$
   U_{\text{BALD}}(x) = H_{\text{cls}}(\bar{\mathbf{p}}) - \frac{1}{M_{\text{passes}}} \sum_{m=1}^{M_{\text{passes}}} H_{\text{cls}}\left(\mathbf{p}^{(m)}\right) \in [0, 1]
   $$
-  Blend with total predictive entropy using $\beta_{\text{ent}} = \text{cls\_entropy\_blend}$ ($0.20$) so ambiguous boundary samples where passes agree on a $50/50$ split still receive a non-zero uncertainty score:
+  Blend with total predictive entropy using $\beta_{\text{ent}} = \text{cls_entropy_blend}$ ($0.20$) so ambiguous boundary samples where passes agree on a $50/50$ split still receive a non-zero uncertainty score:
   $$
   U_{\text{total}}(x) = U_{\text{cls}}(x) = (1 - \beta_{\text{ent}}) \, U_{\text{BALD}}(x) + \beta_{\text{ent}} \, H_{\text{cls}}(\bar{\mathbf{p}}) \in [0, 1]
   $$
@@ -271,20 +271,20 @@ Supports both **Option 1 (`DEEP_ENSEMBLE`)** and **Option 2 (`TTA_MULTIVIEW`)** 
 * **Hook Mechanism (Supporting Single-Head YOLO11/12 & Dual-Head YOLO26):**
   * Attach a forward hook to the `Detect` / `Segment` head during inference.
   * **Crucial for YOLO26:** Even though YOLO26 defaults to end-to-end NMS-free inference (`nms=False`) using only its One-to-One ($H_{\text{O2O}}$) head, both $H_{\text{O2M}}$ and $H_{\text{O2O}}$ are present and trained in every checkpoint. The hook **must intercept both**:
-    1. The dense **One-to-Many ($H_{\text{O2M}}$)** raw tensor prior to NMS (shape: `[batch, 4 + C (+ 32 mask_protos), 8400]`).
-    2. In YOLO26, the sparse **One-to-One ($H_{\text{O2O}}$)** decoded tensor (shape: `[batch, 300, 6 (+ 32 mask_protos)]`).
+    1. The dense **One-to-Many ( $H_{\text{O2M}}$)** raw tensor prior to NMS (shape: `[batch, 4 + C (+ 32 mask_protos), 8400]`).
+    2. In YOLO26, the sparse **One-to-One ( $H_{\text{O2O}}$)** decoded tensor (shape: `[batch, 300, 6 (+ 32 mask_protos)]`).
     3. In YOLO11 and YOLO12, the pre-softmax **16-bin DFL** regression tensor (shape: `[batch, 64, 8400]`).
 * **Proposal Clustering:**
-  1. Obtain the $M_{\text{obj}}$ surviving candidate objects per image with confidence $\ge \text{candidate\_conf\_floor}$ (`0.08`) by running standard NMS on $H_{\text{O2M}}$ (or taking the union with $H_{\text{O2O}}$ survivors in YOLO26).
+  1. Obtain the $M_{\text{obj}}$ surviving candidate objects per image with confidence $\ge \text{candidate_conf_floor}$ (`0.08`) by running standard NMS on $H_{\text{O2M}}$ (or taking the union with $H_{\text{O2O}}$ survivors in YOLO26).
   2. For each surviving object $o_j$ with reference box $b_j^*$ and top class $c^*$, compute the GPU IoU between $b_j^*$ and all pre-NMS anchor boxes in $H_{\text{O2M}}$ whose max class score exceeds `0.05`.
-  3. Collect the local cluster of $K_j$ pre-NMS proposals $\{(b_m, \mathbf{p}_m)\}_{m=1}^{K_j}$ from $H_{\text{O2M}}$ that overlap with $b_j^*$ at $\text{IoU}(b_m, b_j^*) \ge \tau_{\text{cluster}}$ ($\tau_{\text{cluster}} = 0.50$).
+  3. Collect the local cluster of $K_j$ pre-NMS proposals $\{(b_m, \mathbf{p}_m)\}_{m=1}^{K_j}$ from $H_{\text{O2M}}$ that overlap with $b_j^*$ at $\text{IoU}(b_m, b_j^*) \ge \tau_{\text{cluster}}$ ( $\tau_{\text{cluster}} = 0.50$).
   4. Compute normalized confidence weights across the $K_j$ proposals:
      $$
      s_m = \max_{c \in \{1..C\}} p_{m,c}, \qquad w_m = \frac{s_m}{\sum_{l=1}^{K_j} s_l}
      $$
   5. Compute the **Effective Sample Size Shrinkage Factor** $\gamma(K_j)$ to smoothly handle isolated detections where $K_j = 1$ (where empirical cluster variance would falsely collapse to $0$):
      $$
-     \gamma(K_j) = \frac{K_j - 1}{K_j + \kappa} \quad (\text{with } \kappa = \text{shrinkage\_kappa} = 2.0)
+     \gamma(K_j) = \frac{K_j - 1}{K_j + \kappa} \quad (\text{with } \kappa = \text{shrinkage_kappa} = 2.0)
      $$
 
 * **Mathematical Formulations over Proposal Cluster $K_j$:**
@@ -329,7 +329,7 @@ Supports both **Option 1 (`DEEP_ENSEMBLE`)** and **Option 2 (`TTA_MULTIVIEW`)** 
      U_{\text{O2M-loc}}(o_j) = \gamma(K_j) \left( \frac{1 - \sum_{m=1}^{K_j} w_m \, \text{IoU}(b_m, b_j^*)}{1 - \tau_{\text{cluster}}} \right) + \left(1 - \gamma(K_j)\right) U_{\text{loc-prior}}(o_j) \in [0, 1]
      $$
   3. **YOLO26 Dual-Head Spatial Disagreement:**
-     Measure the IoU discrepancy between the One-to-Many reference box $b_j^*$ and the matched One-to-One head box $b_{\text{O2O}}$ ($\text{IoU} = 0$ if unmatched):
+     Measure the IoU discrepancy between the One-to-Many reference box $b_j^*$ and the matched One-to-One head box $b_{\text{O2O}}$ ( $\text{IoU} = 0$ if unmatched):
      $$
      U_{\text{dual-loc}}(o_j) = 1 - \text{IoU}\left(b_j^*, \, b_{\text{O2O}}\right) \in [0, 1]
      $$
@@ -339,12 +339,12 @@ Supports both **Option 1 (`DEEP_ENSEMBLE`)** and **Option 2 (`TTA_MULTIVIEW`)** 
 
   ##### C. Instance Segmentation Uncertainty ($U_{\text{seg}}$)
 
-  1. **Morphological Boundary-Band Binary Entropy ($U_{\text{seg-bound}}$):**
-     Decode the surviving object's probability mask $M_j \in (0, 1)^{H_p \times W_p}$ and binarized mask $\hat{M}_j = \mathbb{I}(M_j > 0.5)$. Compute the morphological boundary band $B(\hat{M}_j) = \operatorname{Dilate}(\hat{M}_j, r) \setminus \operatorname{Erode}(\hat{M}_j, r)$ with radius $r = \text{mask\_boundary\_band\_px}$ (if $\operatorname{Erode}(\hat{M}_j, r)$ is empty for very small objects, set $B(\hat{M}_j) = \operatorname{Dilate}(\hat{M}_j, r)$). Calculate mean binary entropy in base 2 over pixels $i \in B(\hat{M}_j)$:
+  1. **Morphological Boundary-Band Binary Entropy ( $U_{\text{seg-bound}}$):**
+     Decode the surviving object's probability mask $M_j \in (0, 1)^{H_p \times W_p}$ and binarized mask $\hat{M}_j = \mathbb{I}(M_j > 0.5)$. Compute the morphological boundary band $B(\hat{M}_j) = \operatorname{Dilate}(\hat{M}_j, r) \setminus \operatorname{Erode}(\hat{M}_j, r)$ with radius $r = \text{mask_boundary_band_px}$ (if $\operatorname{Erode}(\hat{M}_j, r)$ is empty for very small objects, set $B(\hat{M}_j) = \operatorname{Dilate}(\hat{M}_j, r)$). Calculate mean binary entropy in base 2 over pixels $i \in B(\hat{M}_j)$:
      $$
      U_{\text{seg-bound}}(o_j) = -\frac{1}{|B(\hat{M}_j)|} \sum_{i \in B(\hat{M}_j)} \left[ p_i \log_2 p_i + (1 - p_i) \log_2(1 - p_i) \right] \in [0, 1]
      $$
-  2. **Pre-NMS Prototype Coefficient Spherical Variance ($U_{\text{seg-coeff}}$):**
+  2. **Pre-NMS Prototype Coefficient Spherical Variance ( $U_{\text{seg-coeff}}$):**
      For the $K_j$ proposals in $H_{\text{O2M}}$, L2-normalize their 32-dimensional mask coefficient vectors $\hat{\mathbf{c}}_m = \frac{\mathbf{c}_m}{\|\mathbf{c}_m\|_2 + \epsilon}$ and compute spherical dispersion without decoding extra spatial masks:
      $$
      U_{\text{seg-coeff}}(o_j) = 1 - \left\| \sum_{m=1}^{K_j} w_m \hat{\mathbf{c}}_m \right\|_2 \in [0, 1]
@@ -387,10 +387,10 @@ Supports both **Option 1 (`DEEP_ENSEMBLE`)** and **Option 2 (`TTA_MULTIVIEW`)** 
   * Maintain state of the master image pool $U$ (which includes `UNLABELED` and `PARTIALLY_LABELED` images, excluding `EXHAUSTIVELY_LABELED` images).
   * Sample `image_subpool_size` images uniformly at random. Cache and reuse $S_{\text{img}}$ for `subpool_renewal_interval` ($\alpha = 2$) AL iterations before resampling.
 * **Tier 2 (Object Candidate Gatekeeper $S_{\text{obj}}$):**
-  * For `TaskType.CLASSIFICATION`, each image in $S_{\text{img}}$ produces a single image-level `CandidateItem` ($|S_{\text{obj}}| = |S_{\text{img}}|$).
+  * For `TaskType.CLASSIFICATION`, each image in $S_{\text{img}}$ produces a single image-level `CandidateItem` ( $|S_{\text{obj}}| = |S_{\text{img}}|$).
   * For `TaskType.DETECTION` and `TaskType.SEGMENTATION`, run proxy inference on $S_{\text{img}}$ to collect raw object-level `CandidateItem` instances.
-  * **Deduplication against Existing Annotations:** For any `PARTIALLY_LABELED` image, load its existing human-verified annotations (both positive boxes and verified hard-negative ROIs). Discard any candidate $o_j$ that overlaps with an existing annotation or queried ROI at $\text{IoU} \ge \text{annotated\_iou\_dedup\_thresh}$ ($0.50$).
-  * **Candidate Ceiling Pre-Filter:** If total surviving candidates $\vert S_{\text{obj}} \vert > \text{max\_object\_candidates}$ ($15,000$), sort candidates by $U_{\text{total}}$ and retain the top `max_object_candidates` to guarantee that PCA and clustering execute in $< 5$ seconds.
+  * **Deduplication against Existing Annotations:** For any `PARTIALLY_LABELED` image, load its existing human-verified annotations (both positive boxes and verified hard-negative ROIs). Discard any candidate $o_j$ that overlaps with an existing annotation or queried ROI at $\text{IoU} \ge \text{annotated_iou_dedup_thresh}$ ($0.50$).
+  * **Candidate Ceiling Pre-Filter:** If total surviving candidates $\vert S_{\text{obj}} \vert > \text{max_object_candidates}$ ( $15,000$), sort candidates by $U_{\text{total}}$ and retain the top `max_object_candidates` to guarantee that PCA and clustering execute in $< 5$ seconds.
 
 #### 2. DADA Clustering & Quota Selector (`dada_selector.py`)
 
@@ -402,7 +402,7 @@ Implement Algorithm 1 from Meirelles et al. (2022) adapted to `CandidateItem` ob
 4. For each cluster $k \in \{0, \dots, K-1\}$:
    * Calculate mean cluster uncertainty: $Z(k) = \frac{1}{\vert C_k \vert} \sum_{o_j \in C_k} U_{\text{total}}(o_j)$.
 5. Compute cluster proportion $PR(k) = \frac{Z(k)}{\sum_{m=0}^{K-1} Z(m)}$.
-6. Allocate integer quotas using the Largest Remainder Method, targeting $Q = \text{acquisition\_budget\_q}$ from the API request, subject to available eligible candidates. [P7-09](../phases/phase_7.md#p7-09--dada-selection-edge-cases) governs edge cases and quota redistribution.
+6. Allocate integer quotas using the Largest Remainder Method, targeting $Q = \text{acquisition_budget_q}$ from the API request, subject to available eligible candidates. [P7-09](../phases/phase_7.md#p7-09--dada-selection-edge-cases) governs edge cases and quota redistribution.
 7. Within each cluster $C_k$, sort candidates descending by $U_{\text{total}}(o_j)$ and select the top $\text{acqSize}(k)$ items.
 8. **Query ROI Generation (Detection & Segmentation):** For each selected object with bounding box $[x_1, y_1, x_2, y_2]$, expand the box by `roi_context_padding` ($15\%$) clipped to image dimensions to create the `queried_roi` window presented to human annotators.
 
@@ -468,7 +468,7 @@ The dataset state must be serialized in an extended COCO format that tracks spat
 
 #### 2. Background-Safe PAI Training Pipeline (`pai_trainer.py`)
 
-Standard object detectors treat every anchor outside ground-truth boxes as negative background ($y=0$). Training naively on `PARTIALLY_LABELED` images penalizes the model when it detects real, unqueried objects outside `queried_rois`. Implement **two selectable training modes** with distinct guarantees:
+Standard object detectors treat every anchor outside ground-truth boxes as negative background ( $y=0$). Training naively on `PARTIALLY_LABELED` images penalizes the model when it detects real, unqueried objects outside `queried_rois`. Implement **two selectable training modes** with distinct guarantees:
 
 ##### Mode 1 (`MODE_1_LOSS_MASK` — Default & Primary): Region-Aware Loss Masking (`PAIYoloTrainer`)
 
@@ -481,7 +481,7 @@ Standard object detectors treat every anchor outside ground-truth boxes as negat
        2. Anchor $a$ is matched as a **positive foreground sample** (via TAL in YOLO11/12 or STAL in YOLO26), **OR**
        3. Anchor $a$'s spatial center point $(c_x, c_y)$ falls inside at least one verified `queried_roi` box (`CONFIRMED_OBJECT` or `EXPLICIT_HARD_NEGATIVE`).
      * $W_a = 0.0$ for all unmatched anchors whose center $(c_x, c_y)$ lies in unqueried image regions.
-  3. Multiply the negative/background Binary Cross-Entropy (BCE) classification loss term for anchor $a$ by $W_a$ before reduction across **both** the One-to-Many head ($\mathcal{L}_{\text{O2M}}$) and, in YOLO26, the One-to-One head ($\mathcal{L}_{\text{O2O}}$):
+  3. Multiply the negative/background Binary Cross-Entropy (BCE) classification loss term for anchor $a$ by $W_a$ before reduction across **both** the One-to-Many head ($\mathcal{L}_{\text{O2M}}$) and, in YOLO26, the One-to-One head ( $\mathcal{L}_{\text{O2O}}$):
      $$
      \mathcal{L}_{\text{cls-bg}}(a) = W_a \cdot \sum_{c=1}^{C} \operatorname{BCE}\left(\sigma(z_{a,c}), \, 0\right)
      $$
@@ -491,8 +491,8 @@ Standard object detectors treat every anchor outside ground-truth boxes as negat
 
 * **Guarantee:** Designed for external or frozen training loops where the loss function cannot be overridden. **Note:** Mode 2 does *not* produce zero background gradient at the logit layer (because standard BCE still evaluates $y=0$ on masked pixels); instead, it satisfies the **Visual Feature Suppression & Pseudo-Label Protection Criterion**.
 * **Implementation:** Before launching a training run, generate a temporary training view of all `PARTIALLY_LABELED` images:
-  1. **High-Confidence Pseudo-Label Injection:** Run the current best model over `PARTIALLY_LABELED` images. Any prediction outside `queried_rois` with confidence $\ge 0.80$ is temporarily added to the image's positive ground-truth training labels ($y=1$) for the upcoming epoch cycle.
-  2. **Unqueried Region Pixel Neutralization:** Construct a pixel validity mask $W_{\text{px}} \in \{0, 1\}^{H \times W}$ where $W_{\text{px}} = 1$ inside all `queried_rois` and inside injected high-confidence pseudo-label boxes. Everywhere else ($W_{\text{px}} = 0$), replace pixel values with the dataset mean RGB value `(114, 114, 114)` or a heavy Gaussian blur $(\sigma = 25)$ so unqueried foreground objects are visually erased before convolutional filters process the image.
+  1. **High-Confidence Pseudo-Label Injection:** Run the current best model over `PARTIALLY_LABELED` images. Any prediction outside `queried_rois` with confidence $\ge 0.80$ is temporarily added to the image's positive ground-truth training labels ( $y=1$) for the upcoming epoch cycle.
+  2. **Unqueried Region Pixel Neutralization:** Construct a pixel validity mask $W_{\text{px}} \in \{0, 1\}^{H \times W}$ where $W_{\text{px}} = 1$ inside all `queried_rois` and inside injected high-confidence pseudo-label boxes. Everywhere else ( $W_{\text{px}} = 0$), replace pixel values with the dataset mean RGB value `(114, 114, 114)` or a heavy Gaussian blur $(\sigma = 25)$ so unqueried foreground objects are visually erased before convolutional filters process the image.
 
 ---
 
@@ -503,7 +503,7 @@ The main orchestrator (`ActiveLearningOrchestrator.step()`) shall execute the fo
 1. **Train Proxy Selector:** Train the lightweight proxy model (`proxy_model_name`, defaulting to `efficientnet_b1` for classification—training $N=3$ instances if `DEEP_ENSEMBLE` is selected, or $1$ instance if `TTA_MULTIVIEW` is selected—and `yolo26n.pt`, `yolo12n.pt`, or `yolo11n.pt` for detection/segmentation) on the current labeled dataset $L^i$ using `pai_trainer.py` for $E_{\text{proxy}}$ epochs.
 2. **Tier-1 Subpool Sampling:** Query `SubpoolManager` to retrieve or renew the active image subpool $S_{\text{img}}^i \subset U^i$.
 3. **Candidate & Feature Extraction:** Run the trained proxy model(s) over $S_{\text{img}}^i$ with forward hooks enabled (`cls_extractor` for classification; `pre_nms_extractor` or `tta_extractor` + multi-scale `roi_align` feature hook for detection/segmentation) to produce raw `CandidateItem` instances.
-4. **Tier-2 Gatekeeper Filtering:** For detection and segmentation, filter out candidates overlapping already-queried ROIs ($\text{IoU} \ge 0.5$) and cap total candidates at `max_object_candidates`.
+4. **Tier-2 Gatekeeper Filtering:** For detection and segmentation, filter out candidates overlapping already-queried ROIs ( $\text{IoU} \ge 0.5$) and cap total candidates at `max_object_candidates`.
 5. **DADA Selection:** Execute PCA dimensionality reduction, `MiniBatchKMeans` clustering, and proportional uncertainty quota allocation to select up to the requested $Q$ eligible items (images for classification; objects for detection/segmentation). Report a shortfall and reason if insufficient eligible candidates are available.
 6. **Prepare selection:** Generate padded `queried_roi` coordinates for selected objects, or identify selected images for classification, preserving the input references.
 7. **Return batch:** Return a selection manifest in the input pool manifest format to the API, including selected object geometry where applicable. The API dispatches annotation jobs and manages accepted results; DADA receives an updated training snapshot on a later request.
@@ -514,7 +514,7 @@ The main orchestrator (`ActiveLearningOrchestrator.step()`) shall execute the fo
 ## 6. Verification & Acceptance Criteria for the Coding Agent
 
 1. **Unit Test — Classification Ensemble & TTA Extractor (`cls_extractor.py`):** Verify with `efficientnet_b1` that Option 1 (`DEEP_ENSEMBLE`, $N=3$) outputs L2-normalized concatenated features of shape `(B, 3840)` and Option 2 (`TTA_MULTIVIEW`, $T=5$) outputs L2-normalized mean features of shape `(B, 1280)`, with $U_{\text{cls}} \in [0.0, 1.0]$ and strictly positive uncertainty ($> 0.0$) on unanimous $50/50$ boundary predictions.
-2. **Unit Test — YOLO11/12/26 Pre-NMS / Dual-Head Hook & RoIAlign Speed:** Verify on a batch of 16 images ($640 \times 640$) with `yolo26n.pt`, `yolo12n.pt`, and `yolo11n-seg.pt` that pre-NMS/dual-head uncertainty scoring and multi-scale GPU `roi_align` feature extraction complete in $< 50\text{ ms}$ per image on a single GPU without CPU-GPU tensor copy bottlenecks.
+2. **Unit Test — YOLO11/12/26 Pre-NMS / Dual-Head Hook & RoIAlign Speed:** Verify on a batch of 16 images ( $640 \times 640$) with `yolo26n.pt`, `yolo12n.pt`, and `yolo11n-seg.pt` that pre-NMS/dual-head uncertainty scoring and multi-scale GPU `roi_align` feature extraction complete in $< 50\text{ ms}$ per image on a single GPU without CPU-GPU tensor copy bottlenecks.
 3. **Unit Test — Simplex & Dispersion Bounds:** Verify that `metrics.py` produces $U_{\text{cls}}, U_{\text{loc}}, U_{\text{mask}}, U_{\text{total}} \in [0.0, 1.0]$ across all edge cases, including when $K_j = 1$ (single surviving proposal) and when YOLO26's O2O head misses an object detected by the O2M head.
 4. **Unit Test — Quota Conservation:** Verify that `dada_selector.py` returns $Q$ candidates when sufficient eligible candidates exist, and otherwise returns the available candidates with a shortfall reason; cover empty clusters, single-item clusters, and zero uncertainty in accordance with P7-09.
 5. **Unit Test — Deduplication Gatekeeper:** Verify that if an object at `[100, 100, 200, 200]` is already recorded in `queried_rois` (either as a positive object or an explicit hard negative), any new candidate overlapping it with $\text{IoU} \ge 0.50$ is strictly excluded from selection in subsequent AL iterations.
