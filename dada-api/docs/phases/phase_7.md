@@ -1,16 +1,11 @@
 # Phase 7 pending decisions
 
 This is the canonical decision record for Phase 7. It contains the shared API
-decisions `P7-01`–`P7-06` and the App decisions `A7-01`–`A7-03` from the
+decisions `P7-01`–`P7-10` and the App decisions `A7-01`–`A7-03` from the
 [API implementation plan](../api-implementation-plan.md) and the
 [App adaptation plan](../../../dada-app/docs/annotator-disagreement-adaptation-plan.md).
 
-`P7-06` is **APPROVED**; the other eight decisions are **PENDING**. Phase 7
-implementation must not begin until every pending decision is resolved and
-approved here. For the App implementation,
-the separate blocking issues in
-[Phase 7 App issues](../../../dada-app/docs/issues_before_phase7.md) must also
-be resolved and verified.
+The decision register below is the source of truth for Phase 7 decisions. Phase 7 implementation must not begin until the pending decisions are resolved and approved here. App issues I7-04 and I7-05 are implementation stages: address and verify them when implementation begins; they do not block starting the phase. Their details and evidence are tracked in [Phase 7 App issues](../../../dada-app/docs/issues_before_phase7.md).
 
 When a decision is approved, replace its pending status with **APPROVED** and
 record the chosen behavior, its main reason, any contract change, how it will be
@@ -23,14 +18,18 @@ resolutions; the two implementation plans retain the phase gate and link here.
 | ID | Area | Required outcome | Status |
 | --- | --- | --- | --- |
 | `P7-01` | Active-learning run and dataset export boundary | Exact accepted annotations given to the internal active-learning worker, its selection result, temporary run/artifact retention, and the final annotated-dataset export | **APPROVED** |
-| `P7-02` | Active-learning selection | Initial task adapter, uncertainty ranking, media versus object targets, deterministic ties, object context, and unavailable-adapter behavior | **PENDING** |
-| `P7-03` | Iteration stopping and recovery | Validation metric per task, optional target, maximum iterations, evaluation point, and retry behavior | **PENDING** |
-| `P7-04` | Assisted segmentation | Whether it ships in Phase 7 and, if so, the provider, minimal request/result contract, authorization, timeout, and non-vote rule | **PENDING** |
-| `P7-05` | Quality statistics | Published metrics, formulas, authorized roles, and minimum-sample suppression | **PENDING** |
+| `P7-02` | Active-learning selection | Initial task adapter, uncertainty ranking, media versus object targets, deterministic ties, object context, and unavailable-adapter behavior | **APPROVED** |
+| `P7-03` | Iteration stopping and recovery | Validation metric per task, optional target, maximum iterations, evaluation point, and retry behavior | **APPROVED** |
+| `P7-04` | Assisted segmentation | Whether it ships in Phase 7 and, if so, the provider, minimal request/result contract, authorization, timeout, and non-vote rule | **APPROVED** |
+| `P7-05` | Quality statistics | Published metrics, formulas, authorized roles, and minimum-sample suppression | **APPROVED** |
 | `P7-06` | HEIC/HEIF ingestion and browser rendition | Accepted types, decoder, original retention, deterministic lossless WebP rendition, pixel-coordinate invariant, delivery contract, App selection behavior, and verification | **APPROVED** |
-| `A7-01` | Acquisition activity UX | User-visible random/active-learning states, failure message, and retry action | **PENDING** |
-| `A7-02` | Quality presentation | Manager-visible values, suppression display, accessible table, and no annotator ranking | **PENDING** |
-| `A7-03` | Assisted-segmentation UX | Trigger, preview, accept/discard/edit, and safe failure without changing the draft | **PENDING** |
+| `P7-07` | Assistance model lifecycle and contract | Model availability, provider and authorized request/result behavior | **PENDING** |
+| `P7-08` | Batch and evaluation contract | Snapshots, jobs, evaluation cadence and recovery semantics | **PENDING** |
+| `P7-09` | DADA selection edge cases | Budget, clustering, insufficient candidates and reproducibility | **PENDING** |
+| `P7-10` | DADA task and training behavior | Classification support, partial-label training and consensus boundary | **PENDING** |
+| `A7-01` | Acquisition activity UX | User-visible random/active-learning states, failure message, and retry action | **APPROVED** |
+| `A7-02` | Quality presentation | Manager-visible values, suppression display, accessible table, and no annotator ranking | **APPROVED** |
+| `A7-03` | Assisted-segmentation UX | Trigger, preview, accept/discard/edit, and safe failure without changing the draft | **APPROVED** |
 
 ## Fixed Phase 7 constraints
 
@@ -90,6 +89,11 @@ Dataset export should be possible at any iteration (training, validation and tes
 annotations, media, classes, and provenance; do not export an application model or expose a generic training API. Dataset
 export format for detection and segmentation should be selected by the user. Available formats: YOLO normalized or COCO.
 
+**Approving owner:** DADA API/App owner
+
+**Approval date:** 2026-11-09
+
+
 ### P7-02 — Active-learning selection
 
 **Status:** **APPROVED**
@@ -103,6 +107,11 @@ Other frameworks can be implemented in the future and if another option exists, 
 General modularity requirements and architecture definitions for any active learning solution are defined in [AL](../active_learning/active_learning_requirements_specification.md)
 and should be followed.
 
+**Approving owner:** DADA API/App owner
+
+**Approval date:** 2026-11-09
+
+
 ### P7-03 — Iteration stopping and recovery
 
 **Status:** **APPROVED**
@@ -114,8 +123,11 @@ after a failed iteration.
 
 **Decision:** Let the user choose accuracy or F1 for classification, mAP@50 for
 detection, and mean IoU for segmentation. Let the user choose when to evaluate, with possibilities to
-evaluate the target model at every acquisition iteration or after every K iterations. Stop when the maximum acquisition count is reached or the optional metric target is met. Retry a failure from the same
-accepted-resolution snapshot as a new attempt.
+evaluate the target model at every acquisition iteration or after every K iterations. Stop when the maximum acquisition count is reached or the optional metric target is met. Retry a failure from the same accepted-resolution snapshot as a new attempt.
+
+**Approving owner:** DADA API/App owner
+
+**Approval date:** 2026-11-09
 
 ### P7-04 — Assisted segmentation
 
@@ -133,6 +145,10 @@ accept the suggestion before it becomes draft geometry, and it never counts as
 a submission or vote. If the feature is deferred, approve that explicit
 deferral and keep the current placeholder.
 
+**Approving owner:** DADA API/App owner
+
+**Approval date:** 2026-11-09
+
 ### P7-05 — Quality statistics
 
 **Status:** **APPROVED**
@@ -144,6 +160,51 @@ expose unreliable or private annotator comparisons.
 task-appropriate agreement summaries. Owners and managers may see performance
 summaries after at least 30 eligible decisions; hide cells below five
 observations. Annotators do not receive named performance data or rankings.
+
+**Approving owner:** DADA API/App owner
+
+**Approval date:** 2026-11-09
+
+
+### P7-07 — Assistance model lifecycle and contract
+
+**Status:** **APPROVED**
+
+**Decision needed:** Define the provider, model selection and retention, availability before the first target evaluation and outside AL mode, authorization, timeout, and request/result contracts for detection and segmentation assistance. Reconcile boxes, polygons and supported prompts with A7-03.
+
+**Decision:** Use the latest compatible target model with an explicit assistance retention policy; report assistance unavailable when no compatible model exists. Authorize against the active assignment, impose a bounded timeout, and return typed geometry in canonical coordinates. Never persist a suggestion without explicit acceptance into the draft.
+
+**Approving owner:** DADA API/App owner
+
+**Approval date:** 2026-11-09
+
+### P7-08 — Batch and evaluation contract
+
+**Status:** **APPROVED**
+
+**Decision needed:** Specify versioned request/result schemas, snapshot and media access, job states, errors, idempotency and retry; define evaluation data requirements and delivery of results. Specify K bounds and first evaluation point, metric aggregation, threshold direction, empty validation and pool exhaustion behavior.
+
+**Decision:** Use immutable identified snapshots and a durable idempotent job per iteration and attempt; retries use the same snapshots. Evaluations should be performed over the validation set (defined at project creation) and over the test set after the last iteration and persist target-model metrics and provenance. Evaluate after every K completed acquisition iterations, K >= 1, and stop on an explicitly configured threshold or maximum; define task-specific averaging and unavailable-data errors before implementation.
+
+**Approving owner:** DADA API/App owner
+
+**Approval date:** 2026-11-09
+
+### P7-09 — DADA selection edge cases
+
+**Status:** **APPROVED**
+
+**Decision needed:** Resolve requested budget versus DADA configuration, insufficient candidates, empty or undersized clusters, zero uncertainty, quota redistribution, random seeds and tie-breaking.
+
+**Decision:** The batch request is authoritative for Q. Cap clusters by candidate count, allocate by largest remainder with capacity-aware redistribution, use equal weights when all scores are zero, and return all available candidates with a reason when fewer than Q exist. Persist seeds and use stable identifiers for ties; define empty-pool behavior explicitly.
+
+### P7-10 — DADA tasks and partial-label training
+
+**Status:** **PENDING**
+
+**Decision needed:** Specify classification extraction and compatible model/uncertainty combinations, partial-label training and its verification, and remove ambiguity around consensus ownership. Establish whether all listed model families are supported in the first release.
+
+**Suggestion (not approved):** Publish only tested task/model/method combinations in discovery; implement a classification-specific extraction path and reject unsupported combinations. Use loss masking with a verified zero-negative-gradient test for unknown regions; treat blackout/pseudo-labeling as a separate approach requiring evidence rather than assuming equivalence. Keep consensus and canonical labels in the API, with DADA consuming snapshots.
 
 ### P7-06 — HEIC/HEIF ingestion and browser rendition
 
@@ -251,6 +312,10 @@ or `Training`, `Evaluating`, and then `Selecting images`/`Selecting objects`.
 Show ETA only when the API provides one. On failure, show the API reason and a
 Retry action to authorized users.
 
+**Approving owner:** DADA API/App owner
+
+**Approval date:** 2026-11-09
+
 ### A7-02 — Quality presentation
 
 **Status:** **APPROVED**
@@ -266,6 +331,10 @@ table for review rate, agreement, and task metrics. Render suppressed values as
 `Not enough data`. Do not add annotator-facing rankings. Charts and CSV export
 can be added later if there is a concrete need.
 
+**Approving owner:** DADA API/App owner
+
+**Approval date:** 2026-11-09
+
 ### A7-03 — Assisted-segmentation UX
 
 **Status:** **APPROVED**
@@ -279,6 +348,11 @@ accept, discard, or edit it. For an object-target assignment, limit edits to the
 highlighted target. Offline and timeout errors leave the existing draft
 unchanged.
 
+**Approving owner:** DADA API/App owner
+
+**Approval date:** 2026-11-09
+
+
 ## Resolution checklist
 
 Before changing a status to **APPROVED**, record:
@@ -288,5 +362,4 @@ Before changing a status to **APPROVED**, record:
 3. the verification that will prove it works; and
 4. the approver and approval date.
 
-After all eight pending records are approved, update the Phase 7 statuses in both
-implementation plans before implementation starts.
+After all pending records are approved, the implementation plans refer to this record for their current status.

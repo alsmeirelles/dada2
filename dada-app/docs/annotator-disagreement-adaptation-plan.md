@@ -636,9 +636,9 @@ addressed.
 
 ### Phase 7: active-learning activity and quality metrics
 
-**Start gate:** resolve shared decisions `P7-01`–`P7-06` and App decisions
-`A7-01`–`A7-03` in `dada-api/docs/phases/phase_7.md`, and resolve and verify
-every blocking item in [Phase 7 App issues](issues_before_phase7.md).
+**Start gate:** resolve and approve pending decisions in the canonical [Phase 7 record](../../dada-api/docs/phases/phase_7.md). Resolve and verify I7-04 and I7-05 as implementation stages when Phase 7 begins; they do not block starting it. See [Phase 7 App issues](issues_before_phase7.md).
+
+Use the API solution catalog to present compatible active-learning solutions and configuration. The API owns the annotation workflow and labeled pool. Show target-model evaluation at the user-selected cadence and handle unavailable assistance according to the Phase 7 decisions.
 
 - Implement approved HEIC/HEIF decision `P7-06`. Use one shared format registry
   for MIME types, extensions, both dataset file inputs, and visible format help;
@@ -697,9 +697,6 @@ and also block the App phase that references them.
 
 | ID | Pending App decision | Required documented outcome |
 | --- | --- | --- |
-| `A7-01` | Acquisition activity UX | User-visible random/active-learning states, failure message, and retry action |
-| `A7-02` | Quality presentation | Manager-visible values, suppression display, accessible table, and no annotator ranking |
-| `A7-03` | Assisted-segmentation UX | Trigger, preview, accept/discard/edit, and safe failure without changing the draft |
 | `A8-01` | Connection and recovery UX | Offline/reconnecting indicators, polling cadence visibility, sequence-gap refresh behavior, duplicate-notification suppression, and actions during degraded service |
 | `A8-02` | Real-time cache and privacy boundaries | Query-key ownership, evidence eviction on role/project changes, event-to-query invalidation, cross-tab behavior, and logout cleanup |
 | `A8-03` | Load and accessibility budgets | Page-size defaults, lazy-loading thresholds, canvas/evidence limits, 200% zoom layouts, reduced-motion behavior, and measurable performance budgets |
@@ -712,9 +709,7 @@ are maintained in the canonical [Phase 5 decision record](../../dada-api/docs/ph
 Phase 6 App decisions `A6-01`–`A6-04` and API decisions `P6-01`–`P6-08`
 are maintained in the canonical [Phase 6 decision record](../../dada-api/docs/phases/phase_6.md).
 
-Shared decision `P7-06` is approved in the canonical
-[Phase 7 decision record](../../dada-api/docs/phases/phase_7.md). App decisions
-`A7-01`–`A7-03` remain pending there.
+All Phase 7 decision statuses and pending decisions are maintained in the canonical [Phase 7 record](../../dada-api/docs/phases/phase_7.md).
 
 ## Test plan
 
@@ -779,7 +774,7 @@ Detailed issues are in [Phase 6 issues](issues_before_phase6.md).
 
 #### Phase 7
 
-Detailed blocking issues are in [Phase 7 App issues](issues_before_phase7.md).
+Implementation issues are in [Phase 7 App issues](issues_before_phase7.md); decision status is in the [Phase 7 record](../../dada-api/docs/phases/phase_7.md).
 
 #### Phase 8
 

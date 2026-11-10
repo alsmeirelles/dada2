@@ -795,12 +795,9 @@ worker retry.
 
 ### Phase 7: active-learning loop, dataset export, metrics, and assisted segmentation
 
-**Start gate:** resolve API decisions `P7-01`–`P7-06` and App decisions
-`A7-01`–`A7-03` in `docs/phases/phase_7.md`, then change their status in both
-plans.
+**Start gate:** resolve and approve pending decisions in the canonical [Phase 7 record](phases/phase_7.md). That record is the source of truth for decision status.
 
-Model training and evaluation in this phase exist only to choose the next
-active-learning annotation targets. DADA's durable product is the annotated
+Training and selection are internal to the chosen active-learning solution. Scheduled performance evaluation uses the target model at the user-selected frequency; details are governed by the Phase 7 record. DADA's durable product is the annotated
 dataset; production training, model deployment, and model experimentation are
 outside its scope.
 
@@ -819,7 +816,11 @@ outside its scope.
   first acquisition only after all initial images have accepted resolutions:
   random selection may proceed directly; active learning requests a batch from
   the chosen solution with accepted training data and the eligible pool. The
-  solution owns any training and evaluation needed for selection.
+  solution owns any training and evaluation needed for selection. The API owns
+  annotation and the accepted labeled pool. Discover solutions through the API
+  catalog, persist the chosen version, and validate returned batches. Proxy and
+  helper models are deleted by default after operational or retry needs, unless
+  explicitly configured for retention; persist evaluation provenance separately.
 - Generate dataset manifests only from accepted resolution IDs. Training uses
   the cumulative initial-training and accepted acquisition data; validation is
   evaluation-only and test is final-evaluation-only. Detection and segmentation
@@ -945,11 +946,6 @@ and share the same gate and decision record.
 
 | ID | Pending decision | Required documented outcome |
 | --- | --- | --- |
-| `P7-01` | Active-learning run and dataset export boundary | Exact accepted annotations given to the internal active-learning worker, its selection result, temporary run/artifact retention, and the final annotated-dataset export |
-| `P7-02` | Active-learning selection | Initial task adapter, uncertainty ranking, media versus object targets, deterministic ties, object context, and unavailable-adapter behavior |
-| `P7-03` | Iteration stopping and recovery | Validation metric per task, optional target, maximum iterations, evaluation point, and retry behavior |
-| `P7-04` | Assisted segmentation | Whether it ships in Phase 7 and, if so, the provider, minimal request/result contract, authorization, timeout, and non-vote rule |
-| `P7-05` | Quality statistics | Published metrics, formulas, authorized roles, and minimum-sample suppression |
 | `P8-01` | Event delivery contract | WebSocket topology, ticket TTL/single-use rules, sequence scope and retention, event schemas/redaction, reconnect/gap algorithm, and polling fallback cadence |
 | `P8-02` | Public and worker resource limits | Per-route/user/project rate limits, upload and signed-URL expiry, consensus/training concurrency, queue backpressure, and overload errors |
 | `P8-03` | Reliability and data operations | Service objectives, metrics/alerts, trace sampling, backup schedule, restore drill, RPO/RTO, retention/purge schedule, and runbook owners |
@@ -965,10 +961,7 @@ are maintained in the canonical [Phase 5 decision record](phases/phase_5.md). CO
 Phase 6 API decisions `P6-01`–`P6-08` and App decisions `A6-01`–`A6-04`
 are maintained in the canonical [Phase 6 decision record](phases/phase_6.md).
 
-Phase 7 API decisions `P7-01`–`P7-06` and App decisions `A7-01`–`A7-03`
-are maintained in the canonical [Phase 7 decision record](phases/phase_7.md).
-`P7-06` is **APPROVED**; the other Phase 7 decisions remain **PENDING** until
-approved there.
+Phase 7 decisions, including all pending decisions and their current status, are maintained exclusively in the canonical [Phase 7 decision record](phases/phase_7.md).
 
 ### Phase 3 storage and retention — settled
 

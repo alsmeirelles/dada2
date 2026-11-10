@@ -1,16 +1,10 @@
-# Phase 7 App blocking issues
+# Phase 7 App implementation issues
 
-This document is a **blocking requirement for App Phase 7 implementation**.
-App Phase 7 code must not start until every issue below is marked **RESOLVED**
-in this file with the implemented change and verification evidence. This gate is
-in addition to resolving and approving `P7-01`–`P7-06` and `A7-01`–`A7-03` in
-the canonical [Phase 7 decision record](../../dada-api/docs/phases/phase_7.md).
+I7-04 and I7-05 are implementation stages to resolve and verify when Phase 7 implementation begins; they do not block its start. Phase 7 decisions and the start gate are maintained in the canonical [Phase 7 decision record](../../dada-api/docs/phases/phase_7.md).
 
-An issue is resolved only when this document records its root cause, affected
-App/API surface, remediation, verification, owner, and completion date. A
-workaround or an unverified observation does not satisfy the gate.
+Record each resolution with its root cause, affected surface, remediation, verification, owner, and completion date.
 
-| ID | Blocking issue | Required documented outcome | Status |
+| ID | Issue | Required documented outcome | Status |
 | --- | --- | --- | --- |
 | `I7-01` | Annotator selection in project creation | Replace ambiguous typed usernames with selection from existing eligible users | **RESOLVED** |
 | `I7-02` | Annotation settings: class strategy availability | Present concise, actionable availability guidance without internal IDs or raw evidence diagnostics | **RESOLVED** |
