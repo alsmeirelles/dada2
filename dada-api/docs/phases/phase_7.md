@@ -1,11 +1,11 @@
 # Phase 7 pending decisions
 
 This is the canonical decision record for Phase 7. It contains the shared API
-decisions `P7-01`–`P7-10` and the App decisions `A7-01`–`A7-03` from the
+decisions `P7-01`–`P7-09` and the App decisions `A7-01`–`A7-03` from the
 [API implementation plan](../api-implementation-plan.md) and the
 [App adaptation plan](../../../dada-app/docs/annotator-disagreement-adaptation-plan.md).
 
-The decision register below is the source of truth for Phase 7 decisions. Phase 7 implementation must not begin until the pending decisions are resolved and approved here. App issues I7-04 and I7-05 are implementation stages: address and verify them when implementation begins; they do not block starting the phase. Their details and evidence are tracked in [Phase 7 App issues](../../../dada-app/docs/issues_before_phase7.md).
+The individual decision records below are the source of truth for Phase 7 decision status; the register summarizes them. Phase 7 implementation must not begin until the pending decisions are resolved and approved here. App issues I7-04 and I7-05 are implementation stages: address and verify them when implementation begins; they do not block starting the phase. Their details and evidence are tracked in [Phase 7 App issues](../../../dada-app/docs/issues_before_phase7.md).
 
 When a decision is approved, replace its pending status with **APPROVED** and
 record the chosen behavior, its main reason, any contract change, how it will be
@@ -23,10 +23,9 @@ resolutions; the two implementation plans retain the phase gate and link here.
 | `P7-04` | Assisted segmentation | Whether it ships in Phase 7 and, if so, the provider, minimal request/result contract, authorization, timeout, and non-vote rule | **APPROVED** |
 | `P7-05` | Quality statistics | Published metrics, formulas, authorized roles, and minimum-sample suppression | **APPROVED** |
 | `P7-06` | HEIC/HEIF ingestion and browser rendition | Accepted types, decoder, original retention, deterministic lossless WebP rendition, pixel-coordinate invariant, delivery contract, App selection behavior, and verification | **APPROVED** |
-| `P7-07` | Assistance model lifecycle and contract | Model availability, provider and authorized request/result behavior | **PENDING** |
-| `P7-08` | Batch and evaluation contract | Snapshots, jobs, evaluation cadence and recovery semantics | **PENDING** |
-| `P7-09` | DADA selection edge cases | Budget, clustering, insufficient candidates and reproducibility | **PENDING** |
-| `P7-10` | DADA task and training behavior | Classification support, partial-label training and consensus boundary | **PENDING** |
+| `P7-07` | Assistance model lifecycle and contract | Model availability, provider and authorized request/result behavior | **APPROVED** |
+| `P7-08` | Batch and evaluation contract | Snapshots, jobs, evaluation cadence and recovery semantics | **APPROVED** |
+| `P7-09` | DADA selection edge cases | Budget, clustering, insufficient candidates and reproducibility | **APPROVED** |
 | `A7-01` | Acquisition activity UX | User-visible random/active-learning states, failure message, and retry action | **APPROVED** |
 | `A7-02` | Quality presentation | Manager-visible values, suppression display, accessible table, and no annotator ranking | **APPROVED** |
 | `A7-03` | Assisted-segmentation UX | Trigger, preview, accept/discard/edit, and safe failure without changing the draft | **APPROVED** |
@@ -81,7 +80,7 @@ wrong split, unresolved annotations, or unselected objects. It is not a general
 training platform, model registry, or production-model export.
 
 
-**Approved decision, clarified:** Use one internal run record for each batch request. The API supplies an immutable snapshot of accepted training resolutions and media, the eligible unlabeled pool, task, class mapping, requested size and solution configuration. Validation data, if supplied for evaluation, is separate from the acquisition pool. The selected solution returns an ordered batch of eligible media or object targets and provenance under the [shared contract](../active_learning/active_learning_requirements_specification.md#batch-selection-interface). Selection methods, training and model artifacts are solution internals. Performance evaluations use the target model at a user-selected frequency, not a proxy or helper model; cadence and stopping details are pending in P7-03. Record evaluation results with target-model, data-snapshot and iteration provenance.
+**Approved decision, clarified:** Use one internal run record for each batch request. The API supplies an immutable snapshot of accepted training resolutions and media, the eligible unlabeled pool, task, class mapping, requested size and solution configuration. Validation data, if supplied for evaluation, is separate from the acquisition pool. The selected solution returns an ordered batch of eligible media or object targets and provenance under the [shared contract](../active_learning/active_learning_requirements_specification.md#batch-selection-interface). Selection methods, training and model artifacts are solution internals. Performance evaluations use the target model at a user-selected frequency, not a proxy or helper model; cadence and stopping follow P7-03 and P7-08. Record evaluation results with target-model, data-snapshot and iteration provenance.
 
 The API validates and records the batch, manages single-annotation or consensus workflows, and maintains accepted annotations in the canonical labeled pool. The next request uses a new accepted-data snapshot. Proxy and helper models and checkpoints are not kept by default. A configuration parameter may explicitly enable their retention. Temporary artifacts needed for a run or retry may be kept until no longer needed, then deleted unless retention is enabled. Record failures and retry against the same snapshot; retain run and evaluation provenance independently of helper artifacts.
 
@@ -174,6 +173,8 @@ observations. Annotators do not receive named performance data or rankings.
 
 **Decision:** Use the latest compatible target model with an explicit assistance retention policy; report assistance unavailable when no compatible model exists. Authorize against the active assignment, impose a bounded timeout, and return typed geometry in canonical coordinates. Never persist a suggestion without explicit acceptance into the draft.
 
+**Implementation suggestions:** Use an internal provider interface that loads the latest compatible retained target model and reports a stable unavailable reason when absent. Apply a configurable 30-second timeout; authorize project membership and the active assignment before reading media. Accept an assignment ID, canonical-plane point/box prompts and a request ID; return typed box or polygon geometry, model provenance and status. Reject invalid coordinates and keep drafts unchanged on timeout or failure. Define target-model retention and cleanup for assistance independently of helper-model retention.
+
 **Approving owner:** DADA API/App owner
 
 **Approval date:** 2026-11-09
@@ -185,6 +186,8 @@ observations. Annotators do not receive named performance data or rankings.
 **Decision needed:** Specify versioned request/result schemas, snapshot and media access, job states, errors, idempotency and retry; define evaluation data requirements and delivery of results. Specify K bounds and first evaluation point, metric aggregation, threshold direction, empty validation and pool exhaustion behavior.
 
 **Decision:** Use immutable identified snapshots and a durable idempotent job per iteration and attempt; retries use the same snapshots. Evaluations should be performed over the validation set (defined at project creation) and over the test set after the last iteration and persist target-model metrics and provenance. Evaluate after every K completed acquisition iterations, K >= 1, and stop on an explicitly configured threshold or maximum; define task-specific averaging and unavailable-data errors before implementation.
+
+**Implementation suggestions:** Use a versioned manifest schema shared by input and selection output, preserving media references and adding selected object geometry when needed; include snapshot IDs, task, class mapping, requested size, solution version and configuration. Use queued, running, succeeded, failed and cancelled job states with structured errors and an idempotency key scoped to project, iteration and attempt. Retry as a new attempt against the same immutable snapshots. Persist evaluation data and model provenance; define macro F1 across classes and class-averaged IoU with an explicit absent-class rule, treat all listed metrics as higher-is-better, and report an unavailable-data error for empty validation. Define first evaluation at iteration K, with final test evaluation after the last iteration. The exact schema and rules require approval.
 
 **Approving owner:** DADA API/App owner
 
@@ -198,13 +201,9 @@ observations. Annotators do not receive named performance data or rankings.
 
 **Decision:** The batch request is authoritative for Q. Cap clusters by candidate count, allocate by largest remainder with capacity-aware redistribution, use equal weights when all scores are zero, and return all available candidates with a reason when fewer than Q exist. Persist seeds and use stable identifiers for ties; define empty-pool behavior explicitly.
 
-### P7-10 — DADA tasks and partial-label training
+**Approving owner:** DADA API/App owner
 
-**Status:** **PENDING**
-
-**Decision needed:** Specify classification extraction and compatible model/uncertainty combinations, partial-label training and its verification, and remove ambiguity around consensus ownership. Establish whether all listed model families are supported in the first release.
-
-**Suggestion (not approved):** Publish only tested task/model/method combinations in discovery; implement a classification-specific extraction path and reject unsupported combinations. Use loss masking with a verified zero-negative-gradient test for unknown regions; treat blackout/pseudo-labeling as a separate approach requiring evidence rather than assuming equivalence. Keep consensus and canonical labels in the API, with DADA consuming snapshots.
+**Approval date:** 2026-11-10
 
 ### P7-06 — HEIC/HEIF ingestion and browser rendition
 
