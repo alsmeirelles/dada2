@@ -12,8 +12,8 @@ from dada_api.models.annotation_policy import AnnotationMode, AnnotationPolicyDe
 from dada_api.models.label_import import AnnotationImport, ImportStatus
 from dada_api.models.project import DatasetLayout, Project, ProjectMember, ProjectRole
 from dada_api.models.user import User
-from dada_api.schemas.project import ProjectCreate, ProjectUpdate
-from dada_api.services import audit, datasets, storage
+from dada_api.schemas.project import LEARNING_FIELDS, ProjectCreate, ProjectUpdate
+from dada_api.services import audit, datasets, learning_settings, storage
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,8 @@ async def create_project(
 
     Project authority is resolved from membership, so the owner's membership
     row and the default annotation policy are written in the same transaction
-    as the project itself.
+    as the project itself. An active-learning project receives the defaults
+    of its solution and task for every learning setting left out.
 
     Args:
         session: Active database session.
@@ -38,6 +39,10 @@ async def create_project(
 
     Returns:
         The persisted project.
+
+    Raises:
+        ApiError: 422 when a learning setting is unknown, unavailable,
+            incompatible with the task, or invalid.
     """
     project = Project(
         name=request.name,
@@ -53,7 +58,12 @@ async def create_project(
         validation_set_size=request.validation_set_size,
         validation_set_percentage=request.validation_set_percentage,
         iteration_batch_size=request.iteration_batch_size,
+        max_acquisition_iterations=request.max_acquisition_iterations,
+        learning_configuration={},
         version=1,
+    )
+    learning_settings.apply(
+        project, request.model_dump(include=set(LEARNING_FIELDS), exclude_unset=True)
     )
     session.add(project)
     await session.flush()
@@ -126,8 +136,9 @@ async def update_project(
     """Apply a versioned update to a project.
 
     A static ``single_batch`` project never acquires, so it keeps the random
-    strategy. A strategy change is audited because it decides how every later
-    training batch will be chosen.
+    strategy and has no iteration limit. Strategy and learning-setting
+    changes are audited because they decide how every later acquisition
+    iteration runs.
 
     Args:
         session: Active database session.
@@ -140,7 +151,8 @@ async def update_project(
 
     Raises:
         ApiError: 409 when the supplied version is not the current one; 422
-            when a static project is asked to use active learning.
+            when a static project is asked to acquire, or a learning setting
+            is not allowed or invalid.
     """
     if request.version != project.version:
         raise ApiError(
@@ -170,6 +182,32 @@ async def update_project(
             after={"acquisition_strategy": strategy},
         )
         project.acquisition_strategy = strategy
+
+    learning = {name: fields.pop(name) for name in LEARNING_FIELDS if name in fields}
+    limit = fields.pop("max_acquisition_iterations", None)
+    if limit is not None and project.dataset_layout == DatasetLayout.single_batch:
+        raise ApiError(
+            422,
+            "learning_settings_not_allowed",
+            "A single_batch project has no acquisition iterations.",
+        )
+    if learning or limit is not None or strategy is not None:
+        before = learning_settings.snapshot(project)
+        if limit is not None:
+            project.max_acquisition_iterations = limit
+        learning_settings.apply(project, learning)
+        after = learning_settings.snapshot(project)
+        if after != before:
+            audit.record(
+                session,
+                actor,
+                project.id,
+                "project.learning_settings_changed",
+                "project",
+                project.id,
+                before=before,
+                after=after,
+            )
     for name, value in fields.items():
         setattr(project, name, value)
     project.version += 1

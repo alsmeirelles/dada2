@@ -369,7 +369,7 @@ project, matching the existing treatment of `activate_project`.
 ## Current placeholders
 
 The assisted-segmentation inference route remains a `501` placeholder until
-Phase 7. The prototype `/api/v1/queue` routes were removed in Phase 5; see
+Phase 7 block 2. The prototype `/api/v1/queue` routes were removed in Phase 5; see
 [Image assignments](#image-assignments-phase-5).
 
 `GET /api/v1/capabilities` is served from validated settings and now advertises
@@ -630,3 +630,71 @@ install the scripted fake adapter (`dada_api.consensus.fake.ScriptedPipeline`)
 through `dada_api.consensus.pipeline.ADAPTERS`, or run the real pipelines.
 Pure pipeline tests replay the committed golden fixtures under
 `tests/fixtures/consensus/`.
+
+## Acquisition loop (Phase 7)
+
+Once every image of the test, validation, and initial-training batches has an
+accepted resolution, the loop opens acquisition iterations on its own. Each
+batch that becomes `resolved` writes a `learning.batch_resolved.v1` outbox
+event, and the relay that already runs for consensus opens the next
+iteration:
+
+- **Random acquisition** draws the batch in the relay itself and opens it in
+  `preparing`.
+- **Active learning** writes immutable manifests (`dada-coco-pai/1`) of the
+  accepted training data, the eligible pool, and, when an evaluation is due,
+  validation and test, under `<media root>/<project>/learning/snapshots/`. A
+  run then goes to the Celery queue `learning`, where the project's solution
+  evaluates and selects. The API validates the answer and opens the batch in
+  `preparing`.
+
+A manager starts every acquisition batch from the batches page, as with the
+initial batches. Decisions and their reasons are in
+[Phase 7](phases/phase_7.md#decisões).
+
+### Running it locally
+
+```bash
+make run                              # terminal 1: the API
+make consensus                        # terminal 2: relay and consensus workers
+make worker-learning                  # terminal 3: the active-learning worker
+```
+
+On Windows, use `make worker-learning CELERY_POOL=solo`. In `development`
+and `test`, the catalog includes a `deterministic` solution that needs no
+model or GPU, so the whole loop can be exercised locally.
+
+### Settings
+
+A `split` project requires `max_acquisition_iterations`. With
+`active_learning`, `learning_solution`, `learning_configuration`,
+`evaluation_metric`, `evaluation_interval` (K), and `metric_target` receive
+defaults when omitted, and `PATCH /projects/{id}` changes them for the next
+run. `GET /capabilities` lists the solutions and the metrics of each task.
+`DADA_LEARNING_TIMEOUT_SECONDS` (default 86400) bounds one run; the relay
+fails a run that reports nothing within it.
+
+### Iterations
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/projects/{id}/iterations` | Iterations, oldest first, plus the current one |
+| `GET` | `/projects/{id}/iterations/{iteration_id}` | One iteration with counts, state, stage, and metrics |
+| `POST` | `/projects/{id}/iterations/{iteration_id}/close` | Idempotent completion check; `409 iteration_incomplete` while images remain |
+| `POST` | `/projects/{id}/iterations/{iteration_id}/retry` | New attempt of a failed iteration over the same snapshots (`manage_learning`) |
+| `GET` | `/projects/{id}/statistics` | Progress and every target-model evaluation |
+
+A failed run stays failed until a manager retries it; nothing is retried
+automatically. The project becomes `completed` with `completion_reason`
+`max_iterations`, `metric_target`, or `pool_exhausted`.
+
+## HEIC/HEIF ingestion (Phase 7)
+
+`image/heic` and `image/heif` are accepted. At upload completion the API
+decodes the primary image once, with its HEIF orientation applied, and
+writes a lossless 8-bit sRGB WebP rendition at
+`<media root>/<project>/renders/v1/<source sha256>.webp` before the source is
+promoted. The source keeps its digest; its recorded width and height are the
+rendition's. The signed content route serves the rendition as `image/webp`.
+A local `.env` copied from an older example must add both types to
+`DADA_SUPPORTED_IMAGE_MEDIA_TYPES`.

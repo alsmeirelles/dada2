@@ -320,6 +320,7 @@ async def test_project_owner_cannot_be_deleted(database: None) -> None:
                 "initial_training_size": 10,
                 "test_set_size": 5,
                 "iteration_batch_size": 5,
+                "max_acquisition_iterations": 5,
             },
         )
         assert created.status_code == 201, created.text
@@ -468,6 +469,7 @@ async def test_global_user_routes_refuse_every_non_administrator(
                 "initial_training_size": 10,
                 "test_set_size": 5,
                 "iteration_batch_size": 5,
+                "max_acquisition_iterations": 5,
             },
         )
         assert created.status_code == 201

@@ -74,6 +74,7 @@ DRAFT = {
     "validation_set_size": 1,
     "initial_training_size": 2,
     "iteration_batch_size": 2,
+    "max_acquisition_iterations": 5,
 }
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 PIPELINES = {

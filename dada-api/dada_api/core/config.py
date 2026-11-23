@@ -45,7 +45,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     readiness_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
     cursor_secret_key: SecretStr | None = Field(default=None, repr=False)
-    supported_image_media_types: str = "image/jpeg,image/png,image/webp"
+    supported_image_media_types: str = (
+        "image/jpeg,image/png,image/webp,image/heic,image/heif"
+    )
     max_file_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
     max_project_files: int = Field(default=100_000, gt=0)
     upload_chunk_bytes: int = Field(default=8 * 1024 * 1024, gt=0)
@@ -58,6 +60,7 @@ class Settings(BaseSettings):
     consensus_mask_timeout_seconds: int = Field(default=900, ge=60, le=3600)
     consensus_standard_memory_bytes: int = Field(default=1024**3, gt=0)
     consensus_mask_memory_bytes: int = Field(default=4 * 1024**3, gt=0)
+    learning_timeout_seconds: int = Field(default=86_400, ge=60, le=7 * 86_400)
     jwt_secret_key: SecretStr = Field(
         default=SecretStr("change-this-development-secret"),
         repr=False,

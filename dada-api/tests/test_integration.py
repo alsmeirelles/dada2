@@ -59,6 +59,7 @@ async def test_migrations_and_readiness() -> None:
         "task_type": "detection",
         "test_set_size": 1,
         "iteration_batch_size": 1,
+        "max_acquisition_iterations": 5,
     }
     async with httpx.AsyncClient(
         transport=transport, base_url="http://testserver"

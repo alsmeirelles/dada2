@@ -21,11 +21,13 @@ from dada_api.models.batch import (
     BatchStatus,
     ItemStatus,
 )
+from dada_api.models.consensus import OutboxEvent
 from dada_api.models.label_import import (
     AnnotationImport,
     ImportedSeedDocument,
     ImportStatus,
 )
+from dada_api.models.learning import BATCH_RESOLVED_EVENT
 from dada_api.models.media import Media
 from dada_api.models.project import ANNOTATION_ROLES, Project, ProjectMember
 from dada_api.models.user import User
@@ -39,6 +41,14 @@ from dada_api.services import (
 )
 
 PAGE_SIZE = 50
+LEARNING_PURPOSES = frozenset(
+    {
+        BatchPurpose.initial_training,
+        BatchPurpose.validation,
+        BatchPurpose.test,
+        BatchPurpose.acquisition,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -112,6 +122,47 @@ async def create_batch(
     """
     seed = selection.new_seed()
     chosen = selection.choose_up_to(candidates, size, seed)
+    await open_batch(
+        session,
+        project,
+        purpose,
+        chosen,
+        strategy=selection.RANDOM_STRATEGY,
+        seed=seed,
+        input_fingerprint=selection.fingerprint(candidates),
+        requested_size=size,
+    )
+    return chosen
+
+
+async def open_batch(
+    session: AsyncSession,
+    project: Project,
+    purpose: BatchPurpose,
+    chosen: list[str],
+    *,
+    strategy: str,
+    seed: int,
+    input_fingerprint: str,
+    requested_size: int,
+    model_run_id: str | None = None,
+) -> AnnotationBatch:
+    """Open a ``preparing`` batch over chosen media with the current policy.
+
+    Args:
+        session: Active database session, committed by the caller.
+        project: Project the batch belongs to.
+        purpose: Why the media was selected.
+        chosen: Selected media identifiers.
+        strategy: Selection strategy recorded as provenance.
+        seed: Seed of the selection.
+        input_fingerprint: Digest of the selection's ordered input.
+        requested_size: Size that was asked for.
+        model_run_id: Learning run that chose the media, when one did.
+
+    Returns:
+        The new batch.
+    """
     batch = AnnotationBatch(
         project_id=project.id,
         purpose=purpose,
@@ -120,10 +171,11 @@ async def create_batch(
         parameters={},
         review_thresholds={},
         source_policy_version=1,
-        selection_strategy=selection.RANDOM_STRATEGY,
+        selection_strategy=strategy,
         selection_seed=seed,
-        selection_input_fingerprint=selection.fingerprint(candidates),
-        requested_size=size,
+        selection_input_fingerprint=input_fingerprint,
+        requested_size=requested_size,
+        model_run_id=model_run_id,
     )
     session.add(batch)
     await _snapshot_policy(session, project, batch)
@@ -144,7 +196,7 @@ async def create_batch(
                 position=positions[media_id],
             )
         )
-    return chosen
+    return batch
 
 
 async def annotator_ids(session: AsyncSession, batch: AnnotationBatch) -> list[str]:
@@ -214,12 +266,17 @@ async def refresh_status(session: AsyncSession, batch: AnnotationBatch) -> None:
     ``resolving`` otherwise. Batches that are preparing, closed, or failed are
     left alone.
 
+    A split project's batch that becomes ``resolved`` records the
+    ``learning.batch_resolved.v1`` outbox event in the same transaction, so
+    the relay can open the next acquisition iteration (D4).
+
     Args:
         session: Active database session, with item changes flushed.
         batch: Batch to refresh.
     """
     if batch.status in (BatchStatus.preparing, BatchStatus.closed, BatchStatus.failed):
         return
+    previous = batch.status
     statuses = set(
         await session.scalars(
             select(BatchItem.status)
@@ -232,12 +289,39 @@ async def refresh_status(session: AsyncSession, batch: AnnotationBatch) -> None:
     )
     if statuses <= {ItemStatus.resolved}:
         batch.status = BatchStatus.resolved
+        if previous != BatchStatus.resolved and batch.purpose in LEARNING_PURPOSES:
+            await _record_resolved(session, batch)
     elif ItemStatus.pending in statuses:
         batch.status = BatchStatus.annotating
     elif ItemStatus.review_required in statuses:
         batch.status = BatchStatus.review_required
     else:
         batch.status = BatchStatus.resolving
+
+
+async def _record_resolved(session: AsyncSession, batch: AnnotationBatch) -> None:
+    """Record once that a batch feeding the acquisition loop is resolved."""
+    exists = await session.scalar(
+        select(OutboxEvent.id).where(
+            OutboxEvent.event_type == BATCH_RESOLVED_EVENT,
+            OutboxEvent.aggregate_id == batch.id,
+        )
+    )
+    if exists is None:
+        session.add(
+            OutboxEvent(
+                project_id=batch.project_id,
+                event_type=BATCH_RESOLVED_EVENT,
+                aggregate_type="annotation_batch",
+                aggregate_id=batch.id,
+                generation=1,
+                payload={
+                    "project_id": batch.project_id,
+                    "batch_id": batch.id,
+                    "purpose": batch.purpose,
+                },
+            )
+        )
 
 
 async def annotation_members(session: AsyncSession, project: Project) -> list[str]:

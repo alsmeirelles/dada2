@@ -42,6 +42,7 @@ DRAFT = {
     "test_set_size": 1,
     "validation_set_size": 1,
     "iteration_batch_size": 1,
+    "max_acquisition_iterations": 5,
 }
 
 

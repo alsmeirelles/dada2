@@ -43,8 +43,16 @@ async def test_capabilities_match_frontend_contract(
     assert response.status_code == 200
     body = response.json()
     pipelines = body.pop("consensus_pipelines")
+    solutions = body.pop("active_learning_solutions")
+    metrics = body.pop("evaluation_metrics")
     assert body == {
-        "supported_image_media_types": ["image/jpeg", "image/png", "image/webp"],
+        "supported_image_media_types": [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/heic",
+            "image/heif",
+        ],
         "max_file_bytes": 104857600,
         "max_project_files": 100000,
         "upload_chunk_bytes": 8388608,
@@ -71,6 +79,16 @@ async def test_capabilities_match_frontend_contract(
         "numerator": 2,
         "denominator": 3,
     }
+    assert metrics == {
+        "classification": ["accuracy", "f1"],
+        "detection": ["map50"],
+        "segmentation": ["mean_iou"],
+    }
+    assert [(item["id"], item["development_only"]) for item in solutions] == [
+        ("deterministic", True)
+    ]
+    assert solutions[0]["unavailable_reason"] is None
+    assert solutions[0]["parameters"][0]["name"] == "retain_helper_models"
 
 
 async def test_framework_errors_use_common_envelope(

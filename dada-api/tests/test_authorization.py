@@ -66,6 +66,14 @@ def test_manager_actions_added_in_phase_two() -> None:
         assert role_allows(ProjectRole.viewer, action) is False
 
 
-def test_the_matrix_has_fourteen_actions() -> None:
-    assert len(ProjectAction) == 14
-    assert len(EXPECTED_MATRIX) == 56
+def test_the_matrix_has_fifteen_actions() -> None:
+    assert len(ProjectAction) == 15
+    assert len(EXPECTED_MATRIX) == 60
+
+
+def test_manage_learning_belongs_to_owners_and_managers() -> None:
+    action = ProjectAction.manage_learning
+    assert role_allows(ProjectRole.owner, action) is True
+    assert role_allows(ProjectRole.manager, action) is True
+    assert role_allows(ProjectRole.annotator, action) is False
+    assert role_allows(ProjectRole.viewer, action) is False

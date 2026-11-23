@@ -11,14 +11,14 @@ from pathlib import Path
 from dada_api.core.config import get_settings
 from dada_api.db.session import async_session_factory, close_database
 from dada_api.main import create_app
-from dada_api.services import resolution_runs, resolver_quarantines
+from dada_api.services import learning_runs, resolution_runs, resolver_quarantines
 from dada_api.services.bootstrap import (
     BootstrapError,
     bootstrap_administrator,
     replace_bootstrap_administrator,
 )
 from dada_api.services.resolver_quarantines import QuarantineError
-from dada_api.workers.celery_app import send
+from dada_api.workers.celery_app import send, send_learning
 
 
 def export_openapi(output: Path) -> None:
@@ -115,10 +115,12 @@ async def run_bootstrap(replace: bool) -> str:
 
 
 async def run_consensus_relay(interval_seconds: float) -> None:
-    """Run the consensus outbox relay until interrupted.
+    """Run the outbox relay until interrupted.
 
-    Each pass turns readiness events into runs, re-queues runs whose worker
-    vanished, and dispatches queued runs to Celery.
+    Each pass turns readiness events into resolver runs, re-queues runs whose
+    worker vanished, and dispatches queued runs to Celery. The same pass
+    opens acquisition iterations for resolved batches, fails learning runs
+    that outlived their limit, and dispatches queued learning runs (D4).
 
     Args:
         interval_seconds: Pause between passes.
@@ -127,6 +129,10 @@ async def run_consensus_relay(interval_seconds: float) -> None:
         while True:
             async with async_session_factory() as session:
                 await resolution_runs.relay_once(session, send, datetime.now(UTC))
+            async with async_session_factory() as session:
+                await learning_runs.relay_once(
+                    session, send_learning, datetime.now(UTC)
+                )
             await asyncio.sleep(interval_seconds)
     finally:
         await close_database()
@@ -188,7 +194,7 @@ def main() -> None:
     )
     relay_parser = subparsers.add_parser(
         "consensus-relay",
-        help="Dispatch consensus runs from the outbox until interrupted.",
+        help="Dispatch consensus and learning runs from the outbox until interrupted.",
     )
     relay_parser.add_argument(
         "--interval", type=float, default=2.0, help="Seconds between passes."

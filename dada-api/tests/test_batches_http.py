@@ -54,6 +54,7 @@ DRAFT = {
     "test_set_size": TEST_SET_SIZE,
     "validation_set_size": VALIDATION_SET_SIZE,
     "iteration_batch_size": ITERATION_SIZE,
+    "max_acquisition_iterations": 5,
 }
 STATIC = {
     "name": "Static inventory",

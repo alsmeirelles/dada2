@@ -27,6 +27,7 @@ dependencies = [
 
     # Image validation remains an API responsibility.
     "pillow>=10.3.0",
+    "pillow-heif>=1.1.0",
 ]
 
 [project.optional-dependencies]

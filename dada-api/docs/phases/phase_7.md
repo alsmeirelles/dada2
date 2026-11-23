@@ -362,3 +362,394 @@ Before changing a status to **APPROVED**, record:
 4. the approver and approval date.
 
 After all pending records are approved, the implementation plans refer to this record for their current status.
+
+## Decisões
+
+Fechadas em 2026-11-23 com a Stephany, sob as decisões P7-01 a P7-09 e A7-01 a
+A7-03 acima. Só cobrem o que aqueles registros e as especificações de
+aprendizado ativo deixavam sem definição; nada aprovado acima foi reaberto.
+**Continuam sujeitas à revisão do Meirelles.**
+
+A implementação é feita em três blocos: o ciclo de aquisição na API (bloco 1),
+a solução DADA, os alvos por objeto e a assistência (bloco 2), e as saídas, o
+App e o fechamento (bloco 3).
+
+### Ciclo e dados
+
+#### D1: Configuração de aprendizado ativo no projeto
+
+**Escolha:**
+
+- Colunas novas no projeto: `max_acquisition_iterations`,
+  `learning_solution`, `learning_solution_version`, `learning_configuration`,
+  `evaluation_metric`, `evaluation_interval` (o K) e `metric_target`.
+- `max_acquisition_iterations` é obrigatório na criação de projetos `split` e
+  vale também para a aquisição aleatória. Projetos `single_batch` não aceitam
+  nenhum desses campos. Projetos criados antes da migração ficam com o máximo
+  nulo, o que quer dizer "até acabarem as imagens elegíveis".
+- Com `active_learning`, os campos omitidos recebem os padrões: a primeira
+  solução disponível do catálogo para a tarefa, a métrica padrão da tarefa,
+  K = 1 e a configuração padrão da solução. Com `random`, os campos de solução
+  e avaliação ficam nulos.
+- A API recusa solução desconhecida, indisponível ou incompatível com a
+  tarefa, métrica fora da tarefa e configuração inválida, sempre com `422`.
+- Tudo muda pelo `PATCH` versionado, em `draft` ou `active`, com auditoria
+  `project.learning_settings_changed`. Cada execução copia a configuração
+  vigente, então uma mudança vale a partir da próxima.
+
+**Motivo:** mesmo padrão da estratégia de aquisição (D1 da Fase 5), sem tabela
+de configuração.
+
+#### D2: Execuções e avaliações
+
+**Escolha:**
+
+- `learning_runs` tem uma linha por iteração e tentativa: finalidade
+  (`selection` ou `final_evaluation`), estratégia, solução e versão,
+  configuração e impressão digital, tamanho pedido, semente, plano de
+  avaliação, retratos, estado, etapa, fila, tempos, resultado e falha.
+- Um índice único parcial garante uma só execução ativa por projeto.
+- `model_evaluations` guarda uma avaliação por execução e divisão
+  (`validation` ou `test`), com a métrica, o valor, as demais métricas, a
+  procedência do modelo-alvo e o retrato usado.
+- O lote de aquisição aponta para a execução que o escolheu pela coluna
+  `model_run_id`, que já existia e ganha chave estrangeira.
+- A "iteração" das rotas é derivada da execução e do lote, sem tabela própria.
+  O identificador da iteração é o da primeira tentativa.
+
+**Motivo:** segue a D2 da Fase 6 (o estado do job fica na própria tabela de
+execuções) e a D4 da Fase 4 (a procedência fica no lote).
+
+**Rejeitada:** tabelas `iterations` e `iteration_selections`. Repetiriam o que
+a execução e o lote já guardam.
+
+#### D3: Formato do manifesto
+
+**Escolha:**
+
+- Um único formato, o COCO estendido da especificação DADA (`dada-coco-pai/1`),
+  para treino, validação, teste, imagens elegíveis e o resultado da seleção.
+- Cada imagem traz o id da mídia, o caminho do arquivo relativo à raiz de
+  mídia (a cópia WebP quando a origem é HEIC/HEIF), largura e altura
+  canônicas, o caminho relativo original, o sha256 da origem, a versão da
+  cópia, o estado de anotação e as regiões consultadas.
+- As anotações vêm só de resoluções aceitas e vigentes, com o id e a versão da
+  resolução. As categorias usam o `display_order` como índice.
+- Cada retrato é um arquivo JSON imutável gravado em
+  `<projeto>/learning/snapshots/<sha256>.json` na raiz de mídia, identificado
+  pelo sha256 do próprio conteúdo. A execução guarda só as impressões
+  digitais. O arquivo sai junto com o projeto.
+
+**Motivo:** a especificação já define esse formato e pede que o resultado use o
+formato da entrada. Um arquivo em disco escala melhor que JSONB com 100 mil
+imagens.
+
+#### D4: Como o ciclo anda sozinho
+
+**Escolha:**
+
+- Quando um lote `initial_training`, `validation`, `test` ou `acquisition`
+  passa a `resolved`, a mesma transação grava o evento
+  `learning.batch_resolved.v1` na outbox.
+- O relay existente (`dada-api consensus-relay`) também consome esses eventos.
+  Para cada um, decide se a próxima iteração deve nascer: o projeto é `split`
+  e está ativo, as imagens iniciais estão resolvidas, o último lote de
+  aquisição está resolvido e não há execução ativa nem pendente.
+- O sorteio aleatório roda no próprio relay e já cria o lote. A seleção por
+  aprendizado ativo vira uma execução na fila Celery `learning`.
+- `POST /iterations/{id}/close` refaz essa mesma verificação, para o caso de um
+  evento perdido.
+
+**Motivo:** reaproveita a outbox e o relay da Fase 6.
+
+#### D5: Início do lote de aquisição
+
+**Escolha:** o lote nasce em `preparing`, com a cópia da política vigente, e o
+gerente o inicia pela rota de sempre.
+
+**Motivo:** mantém a janela de edição da política que o plano exige, sem lógica
+nova.
+
+#### D6: Estados da iteração
+
+**Escolha:** iteração n = execução n + lote n.
+
+| Estado | Quando |
+| --- | --- |
+| `training` | A execução está na fila ou rodando. A etapa (`training`, `evaluating`, `selecting`) vem do worker |
+| `preparing` | O lote existe e ainda não começou |
+| `annotating` | O lote está coletando anotações |
+| `consolidating` | O lote está em `resolving` ou `review_required` |
+| `ready` | O lote está resolvido, ou a avaliação final terminou |
+| `failed` | A última tentativa falhou |
+
+Não há previsão de tempo (`eta_seconds` é sempre nulo) nesta fase.
+
+**Motivo:** pela P7-01, a mesma execução treina e escolhe, então é ela que
+abre a iteração. O estado `closing` do contrato antigo não tem o que
+representar e sai; a rota `close` continua.
+
+#### D7: Falha e tempo-limite
+
+**Escolha:**
+
+- Sem novas tentativas automáticas.
+- Uma execução que passa do tempo-limite (`DADA_LEARNING_TIMEOUT_SECONDS`,
+  padrão de 24 h) vira `failed` com `worker_failed`, pelo relay.
+- O gerente usa `POST /iterations/{id}/retry`, que cria a próxima tentativa
+  sobre os mesmos retratos, a mesma configuração e a mesma semente.
+- Um resultado repetido, atrasado ou de tentativa antiga não muda nada.
+
+**Motivo:** a A7-01 só pede a nova tentativa manual, e repetir um treino longo
+de forma automática custa caro.
+
+#### D8: Parada e fim
+
+**Escolha:**
+
+- Dentro da execução, a avaliação vem antes da seleção. Se a meta da métrica
+  foi atingida, a solução avalia no teste e devolve `stop_reason:
+  metric_target`, sem seleção.
+- Quando o máximo de iterações é alcançado ou acabam as imagens elegíveis, o
+  aprendizado ativo ainda faz uma execução `final_evaluation` (validação e
+  teste). A aquisição aleatória termina direto.
+- Ao terminar, o projeto fica `completed`, com `completion_reason` igual a
+  `max_iterations`, `metric_target` ou `pool_exhausted`.
+- A aquisição aleatória não avalia, porque não há modelo.
+- A validação de um projeto `split` nunca é vazia (a Fase 4.1 garante ao menos
+  uma imagem). Se, na hora de avaliar, nenhuma imagem de validação tiver
+  resolução aceita, a execução falha com `validation_unavailable` antes de ir
+  ao worker.
+
+#### D9: Métricas
+
+| Tarefa | Métricas | Média |
+| --- | --- | --- |
+| Classificação | `accuracy` ou `f1` | F1 macro entre as classes |
+| Detecção | `map50` | média das classes presentes na validação |
+| Segmentação | `mean_iou` | IoU de máscara por classe, somado nas imagens; classe ausente na referência e na predição fica fora da média |
+
+Todas ficam entre 0 e 1, e maior é melhor. `metric_target` fica em (0, 1].
+
+#### D10: Classificação multirrótulo e a DADA
+
+**Escolha:** o treino e a avaliação da classificação na DADA usam só imagens
+com exatamente uma classe aceita. As demais continuam no conjunto e na
+exportação, e a quantidade excluída fica na procedência da execução.
+
+**Motivo:** a Fase 6 manteve a classificação multirrótulo (D10) e a
+especificação DADA usa uma classe por imagem. **Ponto para o Meirelles
+confirmar.**
+
+#### D11: Solução determinística para desenvolvimento
+
+**Escolha:** um adaptador determinístico (`deterministic`) entra no catálogo só
+com `DADA_ENVIRONMENT` igual a `development` ou `test`, marcado como de
+desenvolvimento. Ele escolhe pela ordem de um hash da semente com o id da mídia
+e calcula uma métrica sintética e crescente.
+
+**Motivo:** sem GPU, é o único jeito de ver o ciclo inteiro. O `testing.md` e o
+critério da Fase 9 já preveem um worker determinístico.
+
+#### D12: Catálogo de soluções
+
+**Escolha:** `GET /capabilities` ganha `active_learning_solutions` (id, versão,
+nome, descrição, tarefas, se é de desenvolvimento, motivo de
+indisponibilidade e descritores de configuração no formato dos resolvers) e
+`evaluation_metrics` por tarefa.
+
+**Motivo:** mesmo padrão dos pipelines de consenso. O App reaproveita o
+formulário guiado por descritores.
+
+#### D13: Onde mora o código
+
+**Escolha:**
+
+- `dada_api/active_learning/` guarda o contrato (`BaseModelAdapter`,
+  `BatchRequest`, `BatchResult`), o catálogo e o adaptador determinístico.
+- A DADA fica em `dada_api/active_learning/dada_al/`, com a estrutura da
+  especificação, sem importar nada da API.
+- As dependências ficam no extra `learning`, que ganha `timm` e
+  `scikit-learn`. Testes que exigem torch ou GPU são pulados quando o extra não
+  está instalado.
+
+**Motivo:** mesmo padrão do pacote `consensus`.
+
+#### D14: Etapas informadas pelo worker
+
+**Escolha:** `select_batch` recebe, além do pedido, uma função opcional
+`report_stage(stage)`, que o worker usa para gravar a etapa da execução
+(`training`, `evaluating` ou `selecting`).
+
+**Motivo:** a A7-01 mostra essas etapas, e o contrato geral só define a
+operação de seleção. A função é opcional e não muda o pedido nem o resultado.
+
+#### D15: Limpeza dos artefatos
+
+**Escolha:** cada tentativa recebe uma pasta de artefatos em
+`<projeto>/learning/runs/iteration-<n>/attempt-<a>`, e cada solução uma pasta de
+estado em `<projeto>/learning/state/<solução>`. Depois de uma execução bem
+sucedida, o worker apaga as pastas de artefatos de todas as tentativas daquela
+iteração, a menos que `retain_helper_models` esteja ligado. Numa falha, elas
+ficam para a nova tentativa.
+
+### Alvos por objeto (bloco 2)
+
+#### D16: Representação do alvo
+
+**Escolha:**
+
+- Um item de lote por alvo, com a geometria proposta e a área de contexto (15%
+  de margem, da especificação DADA) gravadas no item. A unicidade (lote,
+  imagem) passa a incluir o alvo.
+- O documento do alvo tem no máximo um objeto. Vazio quer dizer "não há
+  objeto" e vira um negativo confirmado (`EXPLICIT_HARD_NEGATIVE`).
+- Imagens anotadas só em parte continuam elegíveis para novos alvos.
+
+#### D17: Consenso do alvo
+
+**Escolha:** sem etapa de casamento, porque todas as respostas já são do mesmo
+alvo. Vota classe e existência (com `no_object`) e depois refina a geometria.
+Revisão e especialista funcionam como na Fase 6.
+
+### Segmentação assistida (bloco 2)
+
+#### D18: Pedido e modelo
+
+**Escolha:**
+
+- O modelo-alvo roda na imagem. Com uma caixa, devolve a instância de maior
+  IoU com ela; com um ponto, a de maior confiança que contém o ponto. Sem
+  instância, devolve `no_suggestion`.
+- Executa numa fila Celery própria, com espera de até 30 s. A sugestão nunca é
+  gravada.
+- O projeto guarda só o último modelo-alvo, trocado a cada avaliação e apagado
+  com o projeto.
+- A rota mantém o caminho documentado, `/inference/sam-predict`, e passa a
+  exigir `project_id` e `assignment_id`.
+
+### Saídas e acesso (bloco 3)
+
+#### D19: Exportação
+
+**Escolha:** um ZIP gerado na hora e enviado aos poucos, separado por divisão.
+COCO ou YOLO na detecção e na segmentação, à escolha; CSV (caminho e classes) na
+classificação. Sempre traz um `provenance.json` com as versões das resoluções,
+a origem, a cópia de exibição, o estado de anotação e as regiões consultadas.
+As imagens são as cópias de exibição.
+
+#### D20: Fórmulas da qualidade
+
+| Medida | Fórmula |
+| --- | --- |
+| Taxa de revisão | imagens resolvidas que passaram por revisão ou especialista ÷ imagens resolvidas |
+| Taxa de resolução | imagens resolvidas ÷ imagens não canceladas |
+| Concordância | mediana da métrica da primeira rodada (suporte do vencedor, IoU mediano por par, Dice ou IoU de máscara) |
+
+Rota `GET /projects/{id}/quality`, com a supressão da P7-05.
+
+#### D21: Autorização
+
+**Escolha:** uma ação nova, `manage_learning` (dono e gerente), para nova
+tentativa e exportação. A matriz vai para 15 ações. Iterações e estatísticas
+usam `read_project`; qualidade usa `read_annotator_performance`; assistência
+usa `annotate` e a tarefa da própria pessoa.
+
+#### D22: Sementes de modelo
+
+**Escolha:** ficam fora da Fase 7. O destaque do alvo já cumpre esse papel.
+
+**Motivo:** a P6-06 as trata como opcionais e o plano não as lista na Fase 7.
+
+## Implementação
+
+### Bloco 1: ciclo de aquisição na API
+
+Status: implementado em 2026-11-23, na branch `phase_7`, sem commit. Continua
+sujeito à revisão do Meirelles.
+
+Guia de operação: [development.md](../development.md#acquisition-loop-phase-7).
+
+#### Persistência
+
+Migração `20261123_0011`, exercitada upgrade → downgrade → upgrade, com
+`alembic check` limpo.
+
+- **Projeto:** `max_acquisition_iterations`, `learning_solution`,
+  `learning_solution_version`, `learning_configuration`,
+  `evaluation_metric`, `evaluation_interval`, `metric_target` e
+  `completion_reason` (D1, D8).
+- **Tabelas novas:** `learning_runs` (com o índice único parcial de uma
+  execução ativa por projeto) e `model_evaluations` (D2).
+- **Lote:** `model_run_id` ganhou chave estrangeira para `learning_runs`.
+
+#### Código
+
+| Onde | O quê |
+| --- | --- |
+| `dada_api/active_learning/contract.py` | `BaseModelAdapter`, `BatchRequest`, `BatchResult`, `EvaluationPlan` e a leitura verificada de manifestos (D3, D14) |
+| `dada_api/active_learning/catalog.py` | Registro, disponibilidade, validação de configuração e descritores (D12) |
+| `dada_api/active_learning/deterministic.py` | Solução determinística de desenvolvimento (D11) |
+| `services/learning_settings.py` | Padrões e validação das configurações do projeto (D1) |
+| `services/learning_snapshots.py` | Manifestos `dada-coco-pai/1` só com resoluções aceitas (D3) |
+| `services/learning_runs.py` | Abertura de iterações, relay, tentativas, ingestão, nova tentativa, fechamento e as visões de iteração (D4 a D8, D15) |
+| `services/renditions.py` | Decodificação canônica e cópia WebP sem perda (P7-06) |
+| `workers/learning.py` | Tarefa Celery `learning.select` na fila `learning` |
+| `api/v1/endpoints/iterations.py` | Rotas de iteração e estatísticas |
+
+#### Rotas e comandos
+
+| Rota ou comando | Função |
+| --- | --- |
+| `GET /projects/{id}/iterations` | Iterações, da mais antiga à mais recente, e a atual |
+| `GET /projects/{id}/iterations/{iteration_id}` | Uma iteração, com contagens, estado, etapa e métricas |
+| `POST /projects/{id}/iterations/{iteration_id}/close` | Verificação idempotente; `409 iteration_incomplete` enquanto houver imagens |
+| `POST /projects/{id}/iterations/{iteration_id}/retry` | Nova tentativa sobre os mesmos retratos (`manage_learning`) |
+| `GET /projects/{id}/statistics` | Progresso e avaliações do modelo-alvo |
+| `dada-api consensus-relay` | Passa a abrir iterações, vencer execuções e despachá-las |
+| `make worker-learning` | Worker da fila `learning` |
+
+`/capabilities` ganhou `active_learning_solutions` e `evaluation_metrics`, e
+os tipos `image/heic` e `image/heif`. O `openapi.json` foi de 60 para 65
+caminhos e de 101 para 106 schemas. A matriz de autorização foi para 15 ações
+e 60 pares com `manage_learning`.
+
+#### Leituras feitas na implementação
+
+- **Avaliação devida.** A avaliação entra quando o número de aquisições
+  concluídas é múltiplo de K e maior que zero, e sempre na execução final.
+  Com K = 1, a primeira avaliação acontece na execução que segue a primeira
+  aquisição.
+- **Seleção vazia.** Uma solução que devolve zero imagens de um conjunto não
+  vazio tem o resultado aceito, e o ciclo segue como se as imagens tivessem
+  acabado: avaliação final e `pool_exhausted`.
+- **Alvos ainda não aceitos.** No bloco 1, um resultado com anotações na
+  seleção é recusado como `solution_output_invalid`; os alvos por objeto
+  entram no bloco 2.
+- **Validação de formato da imagem.** A troca de formato só é verificada
+  quando a origem declarada ou a real é HEIF; JPEG, PNG e WebP seguem como
+  antes.
+
+#### Verificação
+
+Executado contra PostgreSQL 16 e Redis 7 locais.
+
+- `ruff check` e `ruff format --check`: limpos. `alembic check`: sem
+  divergência.
+- Testes da API: **648 passaram** com integração habilitada, contra 621 no
+  início do bloco.
+- `openapi.json` regenerado.
+
+| Critério de saída da Fase 7 | Como foi provado |
+| --- | --- |
+| Anotação não resolvida não entra em manifesto | `test_active_learning_runs_through_the_worker_to_its_final_evaluation` e `test_a_manifest_carries_accepted_geometry_in_the_shared_format` |
+| Sucesso, nova tentativa, duplicado, atrasado, tempo esgotado e falha | `test_active_learning_runs_through_the_worker_to_its_final_evaluation`, `test_failures_are_recorded_and_a_retry_reuses_the_snapshots`, `test_duplicate_late_and_timed_out_results_change_nothing`, `test_a_result_that_does_not_fit_its_request_fails_the_run` |
+| HEIC/HEIF: digest da origem, WebP sem perda com mesmo tamanho e pixels iguais | `test_heif_sources_keep_their_digest_and_gain_an_exact_rendition`, `test_orientation_is_applied_once`, `test_spoofed_and_broken_heif_uploads_fail_without_media`, `test_a_conversion_failure_fails_the_upload`, `test_duplicate_heif_content_reuses_its_rendition` |
+
+#### Pendências do bloco
+
+| Item | Situação |
+| --- | --- |
+| `uv.lock` | A dependência `pillow-heif` foi acrescentada ao `pyproject.toml`. O lock precisa ser regenerado com `uv lock` numa máquina que alcance `download.pytorch.org` |
+| `.env` local | Acrescentar `image/heic` e `image/heif` a `DADA_SUPPORTED_IMAGE_MEDIA_TYPES` |
+| App | O assistente ainda não envia `max_acquisition_iterations`, que passou a ser obrigatório em projetos `split`; entra no bloco 3 |

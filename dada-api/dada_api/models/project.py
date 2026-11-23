@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -16,6 +17,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dada_api.db.base import Base
@@ -57,6 +59,10 @@ class Project(Base):
 
     ``dataset_prepared_at`` is set while a draft's layout is materialised and
     cleared when that preparation is reset.
+
+    The learning columns configure later acquisition iterations. Each run
+    copies them when it is created, so a change applies from the next run.
+    ``completion_reason`` is set when acquisition stops for good.
     """
 
     __tablename__ = "projects"
@@ -86,6 +92,18 @@ class Project(Base):
         Float, nullable=True
     )
     iteration_batch_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_acquisition_iterations: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    learning_solution: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    learning_solution_version: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    learning_configuration: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    evaluation_metric: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    evaluation_interval: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metric_target: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completion_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
     dataset_prepared_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

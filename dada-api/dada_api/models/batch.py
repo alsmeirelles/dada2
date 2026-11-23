@@ -142,7 +142,9 @@ class AnnotationBatch(Base):
     selection_seed: Mapped[int] = mapped_column(BigInteger)
     selection_input_fingerprint: Mapped[str] = mapped_column(String(64))
     requested_size: Mapped[int] = mapped_column(Integer)
-    model_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    model_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("learning_runs.id", ondelete="SET NULL"), nullable=True
+    )
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

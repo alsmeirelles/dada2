@@ -6,7 +6,8 @@ contract.
 
 The service includes the FastAPI application foundation, PostgreSQL/Alembic
 persistence, Redis connectivity, identity and project authorization, dataset
-ingestion, annotation batches, and the consensus-resolution engine.
+ingestion, annotation batches, the consensus-resolution engine, and the
+acquisition loop.
 
 See:
 
@@ -29,6 +30,7 @@ Then run:
 ```bash
 make run                              # terminal 1: the API
 make consensus                        # terminal 2: relay and both worker queues
+make worker-learning                  # terminal 3: the active-learning worker
 ```
 
 The consensus target supervises the outbox relay plus the standard and mask

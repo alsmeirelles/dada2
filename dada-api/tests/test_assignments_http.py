@@ -50,6 +50,7 @@ DRAFT = {
     "validation_set_size": 1,
     "initial_training_size": TRAINING_SIZE,
     "iteration_batch_size": 2,
+    "max_acquisition_iterations": 5,
 }
 QUEUE_FIELDS = {
     "id",

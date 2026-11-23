@@ -1,5 +1,6 @@
 """Manifest validation, resumable chunk intake, and promotion into media."""
 
+import asyncio
 import hashlib
 import logging
 import unicodedata
@@ -23,7 +24,7 @@ from dada_api.models.upload import (
 )
 from dada_api.models.user import User
 from dada_api.schemas.upload import UploadSessionCreate
-from dada_api.services import datasets, storage
+from dada_api.services import datasets, renditions, storage
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +403,7 @@ async def _content_object_for(
         return existing
 
     _verify_part(upload, item)
-    width, height = _read_dimensions(upload, item)
+    width, height = await _inspect(upload, item)
     storage_key = storage.media_storage_key(upload.project_id, item.sha256)
     storage.promote_part(upload.id, item.id, storage_key)
 
@@ -435,6 +436,63 @@ def _verify_part(upload: UploadSession, item: UploadItem) -> None:
         )
 
 
+def _invalid_image(item: UploadItem) -> ApiError:
+    """Return the error refusing a file that is not the image it claims to be."""
+    return ApiError(
+        422,
+        "invalid_image",
+        "The file could not be read as an image.",
+        details={"client_file_id": item.client_file_id},
+    )
+
+
+async def _inspect(upload: UploadSession, item: UploadItem) -> tuple[int, int]:
+    """Return a verified image's canonical dimensions.
+
+    An HEIC/HEIF source must decode as HEIF and any other declared type must
+    not. A HEIF source is decoded in a worker thread and its lossless WebP
+    rendition is written before the source can be promoted, so no usable
+    media exists without its rendition (P7-06). The rendition's dimensions are
+    the canonical pixel plane.
+
+    Raises:
+        ApiError: 422 ``invalid_image`` when the bytes are not the declared
+            kind of image or fail to decode, and ``image_conversion_failed``
+            when a decoded HEIF image cannot be written as the rendition.
+    """
+    source = storage.part_path(upload.id, item.id)
+    try:
+        heif = renditions.is_heif(source)
+    except OSError as error:
+        raise _invalid_image(item) from error
+    if heif != (item.media_type in storage.HEIF_MEDIA_TYPES):
+        raise _invalid_image(item)
+    if not heif:
+        return _read_dimensions(upload, item)
+
+    key = storage.rendition_storage_key(upload.project_id, item.sha256)
+    written: list[tuple[int, int]] = []
+    try:
+        await asyncio.to_thread(
+            storage.write_media,
+            key,
+            lambda path: written.append(renditions.write_rendition(source, path)),
+        )
+    except renditions.ConversionError as error:
+        raise ApiError(
+            422,
+            "image_conversion_failed",
+            "The image could not be converted for display.",
+            details={"client_file_id": item.client_file_id},
+        ) from error
+    except (OSError, ValueError, Image.DecompressionBombError) as error:
+        raise _invalid_image(item) from error
+    if written:
+        return written[0]
+    with Image.open(storage.media_path(key)) as rendition:
+        return rendition.size
+
+
 def _read_dimensions(upload: UploadSession, item: UploadItem) -> tuple[int, int]:
     """Return an image's original pixel dimensions.
 
@@ -446,12 +504,7 @@ def _read_dimensions(upload: UploadSession, item: UploadItem) -> tuple[int, int]
             with Image.open(handle) as image:
                 return image.width, image.height
     except OSError as error:
-        raise ApiError(
-            422,
-            "invalid_image",
-            "The file could not be read as an image.",
-            details={"client_file_id": item.client_file_id},
-        ) from error
+        raise _invalid_image(item) from error
 
 
 async def _ensure_media(

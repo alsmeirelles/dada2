@@ -16,6 +16,7 @@ def _project_request(**overrides: object) -> dict[str, object]:
         "test_set_size": 4,
         "validation_set_size": 2,
         "iteration_batch_size": 3,
+        "max_acquisition_iterations": 5,
         **overrides,
     }
 
