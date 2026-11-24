@@ -8,6 +8,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from dada_api.active_learning import catalog as solution_catalog
 from dada_api.core.errors import redact_validation_errors
 from dada_api.main import app
 from dada_api.schemas.project import ProjectCreate
@@ -85,10 +86,19 @@ async def test_capabilities_match_frontend_contract(
         "segmentation": ["mean_iou"],
     }
     assert [(item["id"], item["development_only"]) for item in solutions] == [
-        ("deterministic", True)
+        ("dada", False),
+        ("deterministic", True),
     ]
-    assert solutions[0]["unavailable_reason"] is None
-    assert solutions[0]["parameters"][0]["name"] == "retain_helper_models"
+    dada, deterministic = solutions
+    assert dada["unavailable_reason"] == solution_catalog.unavailable_reason(
+        solution_catalog.DADA
+    )
+    assert dada["supported_tasks"] == ["classification", "detection", "segmentation"]
+    assert {"target_model_name", "uncertainty_method", "proxy_epochs"} <= {
+        item["name"] for item in dada["parameters"]
+    }
+    assert deterministic["unavailable_reason"] is None
+    assert deterministic["parameters"][0]["name"] == "retain_helper_models"
 
 
 async def test_framework_errors_use_common_envelope(

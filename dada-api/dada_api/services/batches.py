@@ -1,7 +1,9 @@
 """Batch creation, policy snapshots, and assignment generation."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +51,23 @@ LEARNING_PURPOSES = frozenset(
         BatchPurpose.acquisition,
     }
 )
+
+
+@dataclass(frozen=True)
+class Target:
+    """One object target a model-guided selection chose inside an image (D16).
+
+    Attributes:
+        media_id: Image holding the target.
+        key: Identity of the target inside its batch.
+        geometry: Proposed box or polygon in the document format.
+        region: Context area ``[x, y, width, height]`` shown around it.
+    """
+
+    media_id: str
+    key: str
+    geometry: dict[str, Any]
+    region: list[float]
 
 
 @dataclass(frozen=True)
@@ -139,7 +158,7 @@ async def open_batch(
     session: AsyncSession,
     project: Project,
     purpose: BatchPurpose,
-    chosen: list[str],
+    chosen: Sequence[str | Target],
     *,
     strategy: str,
     seed: int,
@@ -149,11 +168,14 @@ async def open_batch(
 ) -> AnnotationBatch:
     """Open a ``preparing`` batch over chosen media with the current policy.
 
+    Items are numbered by image path, and the targets of one image in their
+    selection order.
+
     Args:
         session: Active database session, committed by the caller.
         project: Project the batch belongs to.
         purpose: Why the media was selected.
-        chosen: Selected media identifiers.
+        chosen: Selected media identifiers, or object targets.
         strategy: Selection strategy recorded as provenance.
         seed: Seed of the selection.
         input_fingerprint: Digest of the selection's ordered input.
@@ -180,20 +202,31 @@ async def open_batch(
     session.add(batch)
     await _snapshot_policy(session, project, batch)
 
-    media_order = list(
-        await session.scalars(
-            select(Media.id)
-            .where(Media.id.in_(chosen))
-            .order_by(Media.relative_path, Media.id)
-        )
+    media_ids = [
+        entry.media_id if isinstance(entry, Target) else entry for entry in chosen
+    ]
+    paths = dict(
+        (
+            await session.execute(
+                select(Media.id, Media.relative_path).where(Media.id.in_(media_ids))
+            )
+        ).all()
     )
-    positions = {media_id: position for position, media_id in enumerate(media_order)}
-    for media_id in chosen:
+    ordered = sorted(
+        range(len(chosen)),
+        key=lambda index: (paths[media_ids[index]], media_ids[index], index),
+    )
+    for position, index in enumerate(ordered):
+        entry = chosen[index]
+        target = entry if isinstance(entry, Target) else None
         session.add(
             BatchItem(
                 batch_id=batch.id,
-                media_id=media_id,
-                position=positions[media_id],
+                media_id=media_ids[index],
+                position=position,
+                target_key=target.key if target else None,
+                target_geometry=target.geometry if target else None,
+                target_region=target.region if target else None,
             )
         )
     return batch
@@ -571,8 +604,9 @@ async def start(
 
     Only an active project distributes work. Activation is what closes the
     label-import review, so starting a prepared draft's batch would hand out
-    assignments before their seeds are settled. Each assignment's draft starts
-    as a copy of its image's accepted imported seed.
+    assignments before their seeds are settled. Each whole-image assignment's
+    draft starts as a copy of its image's accepted imported seed; an object
+    target's draft starts empty, since a seed describes the whole image.
 
     Validation happens before any assignment is created and everything commits
     together, so a refused start leaves no partial work behind.
@@ -624,17 +658,22 @@ async def start(
 
     items = (
         await session.execute(
-            select(BatchItem.id, BatchItem.media_id, BatchItem.position)
+            select(
+                BatchItem.id,
+                BatchItem.media_id,
+                BatchItem.position,
+                BatchItem.target_key,
+            )
             .join(Media, Media.id == BatchItem.media_id)
             .where(BatchItem.batch_id == batch.id)
-            .order_by(Media.relative_path, Media.id)
+            .order_by(Media.relative_path, Media.id, BatchItem.position)
         )
     ).all()
     seeds = await accepted_seeds(session, project)
 
     dealers = group or await annotation_members(session, project)
     assignments = 0
-    for position, (item_id, media_id, item_position) in enumerate(items):
+    for position, (item_id, media_id, item_position, target_key) in enumerate(items):
         owners = (
             cohort_selection.initial_cohort(
                 group, item_position, batch.required_consensus_annotations
@@ -642,8 +681,9 @@ async def start(
             if mode is AnnotationMode.consensus
             else [dealers[position % len(dealers)]]
         )
+        seed = seeds.get(media_id) if target_key is None else None
         for cohort_position, annotator_id in enumerate(owners):
-            assignment = seeded_assignment(item_id, annotator_id, seeds.get(media_id))
+            assignment = seeded_assignment(item_id, annotator_id, seed)
             session.add(assignment)
             if mode is AnnotationMode.consensus:
                 await session.flush()
@@ -678,7 +718,11 @@ async def start(
             "required_consensus_reviewers": batch.required_consensus_reviewers,
             "items": len(items),
             "assignments": assignments,
-            "seeded_items": sum(1 for _, media_id, _ in items if media_id in seeds),
+            "seeded_items": sum(
+                1
+                for _, media_id, _, target_key in items
+                if target_key is None and media_id in seeds
+            ),
         },
     )
     await session.commit()

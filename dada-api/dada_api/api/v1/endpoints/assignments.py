@@ -19,6 +19,7 @@ from dada_api.schemas.assignment import (
     AssignmentQueueItem,
     AssignmentQueuePage,
     AssignmentReassign,
+    AssignmentTarget,
     BatchAssignment,
     BatchAssignmentPage,
     DocumentWrite,
@@ -76,8 +77,9 @@ async def list_my_assignments(
                 version=assignment.version,
                 seeded_from_import=assignment.seed_document_id is not None,
                 updated_at=assignment.updated_at,
+                target=target_view(item),
             )
-            for assignment, batch, media, content in rows
+            for assignment, batch, media, content, item in rows
         ],
         next_cursor=next_cursor,
         counts=AssignmentQueueCounts(**counts),
@@ -141,7 +143,22 @@ async def get_my_assignment(
             if opened.resolution is not None
             else None
         ),
+        target=target_view(opened.item),
     )
+
+
+def target_view(item: BatchItem) -> AssignmentTarget | None:
+    """Represent an item's object target, or None for a whole image.
+
+    Args:
+        item: Batch item behind an assignment.
+
+    Returns:
+        The target cue, or None.
+    """
+    if item.target_key is None:
+        return None
+    return AssignmentTarget(geometry=item.target_geometry, region=item.target_region)
 
 
 @router.put(

@@ -13,7 +13,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError
 
 from dada_api.active_learning import deterministic
-from dada_api.active_learning.contract import AdapterError, BaseModelAdapter
+from dada_api.active_learning.contract import (
+    AdapterError,
+    AssistanceProvider,
+    BaseModelAdapter,
+)
+from dada_api.active_learning.dada_al.config.schema import DADASettings
 from dada_api.consensus.catalog import describe, installed_version
 from dada_api.core.config import get_settings
 
@@ -30,8 +35,9 @@ UnavailableReason = Literal["dependency_missing"]
 class Solution:
     """One registered active-learning solution.
 
-    ``adapter`` is an import path resolved only when a worker runs the
-    solution, so the API never imports its heavy dependencies.
+    ``adapter`` and ``assistant`` are import paths resolved only when a worker
+    runs the solution, so the API never imports its heavy dependencies.
+    ``assistant`` is None for a solution that offers no assisted annotation.
     """
 
     id: str
@@ -43,6 +49,7 @@ class Solution:
     requires: tuple[str, ...]
     configuration: type[BaseModel]
     adapter: str
+    assistant: str | None
 
 
 DETERMINISTIC = Solution(
@@ -58,8 +65,25 @@ DETERMINISTIC = Solution(
     requires=(),
     configuration=deterministic.DeterministicConfiguration,
     adapter="dada_api.active_learning.deterministic:DeterministicAdapter",
+    assistant="dada_api.active_learning.deterministic:DeterministicAssistant",
 )
-PRODUCTION_SOLUTIONS: tuple[Solution, ...] = ()
+DADA = Solution(
+    id="dada",
+    version="1.0.0",
+    display_name="DADA",
+    description=(
+        "Diversity-aware data acquisition: clusters the embeddings of the most "
+        "uncertain images or objects and fills each cluster's quota by its "
+        "mean uncertainty."
+    ),
+    tasks=("classification", "detection", "segmentation"),
+    development_only=False,
+    requires=("torch", "torchvision", "ultralytics", "timm", "scikit-learn"),
+    configuration=DADASettings,
+    adapter="dada_api.active_learning.dada_al.adapter:DADAAdapter",
+    assistant="dada_api.active_learning.dada_al.adapter:DADAAssistant",
+)
+PRODUCTION_SOLUTIONS: tuple[Solution, ...] = (DADA,)
 
 
 def registered() -> list[Solution]:
@@ -106,13 +130,17 @@ def default_for(task_type: str) -> Solution | None:
 
 
 def validate_configuration(
-    solution: Solution, configuration: dict[str, Any]
+    solution: Solution, configuration: dict[str, Any], task: str
 ) -> dict[str, Any]:
     """Validate a configuration and return it with every default filled in.
+
+    The task is given to the configuration model as validation context, so a
+    solution can resolve task defaults and refuse incompatible settings.
 
     Args:
         solution: Registered solution.
         configuration: Client-supplied settings.
+        task: The project's task.
 
     Returns:
         The complete normalized configuration.
@@ -121,7 +149,9 @@ def validate_configuration(
         ValueError: With the validation errors when it is invalid.
     """
     try:
-        model = solution.configuration.model_validate(configuration)
+        model = solution.configuration.model_validate(
+            configuration, context={"task": task}
+        )
     except ValidationError as error:
         raise ValueError(
             error.errors(include_url=False, include_context=False)
@@ -129,15 +159,15 @@ def validate_configuration(
     return model.model_dump(mode="json")
 
 
-def load_adapter(solution_id: str, version: str) -> BaseModelAdapter:
-    """Instantiate the adapter of an exact registered solution version.
+def runnable(solution_id: str, version: str) -> Solution:
+    """Return an exact registered solution version that can run here.
 
     Args:
         solution_id: Persisted solution id.
         version: Persisted solution version.
 
     Returns:
-        A ready adapter.
+        The solution.
 
     Raises:
         AdapterError: ``solution_unavailable`` when the version is not
@@ -152,8 +182,51 @@ def load_adapter(solution_id: str, version: str) -> BaseModelAdapter:
         raise AdapterError(
             "solution_unavailable", f"{solution_id}@{version} lacks dependencies"
         )
-    module, _, name = solution.adapter.partition(":")
+    return solution
+
+
+def _instantiate(path: str) -> Any:
+    """Import ``module:Class`` and return a new instance of it."""
+    module, _, name = path.partition(":")
     return getattr(importlib.import_module(module), name)()
+
+
+def load_adapter(solution_id: str, version: str) -> BaseModelAdapter:
+    """Instantiate the adapter of an exact registered solution version.
+
+    Args:
+        solution_id: Persisted solution id.
+        version: Persisted solution version.
+
+    Returns:
+        A ready adapter.
+
+    Raises:
+        AdapterError: ``solution_unavailable`` when it cannot run here.
+    """
+    return _instantiate(runnable(solution_id, version).adapter)
+
+
+def load_assistant(solution_id: str, version: str) -> AssistanceProvider:
+    """Instantiate the assistance provider of an exact solution version.
+
+    Args:
+        solution_id: Solution that retained the target model.
+        version: Its version.
+
+    Returns:
+        A ready provider.
+
+    Raises:
+        AdapterError: ``solution_unavailable`` when it cannot run here or
+            offers no assistance.
+    """
+    solution = runnable(solution_id, version)
+    if solution.assistant is None:
+        raise AdapterError(
+            "solution_unavailable", f"{solution_id}@{version} offers no assistance"
+        )
+    return _instantiate(solution.assistant)
 
 
 def capabilities() -> list[dict[str, Any]]:

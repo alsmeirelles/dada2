@@ -658,11 +658,21 @@ initial batches. Decisions and their reasons are in
 make run                              # terminal 1: the API
 make consensus                        # terminal 2: relay and consensus workers
 make worker-learning                  # terminal 3: the active-learning worker
+make worker-assistance                # terminal 4: the assisted-annotation worker
 ```
 
-On Windows, use `make worker-learning CELERY_POOL=solo`. In `development`
-and `test`, the catalog includes a `deterministic` solution that needs no
-model or GPU, so the whole loop can be exercised locally.
+On Windows, use `CELERY_POOL=solo` with the workers. In `development` and
+`test`, the catalog includes a `deterministic` solution that needs no model
+or GPU, so the whole loop, object targets, and assisted annotation can be
+exercised locally.
+
+The `dada` solution is listed everywhere but is available only where the
+`learning` extra is installed (`torch`, `torchvision`, `ultralytics`, `timm`,
+`scikit-learn`), in the API and in both workers:
+
+```bash
+uv sync --extra dev --extra consensus --extra learning
+```
 
 ### Settings
 
@@ -687,6 +697,41 @@ fails a run that reports nothing within it.
 A failed run stays failed until a manager retries it; nothing is retried
 automatically. The project becomes `completed` with `completion_reason`
 `max_iterations`, `metric_target`, or `pool_exhausted`.
+
+### Object targets
+
+Model-guided detection and segmentation choose object targets, not whole
+images. Each target is one batch item with the proposed box or polygon and a
+context region around it; the annotator answers only that object, with one
+object or an empty document meaning "no object here". The answered image
+stays in the pool, marked `PARTIALLY_LABELED` in later manifests with every
+answered region as a queried ROI (`CONFIRMED_OBJECT` or
+`EXPLICIT_HARD_NEGATIVE`). In consensus mode the answers to a target form its
+single candidate; the proposed geometry is never a vote. Classification and
+random acquisition keep whole images.
+
+### DADA
+
+`dada_api/active_learning/dada_al/` implements the DADA specification: proxy
+training, a two-tier subpool, pre-NMS or TTA uncertainty, PCA and k-means
+quotas, and region-aware training of partially labeled images. When an
+evaluation is due, it trains and measures the target model first and keeps
+it under `<media root>/<project>/learning/assistance/` for assisted
+annotation; pretrained checkpoints are downloaded under
+`learning/state/dada/weights/`.
+
+## Assisted annotation (Phase 7)
+
+`POST /api/v1/inference/sam-predict` takes `project_id`, `assignment_id`, an
+optional `request_id`, and one point or box prompt in canonical pixels. Only
+the annotator who owns the open assignment may ask, and only in detection and
+segmentation projects. The project's last evaluated target model answers on
+the `assistance` queue within `DADA_ASSISTANCE_TIMEOUT_SECONDS` (default 30):
+a box picks the instance that overlaps it most, a point the most confident
+instance that contains it. The answer is a `suggestion` with a typed geometry
+or `no_suggestion`; nothing is saved. A project with no compatible target
+model answers `409 assistance_unavailable`; a timeout or worker failure
+answers `503` and leaves the draft untouched.
 
 ## HEIC/HEIF ingestion (Phase 7)
 

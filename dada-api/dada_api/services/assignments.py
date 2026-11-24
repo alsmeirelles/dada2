@@ -56,6 +56,7 @@ class OpenedAssignment:
 
     assignment: AnnotationAssignment
     batch: AnnotationBatch
+    item: BatchItem
     media: Media
     content: ContentObject
     latest: AnnotationSubmission | None
@@ -84,8 +85,8 @@ async def list_queue(
         cursor: Opaque cursor from a previous page.
 
     Returns:
-        The page of ``(assignment, batch, media, content)`` rows, the next
-        cursor, and the caller's counts by status.
+        The page of ``(assignment, batch, media, content, item)`` rows, the
+        next cursor, and the caller's counts by status.
     """
     order = (
         AnnotationBatch.created_at,
@@ -94,7 +95,7 @@ async def list_queue(
         AnnotationAssignment.id,
     )
     query = (
-        select(AnnotationAssignment, AnnotationBatch, Media, ContentObject)
+        select(AnnotationAssignment, AnnotationBatch, Media, ContentObject, BatchItem)
         .join(BatchItem, BatchItem.id == AnnotationAssignment.batch_item_id)
         .join(AnnotationBatch, AnnotationBatch.id == BatchItem.batch_id)
         .join(Media, Media.id == BatchItem.media_id)
@@ -126,7 +127,7 @@ async def list_queue(
     next_cursor = None
     if len(rows) > PAGE_SIZE:
         rows = rows[:PAGE_SIZE]
-        assignment, batch, media, _ = rows[-1]
+        assignment, batch, media, _, _ = rows[-1]
         next_cursor = encode_cursor(
             {
                 "created_at": batch.created_at.isoformat(),
@@ -264,7 +265,41 @@ async def open_assignment(
         if item.status == ItemStatus.resolved
         else None
     )
-    return OpenedAssignment(assignment, batch, media, content, latest, resolution)
+    return OpenedAssignment(assignment, batch, item, media, content, latest, resolution)
+
+
+async def open_work(
+    session: AsyncSession,
+    user: User,
+    project: Project,
+    assignment_id: str,
+) -> tuple[AnnotationAssignment, BatchItem, ContentObject]:
+    """Return the caller's assignment that can still take work, with its item
+    and image content.
+
+    Args:
+        session: Active database session.
+        user: The annotator.
+        project: Authorized project.
+        assignment_id: Assignment being worked on.
+
+    Returns:
+        The assignment, its batch item, and the content of its image.
+
+    Raises:
+        ApiError: 404 when missing, 403 when it belongs to someone else, 409
+            when it is submitted or no longer active.
+    """
+    assignment, item, _ = await _load_owned(
+        session, user, project, assignment_id, lock=False
+    )
+    _require_open(assignment)
+    content = await session.scalar(
+        select(ContentObject)
+        .join(Media, Media.content_object_id == ContentObject.id)
+        .where(Media.id == item.media_id)
+    )
+    return assignment, item, content
 
 
 def _require_open(assignment: AnnotationAssignment) -> None:
@@ -356,7 +391,9 @@ async def submit(
     In single mode the submission is the canonical resolution of its image,
     written in the same transaction. In consensus mode the image becomes ready
     for resolution only once every active assignment on it has submitted;
-    imported seeds never count, only annotator submissions do.
+    imported seeds never count, only annotator submissions do. The document
+    of an object target holds at most that one object; an empty one says there
+    is no object there.
 
     Args:
         session: Active database session.
@@ -392,7 +429,12 @@ async def submit(
         )
     )
     errors = annotation_documents.validate_submission(
-        project.task_type, objects, class_ids, width, height
+        project.task_type,
+        objects,
+        class_ids,
+        width,
+        height,
+        target=item.target_key is not None,
     )
     if errors:
         raise ApiError(

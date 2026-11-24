@@ -1,6 +1,7 @@
 """The Phase 7 acquisition loop: opening iterations, worker attempts, result
 ingestion, retries, and the iteration views built from them."""
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -52,6 +53,7 @@ from dada_api.schemas.learning import (
     StatisticsResponse,
 )
 from dada_api.services import (
+    annotation_documents,
     audit,
     batches,
     datasets,
@@ -61,6 +63,7 @@ from dada_api.services import (
 )
 
 QUEUE = "learning"
+OBJECT_TASKS = frozenset({"detection", "segmentation"})
 RELAY_BATCH = 50
 PAGE_SIZE = 50
 TIMEOUT_GRACE = timedelta(seconds=60)
@@ -515,6 +518,12 @@ def artifact_folder(project_id: str, iteration: int) -> str:
     return storage.learning_key(project_id, "runs", f"iteration-{iteration}")
 
 
+def assistance_folder(project_id: str) -> str:
+    """Return the key of the folder holding the project's retained target
+    model (D18)."""
+    return storage.learning_key(project_id, "assistance")
+
+
 async def _request(session: AsyncSession, run: LearningRun) -> BatchRequest:
     """Build the immutable request of a run's current attempt."""
     project = await session.get(Project, run.project_id)
@@ -563,6 +572,7 @@ async def _request(session: AsyncSession, run: LearningRun) -> BatchRequest:
         state_dir=str(
             storage.media_path(storage.learning_key(project.id, "state", run.solution))
         ),
+        assistance_dir=str(storage.media_path(assistance_folder(project.id))),
         retain_helper_models=bool(run.configuration.get("retain_helper_models")),
     )
 
@@ -650,7 +660,7 @@ async def ingest(
         await session.commit()
         return False
     try:
-        chosen = _checked_selection(run, outcome)
+        chosen = _checked_selection(run, project.task_type, outcome)
     except AdapterError as error:
         _fail(session, run, "solution_output_invalid", error.detail, now)
         await session.commit()
@@ -660,8 +670,13 @@ async def ingest(
     return True
 
 
-def _checked_selection(run: LearningRun, result: BatchResult) -> list[str]:
-    """Validate a result against its run and return the chosen media.
+def _checked_selection(
+    run: LearningRun, task_type: str, result: BatchResult
+) -> list[str | batches.Target]:
+    """Validate a result against its run and return what it chose.
+
+    Classification chooses media. Detection and segmentation choose object
+    targets, each with its proposed geometry and context region (D16).
 
     Raises:
         AdapterError: When the result does not answer the run's request.
@@ -705,18 +720,128 @@ def _checked_selection(run: LearningRun, result: BatchResult) -> list[str]:
         or selection_manifest.get("info", {}).get("schema") != MANIFEST_SCHEMA
     ):
         raise AdapterError("invalid", "the selection is not a manifest")
-    if selection_manifest.get("annotations"):
-        raise AdapterError("invalid", "object targets are not supported yet")
-    chosen = [image["id"] for image in selection_manifest.get("images", [])]
     pool = read_manifest(str(get_settings().media_root), _ref(run.snapshots, "pool"))
-    eligible = {image["id"] for image in pool["images"]}
-    if len(set(chosen)) != len(chosen):
+    eligible = {image["id"]: image for image in pool["images"]}
+    images = {image["id"]: image for image in selection_manifest.get("images", [])}
+    chosen = [image["id"] for image in selection_manifest.get("images", [])]
+    if len(images) != len(chosen):
         raise AdapterError("invalid", "the selection repeats an image")
-    if not set(chosen) <= eligible:
+    if not set(chosen) <= set(eligible):
         raise AdapterError("invalid", "the selection names an ineligible image")
-    if len(chosen) > run.requested_size:
+    annotations = selection_manifest.get("annotations", [])
+
+    if task_type not in OBJECT_TASKS:
+        if annotations:
+            raise AdapterError("invalid", "classification selects images, not objects")
+        if len(chosen) > run.requested_size:
+            raise AdapterError("invalid", "the selection exceeds the requested size")
+        return chosen
+
+    if chosen and not annotations:
+        raise AdapterError("invalid", "detection and segmentation select objects")
+    targets = [
+        _target(task_type, annotation, images, eligible) for annotation in annotations
+    ]
+    if {target.media_id for target in targets} != set(chosen):
+        raise AdapterError("invalid", "every selected image must hold a target")
+    if len({(target.media_id, target.key) for target in targets}) != len(targets):
+        raise AdapterError("invalid", "the selection repeats a target")
+    if len({annotation.get("roi_id") for annotation in annotations}) != len(targets):
+        raise AdapterError("invalid", "the selection repeats a region")
+    if len(targets) > run.requested_size:
         raise AdapterError("invalid", "the selection exceeds the requested size")
-    return chosen
+    return targets
+
+
+def _numbers(values: Any, count: int | None = None) -> list[float]:
+    """Return a list of finite numbers, or refuse it."""
+    if (
+        not isinstance(values, list)
+        or (count is not None and len(values) != count)
+        or not all(
+            isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            for value in values
+        )
+    ):
+        raise AdapterError("invalid", "a target holds a malformed coordinate list")
+    return [float(value) for value in values]
+
+
+def _target(
+    task_type: str,
+    annotation: dict[str, Any],
+    images: dict[str, dict[str, Any]],
+    eligible: dict[str, dict[str, Any]],
+) -> batches.Target:
+    """Validate one proposed object target and return it.
+
+    Its geometry must be a valid box or polygon of the task inside its image,
+    and its region a box inside the image that contains the geometry.
+
+    Raises:
+        AdapterError: When the target is malformed or out of place.
+    """
+    media_id = annotation.get("image_id")
+    if media_id not in images or media_id not in eligible:
+        raise AdapterError("invalid", "a target names an image outside the selection")
+    width, height = eligible[media_id]["width"], eligible[media_id]["height"]
+    roi = next(
+        (
+            item
+            for item in images[media_id].get("queried_rois", [])
+            if item.get("roi_id") == annotation.get("roi_id")
+        ),
+        None,
+    )
+    if roi is None:
+        raise AdapterError("invalid", "a target has no region")
+    x1, y1, x2, y2 = _numbers(roi.get("bbox_xyxy"), 4)
+    if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
+        raise AdapterError("invalid", "a target region lies outside its image")
+
+    if task_type == "detection":
+        geometry = {
+            "type": "rectangle",
+            "coordinates": _numbers(annotation.get("bbox"), 4),
+        }
+        x, y, box_width, box_height = geometry["coordinates"]
+        bounds = (x, y, x + box_width, y + box_height)
+    else:
+        rings = annotation.get("segmentation")
+        if not isinstance(rings, list) or not rings:
+            raise AdapterError("invalid", "a segmentation target has no polygon")
+        geometry = {
+            "type": "polygon",
+            "coordinates": [_numbers(ring) for ring in rings],
+        }
+        if any(
+            len(ring) > 2 * annotation_documents.MAX_CANONICAL_RING_POINTS
+            for ring in geometry["coordinates"]
+        ):
+            raise AdapterError("invalid", "a target polygon has too many points")
+        xs = [x for ring in geometry["coordinates"] for x in ring[0::2]]
+        ys = [y for ring in geometry["coordinates"] for y in ring[1::2]]
+        bounds = (
+            min(xs, default=0),
+            min(ys, default=0),
+            max(xs, default=0),
+            max(ys, default=0),
+        )
+    code = annotation_documents.geometry_error(task_type, geometry, width, height)
+    if code is not None:
+        raise AdapterError("invalid", f"a target geometry is invalid ({code})")
+    if not (
+        x1 <= bounds[0] and y1 <= bounds[1] and bounds[2] <= x2 and bounds[3] <= y2
+    ):
+        raise AdapterError("invalid", "a target lies outside its region")
+    return batches.Target(
+        media_id=media_id,
+        key="t-" + fingerprint(geometry)[:40],
+        geometry=geometry,
+        region=[x1, y1, x2 - x1, y2 - y1],
+    )
 
 
 async def _apply(
@@ -724,7 +849,7 @@ async def _apply(
     run: LearningRun,
     project: Project,
     result: BatchResult,
-    chosen: list[str],
+    chosen: list[str | batches.Target],
     now: datetime,
 ) -> None:
     """Persist evaluations, then open the batch or finish the loop."""

@@ -6,7 +6,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from dada_api.schemas.assignment import AssignmentMedia, CanonicalAnnotationObject
+from dada_api.schemas.assignment import (
+    AssignmentMedia,
+    AssignmentTarget,
+    CanonicalAnnotationObject,
+)
 
 WorkItemStatusName = Literal[
     "pending_review", "review_ready", "review_required", "resolved", "cancelled"
@@ -236,7 +240,11 @@ class WorkItemView(BaseModel):
 
 
 class EvidenceResponse(BaseModel):
-    """Everything an owner or manager needs to review one image."""
+    """Everything an owner or manager needs to review one image.
+
+    ``target`` is present when the item answers one object target; its cue is
+    shown for context and is never one of the submissions.
+    """
 
     batch_item_id: UUID
     batch_id: UUID
@@ -252,6 +260,7 @@ class EvidenceResponse(BaseModel):
     runs: list[RunView]
     resolutions: list[ResolutionView]
     work_items: list[WorkItemView]
+    target: AssignmentTarget | None = None
 
 
 class AdjudicationResponse(BaseModel):

@@ -100,7 +100,9 @@ def apply(project: Project, requested: dict[str, Any]) -> None:
             else {}
         )
     try:
-        configuration = catalog.validate_configuration(solution, configuration)
+        configuration = catalog.validate_configuration(
+            solution, configuration, project.task_type
+        )
     except ValueError as error:
         raise ApiError(
             422,

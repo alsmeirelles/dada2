@@ -330,3 +330,60 @@ def test_replay_is_byte_identical() -> None:
     assert protocol.fingerprint(first.model_dump(mode="json")) == protocol.fingerprint(
         again.model_dump(mode="json")
     )
+
+
+REGION = [0.0, 0.0, 120.0, 80.0]
+
+
+def test_an_object_target_is_one_candidate_without_matching() -> None:
+    documents = {
+        "ana": [_box("a1", CAT, 10, 10, 40, 30)],
+        "bia": [_box("b1", CAT, 70, 40, 40, 30)],
+    }
+    output = detection.resolve(
+        _input(documents).model_copy(update={"target_region": REGION})
+    )
+    unmatched = detection.resolve(_input(documents))
+
+    [candidate] = output.candidates
+    assert len(unmatched.candidates) == 2
+    assert candidate.region == REGION
+    assert candidate.metrics["outcome"] == CAT
+    assert {member["source_id"] for member in candidate.members} == {"s-ana", "s-bia"}
+    assert "geometry_below_threshold" in candidate.reasons
+    assert output.diagnostics["duplicates"] == []
+
+
+def test_an_empty_answer_to_a_target_votes_that_there_is_no_object() -> None:
+    output = detection.resolve(
+        _input(
+            {
+                "ana": [_box("a1", CAT, 10, 10, 40, 30)],
+                "bia": [],
+                "caio": [],
+                "davi": [],
+            }
+        ).model_copy(update={"target_region": REGION})
+    )
+
+    [candidate] = output.candidates
+    assert output.diagnostics["observation_matrix"][candidate.key] == {
+        "ana": CAT,
+        "bia": "no_object",
+        "caio": "no_object",
+        "davi": "no_object",
+    }
+    assert candidate.metrics["outcome"] == "no_object"
+    assert candidate.objects == []
+    assert candidate.passed is True
+
+
+def test_a_target_nobody_found_resolves_to_an_empty_document() -> None:
+    output = detection.resolve(
+        _input({"ana": [], "bia": []}).model_copy(update={"target_region": REGION})
+    )
+
+    [candidate] = output.candidates
+    assert candidate.scope == "image"
+    assert candidate.passed is True
+    assert candidate.objects == []

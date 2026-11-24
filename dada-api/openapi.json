@@ -577,7 +577,7 @@
         "type": "object"
       },
       "AssignmentDetail": {
-        "description": "One assignment opened by its annotator.\n\n``objects`` is the caller's draft while the work is open and their latest\nsubmission once it is submitted. ``seeded_from_import`` says the work began\nfrom imported labels without exposing the import itself. ``resolution``\nis present only once the image is resolved.",
+        "description": "One assignment opened by its annotator.\n\n``objects`` is the caller's draft while the work is open and their latest\nsubmission once it is submitted. ``seeded_from_import`` says the work began\nfrom imported labels without exposing the import itself. ``resolution``\nis present only once the image is resolved. ``target`` is present when the\nassignment answers one object target inside the image.",
         "properties": {
           "batch_id": {
             "format": "uuid",
@@ -675,6 +675,16 @@
               }
             ],
             "title": "Submitted At"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "task_type": {
             "enum": [
@@ -819,6 +829,16 @@
             "title": "Status",
             "type": "string"
           },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -894,6 +914,44 @@
           "annotator_id"
         ],
         "title": "AssignmentReassign",
+        "type": "object"
+      },
+      "AssignmentTarget": {
+        "description": "The object target an assignment answers, shown as a cue (D16).\n\n``geometry`` is the solution's proposed box or polygon and ``region`` the\n``[x, y, width, height]`` context area around it, in canonical image\npixels. The document describes only this object, or is empty when there\nis none; the cue itself is never an annotation or a vote.",
+        "properties": {
+          "geometry": {
+            "discriminator": {
+              "mapping": {
+                "polygon": "#/components/schemas/CanonicalPolygonGeometry",
+                "rectangle": "#/components/schemas/RectangleGeometry"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RectangleGeometry"
+              },
+              {
+                "$ref": "#/components/schemas/CanonicalPolygonGeometry"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "region": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Region",
+            "type": "array"
+          }
+        },
+        "required": [
+          "geometry",
+          "region"
+        ],
+        "title": "AssignmentTarget",
         "type": "object"
       },
       "BatchAssignment": {
@@ -1864,7 +1922,7 @@
         "type": "object"
       },
       "EvidenceResponse": {
-        "description": "Everything an owner or manager needs to review one image.",
+        "description": "Everything an owner or manager needs to review one image.\n\n``target`` is present when the item answers one object target; its cue is\nshown for context and is never one of the submissions.",
         "properties": {
           "batch_id": {
             "format": "uuid",
@@ -1926,6 +1984,16 @@
             },
             "title": "Submissions",
             "type": "array"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "task_type": {
             "title": "Task Type",
@@ -2623,7 +2691,7 @@
         "type": "object"
       },
       "ParameterDescriptor": {
-        "description": "One settable resolver field, described so a client can render and\nvalidate it without hard-coding its meaning.\n\n``name`` is dotted for fields inside a nested group. Ratio bounds and\ndefaults are ``{\"numerator\", \"denominator\"}`` objects; an ``area`` value\nis ``{\"pixels\", \"image_ratio\"}``.",
+        "description": "One settable resolver field, described so a client can render and\nvalidate it without hard-coding its meaning.\n\n``name`` is dotted for fields inside a nested group. Ratio bounds and\ndefaults are ``{\"numerator\", \"denominator\"}`` objects; an ``area`` value\nis ``{\"pixels\", \"image_ratio\"}``; a ``string`` is free text, such as a\nmodel name, that the API validates.",
         "properties": {
           "advanced": {
             "title": "Advanced",
@@ -2650,7 +2718,8 @@
               "integer",
               "enum",
               "boolean",
-              "area"
+              "area",
+              "string"
             ],
             "title": "Kind",
             "type": "string"
@@ -4996,70 +5065,130 @@
         "type": "object"
       },
       "SamPredictRequest": {
-        "description": "SAM prediction request.",
+        "description": "A prompt from the annotator who owns the assignment (P7-07).\n\n``request_id`` lets the client match an answer to its prompt; the server\nmakes one up when it is omitted.",
         "properties": {
-          "image_id": {
-            "minLength": 1,
-            "title": "Image Id",
+          "assignment_id": {
+            "format": "uuid",
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
             "type": "string"
           },
           "prompts": {
             "items": {
               "$ref": "#/components/schemas/SamPrompt"
             },
+            "maxItems": 1,
             "minItems": 1,
             "title": "Prompts",
             "type": "array"
-          }
-        },
-        "required": [
-          "image_id",
-          "prompts"
-        ],
-        "title": "SamPredictRequest",
-        "type": "object"
-      },
-      "SamPredictResponse": {
-        "description": "SAM prediction response.",
-        "properties": {
-          "embedding_cache_key": {
+          },
+          "request_id": {
             "anyOf": [
               {
+                "maxLength": 64,
+                "minLength": 1,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Embedding Cache Key"
-          },
-          "image_id": {
-            "title": "Image Id",
-            "type": "string"
-          },
-          "polygons": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Polygons",
-            "type": "array"
+            "title": "Request Id"
           }
         },
         "required": [
-          "image_id",
-          "polygons"
+          "project_id",
+          "assignment_id",
+          "prompts"
+        ],
+        "title": "SamPredictRequest",
+        "type": "object"
+      },
+      "SamPredictResponse": {
+        "description": "A suggestion for the annotator to preview, or ``no_suggestion``.\n\n``geometry`` is a rectangle for detection and a polygon for segmentation,\nin canonical pixels. Nothing is saved: the suggestion reaches the draft\nonly when the annotator accepts it there (A7-03).",
+        "properties": {
+          "assignment_id": {
+            "format": "uuid",
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "polygon": "#/components/schemas/CanonicalPolygonGeometry",
+                    "rectangle": "#/components/schemas/RectangleGeometry"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RectangleGeometry"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CanonicalPolygonGeometry"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "model": {
+            "additionalProperties": true,
+            "title": "Model",
+            "type": "object"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "status": {
+            "enum": [
+              "suggestion",
+              "no_suggestion"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "assignment_id",
+          "status",
+          "geometry",
+          "score",
+          "model"
         ],
         "title": "SamPredictResponse",
         "type": "object"
       },
       "SamPrompt": {
-        "description": "Prompt sent to the assisted segmentation endpoint.",
+        "description": "A point ``[x, y]`` or a box ``[x, y, width, height]`` in canonical image\npixels.",
         "properties": {
           "coordinates": {
             "items": {
               "type": "number"
             },
+            "maxItems": 4,
             "minItems": 2,
             "title": "Coordinates",
             "type": "array"
@@ -6830,8 +6959,8 @@
     },
     "/api/v1/inference/sam-predict": {
       "post": {
-        "description": "Run SAM prompted segmentation for an assigned image.\n\nArgs:\n    _: Prompt payload.\n    __: Authenticated user.\n\nRaises:\n    HTTPException: 501 until Phase 6 implements the assisted segmentation\n        contract and lease authorization.",
-        "operationId": "predict_sam_polygons_api_v1_inference_sam_predict_post",
+        "description": "Suggest a box or polygon for a prompt on the caller's open assignment.\n\nThe project's latest target model answers within the configured timeout\n(D18). The suggestion is only returned; it reaches the draft when the\nannotator accepts it there, so a timeout or failure changes nothing.\n\nArgs:\n    request: The prompt and the assignment it belongs to.\n    user: The annotator.\n    session: Active database session.\n    dispatch: Sender to the assistance worker.\n\nReturns:\n    The suggestion, or ``no_suggestion``.",
+        "operationId": "predict_api_v1_inference_sam_predict_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6899,7 +7028,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Predict Sam Polygons",
+        "summary": "Predict",
         "tags": [
           "inference"
         ]

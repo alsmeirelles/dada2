@@ -1,5 +1,6 @@
 """Phase 7 acquisition loop: settings, random and active-learning iterations,
-worker attempts, retries, stale results, and stopping, over real HTTP."""
+worker attempts, retries, stale results, stopping, object targets, and
+assisted annotation, over real HTTP."""
 
 import json
 import os
@@ -12,13 +13,18 @@ from sqlalchemy import delete, select
 
 from dada_api.active_learning.contract import (
     AdapterError,
+    AssistanceModel,
+    AssistanceRequest,
     BaseModelAdapter,
     BatchRequest,
     BatchResult,
     ManifestRef,
+    read_assistance_model,
     read_manifest,
+    write_assistance_model,
 )
 from dada_api.active_learning.deterministic import DeterministicAdapter
+from dada_api.api.v1.endpoints.inference import get_dispatcher
 from dada_api.core.config import get_settings
 from dada_api.core.security import hash_password
 from dada_api.db.session import async_session_factory
@@ -44,7 +50,7 @@ from dada_api.models.media import ContentObject, Media
 from dada_api.models.project import Project, ProjectClass, ProjectMember
 from dada_api.models.user import User
 from dada_api.services import learning_runs
-from dada_api.workers import learning
+from dada_api.workers import assistance, learning
 
 pytestmark = pytest.mark.skipif(
     os.getenv("DADA_RUN_INTEGRATION") != "1",
@@ -528,10 +534,18 @@ async def test_active_learning_runs_through_the_worker_to_its_final_evaluation(
     validation = _manifest(runs[1], "validation")
     assert training["info"]["schema"] == "dada-coco-pai/1"
     assert len(training["images"]) == 4
-    assert {image["annotation_status"] for image in training["images"]} == {
-        "EXHAUSTIVELY_LABELED"
-    }
-    assert len(pool["images"]) == 2
+    assert sorted(image["annotation_status"] for image in training["images"]) == [
+        "EXHAUSTIVELY_LABELED",
+        "EXHAUSTIVELY_LABELED",
+        "PARTIALLY_LABELED",
+        "PARTIALLY_LABELED",
+    ]
+    assert sorted(image["annotation_status"] for image in pool["images"]) == [
+        "PARTIALLY_LABELED",
+        "PARTIALLY_LABELED",
+        "UNLABELED",
+        "UNLABELED",
+    ]
     assert len(validation["images"]) == 1
     held_out = {image["id"] for image in validation["images"]}
     assert held_out.isdisjoint(image["id"] for image in training["images"])
@@ -554,6 +568,11 @@ async def test_active_learning_runs_through_the_worker_to_its_final_evaluation(
     assert evaluations[0]["model"] == {"name": "deterministic", "version": "1.0.0"}
     artifacts = get_settings().media_root / project["id"] / "learning" / "runs"
     assert not any(artifacts.glob("iteration-*"))
+    retained = read_assistance_model(
+        str(get_settings().media_root / project["id"] / "learning" / "assistance")
+    )
+    assert retained.iteration == 3
+    assert retained.class_ids == [project["class_id"]]
 
 
 async def test_a_met_metric_target_stops_with_a_test_evaluation(
@@ -828,3 +847,415 @@ async def test_a_manifest_carries_accepted_geometry_in_the_shared_format(
         get_settings().media_root / run.snapshots["training"]["path"]
     ).read_bytes()
     assert json.loads(stored) == training
+
+
+async def _acquisition_items(project_id: str) -> list[BatchItem]:
+    """Return the items of a project's acquisition batches in item order."""
+    async with async_session_factory() as session:
+        return list(
+            await session.scalars(
+                select(BatchItem)
+                .join(AnnotationBatch, AnnotationBatch.id == BatchItem.batch_id)
+                .where(
+                    AnnotationBatch.project_id == project_id,
+                    AnnotationBatch.purpose == "acquisition",
+                )
+                .order_by(BatchItem.position)
+            )
+        )
+
+
+async def test_object_targets_are_answered_one_object_at_a_time(
+    database: None,
+) -> None:
+    token = await _user("owner")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(client, token, LEARNING)
+        await _annotate_everything(client, token, project["id"])
+        await _relay(broker)
+        await _execute(broker.commands[0])
+        listed = await client.get(
+            f"/api/v1/projects/{project['id']}/batches", headers=_auth(token)
+        )
+        batch = next(
+            item for item in listed.json()["items"] if item["purpose"] == "acquisition"
+        )
+        started = await client.post(
+            f"/api/v1/projects/{project['id']}/batches/{batch['id']}/start",
+            headers=_auth(token),
+        )
+        assert started.status_code == 200, started.text
+        queue = await client.get(
+            f"/api/v1/projects/{project['id']}/assignments",
+            params={"purpose": "acquisition"},
+            headers=_auth(token),
+        )
+        first, second = queue.json()["items"]
+        detail = await client.get(
+            f"/api/v1/projects/{project['id']}/assignments/{first['id']}",
+            headers=_auth(token),
+        )
+        box = {
+            "class_id": project["class_id"],
+            "geometry": {
+                "type": "rectangle",
+                "coordinates": [170.0, 130.0, 300.0, 220.0],
+            },
+            "attributes": {},
+        }
+        crowded = await client.post(
+            f"/api/v1/projects/{project['id']}/assignments/{first['id']}/submit",
+            headers=_auth(token),
+            json={
+                "version": first["version"],
+                "objects": [{**box, "id": "one"}, {**box, "id": "two"}],
+            },
+        )
+        found = await client.post(
+            f"/api/v1/projects/{project['id']}/assignments/{first['id']}/submit",
+            headers=_auth(token),
+            json={"version": first["version"], "objects": [{**box, "id": "one"}]},
+        )
+        empty = await client.post(
+            f"/api/v1/projects/{project['id']}/assignments/{second['id']}/submit",
+            headers=_auth(token),
+            json={"version": second["version"], "objects": []},
+        )
+        await _relay(broker)
+
+    items = await _acquisition_items(project["id"])
+    assert len(items) == 2
+    assert all(item.target_key.startswith("t-") for item in items)
+    assert items[0].target_geometry == {
+        "type": "rectangle",
+        "coordinates": [160.0, 120.0, 320.0, 240.0],
+    }
+    assert items[0].target_region == [112.0, 84.0, 416.0, 312.0]
+
+    cue = {
+        "geometry": {"type": "rectangle", "coordinates": [160.0, 120.0, 320.0, 240.0]},
+        "region": [112.0, 84.0, 416.0, 312.0],
+    }
+    assert first["target"] == cue
+    assert detail.json()["target"] == cue
+    assert detail.json()["objects"] == []
+    assert crowded.status_code == 422
+    assert crowded.json()["error"]["details"]["errors"] == [
+        {"object_id": None, "code": "too_many_objects"}
+    ]
+    assert found.status_code == 200, found.text
+    assert found.json()["image_resolved"] is True
+    assert empty.status_code == 200, empty.text
+
+    runs = await _runs(project["id"])
+    assert len(runs) == 2
+    training = _manifest(runs[1], "training")
+    pool = _manifest(runs[1], "pool")
+    by_item = {item.media_id: item for item in items}
+    partial = [
+        image
+        for image in training["images"]
+        if image["annotation_status"] == "PARTIALLY_LABELED"
+    ]
+    assert {image["id"] for image in partial} == set(by_item)
+    rois = {roi["roi_id"]: roi for image in partial for roi in image["queried_rois"]}
+    assert rois == {
+        items[0].id: {
+            "roi_id": items[0].id,
+            "bbox_xyxy": [112.0, 84.0, 528.0, 396.0],
+            "al_iteration": 1,
+            "resolution": "CONFIRMED_OBJECT",
+        },
+        items[1].id: {
+            "roi_id": items[1].id,
+            "bbox_xyxy": [112.0, 84.0, 528.0, 396.0],
+            "al_iteration": 1,
+            "resolution": "EXPLICIT_HARD_NEGATIVE",
+        },
+    }
+    [queried] = [
+        annotation
+        for annotation in training["annotations"]
+        if annotation["origin"] == "AL_OBJECT_QUERY"
+    ]
+    assert queried["roi_id"] == items[0].id
+    assert queried["image_id"] == items[0].media_id
+    assert queried["bbox"] == [170.0, 130.0, 300.0, 220.0]
+    partial_pool = [
+        image
+        for image in pool["images"]
+        if image["annotation_status"] == "PARTIALLY_LABELED"
+    ]
+    assert [image["queried_rois"] for image in partial_pool] == [
+        image["queried_rois"] for image in partial
+    ]
+    assert [annotation["roi_id"] for annotation in pool["annotations"]] == [items[0].id]
+
+
+class Targets(DeterministicAdapter):
+    """Returns object targets changed so that they no longer fit."""
+
+    def __init__(self, change: str) -> None:
+        self.change = change
+
+    def select_batch(self, request: BatchRequest, report_stage=None) -> BatchResult:
+        result = super().select_batch(request, report_stage)
+        selection = json.loads(json.dumps(result.selection))
+        images, annotations = selection["images"], selection["annotations"]
+        target, roi = annotations[0], images[0]["queried_rois"][-1]
+        if self.change == "outside_region":
+            target["bbox"] = [0.0, 0.0, 10.0, 10.0]
+        if self.change == "region_outside_image":
+            roi["bbox_xyxy"] = [0.0, 0.0, 700.0, 480.0]
+        if self.change == "unknown_region":
+            target["roi_id"] = "nowhere"
+        if self.change == "no_box":
+            del target["bbox"]
+        if self.change == "repeated":
+            annotations.append(dict(target))
+        if self.change == "image_without_target":
+            pool = read_manifest(request.media_root, request.pool)
+            spare = next(
+                image
+                for image in pool["images"]
+                if image["id"] not in {item["id"] for item in images}
+            )
+            images.append(spare)
+        if self.change == "oversized":
+            images[0]["queried_rois"].append({**roi, "roi_id": "extra"})
+            annotations.append(
+                {**target, "roi_id": "extra", "bbox": [170.0, 130.0, 100.0, 100.0]}
+            )
+        return result.model_copy(update={"selection": selection})
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "outside_region",
+        "region_outside_image",
+        "unknown_region",
+        "no_box",
+        "repeated",
+        "image_without_target",
+        "oversized",
+    ],
+)
+async def test_a_target_that_does_not_fit_fails_the_run(
+    database: None, change: str
+) -> None:
+    token = await _user("owner")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(client, token, LEARNING)
+        await _annotate_everything(client, token, project["id"])
+        await _relay(broker)
+        await _execute(broker.commands[0], Targets(change))
+
+    [run] = await _runs(project["id"])
+    assert run.status == "failed"
+    assert run.failure_code == "solution_output_invalid"
+    assert await _acquisition_items(project["id"]) == []
+
+
+async def test_classification_acquires_whole_images(database: None) -> None:
+    token = await _user("owner")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(
+            client, token, {**LEARNING, "task_type": "classification"}
+        )
+        label = {
+            "id": "label",
+            "class_id": project["class_id"],
+            "geometry": None,
+            "attributes": {},
+        }
+        await _annotate_everything(client, token, project["id"], [label])
+        await _relay(broker)
+        await _execute(broker.commands[0])
+
+    items = await _acquisition_items(project["id"])
+    assert len(items) == 2
+    assert {item.target_key for item in items} == {None}
+
+
+async def _assisted(
+    client: httpx.AsyncClient, token: str, project_id: str, assignment_id: str, prompt
+) -> httpx.Response:
+    """Ask for a suggestion on one assignment."""
+    return await client.post(
+        "/api/v1/inference/sam-predict",
+        headers=_auth(token),
+        json={
+            "project_id": project_id,
+            "assignment_id": assignment_id,
+            "request_id": "prompt-1",
+            "prompts": [prompt],
+        },
+    )
+
+
+def _retain(project: dict, class_ids: list[str] | None = None) -> None:
+    """Leave a deterministic target model in the project's assistance folder."""
+    write_assistance_model(
+        str(get_settings().media_root / project["id"] / "learning" / "assistance"),
+        AssistanceModel(
+            solution_id="deterministic",
+            solution_version="1.0.0",
+            task="detection",
+            class_ids=class_ids or [project["class_id"]],
+            iteration=1,
+            request_id="run",
+            weights=None,
+        ),
+    )
+
+
+async def _in_process(request: AssistanceRequest, _: float) -> dict:
+    """Answer a prompt the way the assistance worker does."""
+    return assistance.run(request.model_dump())
+
+
+async def _too_slow(_: AssistanceRequest, __: float) -> dict:
+    """Behave like a worker that never answers."""
+    raise TimeoutError
+
+
+async def _broken(_: AssistanceRequest, __: float) -> dict:
+    """Behave like a worker whose model failed."""
+    return {"failure": {"code": "assistance_failed", "detail": "out of memory"}}
+
+
+async def test_assistance_answers_the_owner_and_never_touches_the_draft(
+    database: None,
+) -> None:
+    owner = await _user("owner")
+    peer = await _user("peer")
+    outsider = await _user("outsider")
+    broker = Broker()
+    point = {"type": "point", "coordinates": [320.0, 240.0], "label": "foreground"}
+    try:
+        async with _client() as client:
+            project = await _project(client, owner, LEARNING)
+            await _annotate_everything(client, owner, project["id"])
+            await _relay(broker)
+            await _execute(broker.commands[0])
+            listed = await client.get(
+                f"/api/v1/projects/{project['id']}/batches", headers=_auth(owner)
+            )
+            batch = next(
+                item
+                for item in listed.json()["items"]
+                if item["purpose"] == "acquisition"
+            )
+            await client.post(
+                f"/api/v1/projects/{project['id']}/batches/{batch['id']}/start",
+                headers=_auth(owner),
+            )
+            joined = await client.post(
+                f"/api/v1/projects/{project['id']}/members",
+                headers=_auth(owner),
+                json={"username": "peer", "role": "annotator"},
+            )
+            assert joined.status_code == 201, joined.text
+            queue = await client.get(
+                f"/api/v1/projects/{project['id']}/assignments",
+                params={"purpose": "acquisition"},
+                headers=_auth(owner),
+            )
+            first, second = queue.json()["items"][:2]
+            box = {
+                "id": "mine",
+                "class_id": project["class_id"],
+                "geometry": {
+                    "type": "rectangle",
+                    "coordinates": [10.0, 10.0, 20.0, 20.0],
+                },
+                "attributes": {},
+            }
+            saved = await client.put(
+                f"/api/v1/projects/{project['id']}/assignments/{first['id']}/draft",
+                headers=_auth(owner),
+                json={"version": first["version"], "objects": [box]},
+            )
+            assert saved.status_code == 200, saved.text
+
+            app.dependency_overrides[get_dispatcher] = lambda: _in_process
+            missing = await _assisted(client, owner, project["id"], first["id"], point)
+            _retain(project)
+            suggested = await _assisted(
+                client, owner, project["id"], first["id"], point
+            )
+            boxed = await _assisted(
+                client,
+                owner,
+                project["id"],
+                first["id"],
+                {"type": "box", "coordinates": [100.0, 100.0, 50.0, 40.0]},
+            )
+            foreign = await _assisted(client, peer, project["id"], first["id"], point)
+            stranger = await _assisted(
+                client, outsider, project["id"], first["id"], point
+            )
+            outside = await _assisted(
+                client,
+                owner,
+                project["id"],
+                first["id"],
+                {"type": "point", "coordinates": [700.0, 10.0]},
+            )
+            app.dependency_overrides[get_dispatcher] = lambda: _too_slow
+            slow = await _assisted(client, owner, project["id"], first["id"], point)
+            app.dependency_overrides[get_dispatcher] = lambda: _broken
+            broken = await _assisted(client, owner, project["id"], first["id"], point)
+            app.dependency_overrides[get_dispatcher] = lambda: _in_process
+            _retain(project, ["another-class"])
+            stale = await _assisted(client, owner, project["id"], first["id"], point)
+            _retain(project)
+            submitted = await client.post(
+                f"/api/v1/projects/{project['id']}/assignments/{second['id']}/submit",
+                headers=_auth(owner),
+                json={"version": second["version"], "objects": []},
+            )
+            assert submitted.status_code == 200, submitted.text
+            closed = await _assisted(client, owner, project["id"], second["id"], point)
+            detail = await client.get(
+                f"/api/v1/projects/{project['id']}/assignments/{first['id']}",
+                headers=_auth(owner),
+            )
+    finally:
+        app.dependency_overrides.pop(get_dispatcher, None)
+
+    assert missing.status_code == 409
+    assert missing.json()["error"]["code"] == "assistance_unavailable"
+    assert missing.json()["error"]["details"] == {"reason": "no_target_model"}
+    assert suggested.status_code == 200, suggested.text
+    assert suggested.json() == {
+        "request_id": "prompt-1",
+        "assignment_id": first["id"],
+        "status": "suggestion",
+        "geometry": {
+            "type": "rectangle",
+            "coordinates": [260.0, 180.0, 120.0, 120.0],
+        },
+        "score": 1.0,
+        "model": {"solution": "deterministic", "version": "1.0.0", "iteration": 1},
+    }
+    assert boxed.json()["geometry"]["coordinates"] == [100.0, 100.0, 50.0, 40.0]
+    assert foreign.status_code == 403
+    assert foreign.json()["error"]["code"] == "assignment_not_owned"
+    assert stranger.status_code == 403
+    assert stranger.json()["error"]["code"] == "forbidden"
+    assert outside.status_code == 422
+    assert outside.json()["error"]["code"] == "invalid_prompt"
+    assert slow.status_code == 503
+    assert slow.json()["error"]["code"] == "assistance_timeout"
+    assert broken.status_code == 503
+    assert broken.json()["error"]["code"] == "assistance_failed"
+    assert stale.json()["error"]["details"] == {"reason": "incompatible_target_model"}
+    assert closed.status_code == 409
+    assert closed.json()["error"]["code"] == "assignment_already_submitted"
+    assert detail.json()["version"] == saved.json()["version"]
+    assert detail.json()["objects"] == [box]

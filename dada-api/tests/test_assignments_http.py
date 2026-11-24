@@ -64,6 +64,7 @@ QUEUE_FIELDS = {
     "version",
     "seeded_from_import",
     "updated_at",
+    "target",
 }
 
 

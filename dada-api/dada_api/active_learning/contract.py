@@ -2,13 +2,16 @@
 
 A solution receives one :class:`BatchRequest` and returns one
 :class:`BatchResult`. It reads the immutable manifests the request names and
-never touches the database, the HTTP layer, or canonical annotations. Nothing
+never touches the database, the HTTP layer, or canonical annotations. A
+solution may also offer an :class:`AssistanceProvider` that turns an
+annotator's prompt into a suggestion with its latest target model. Nothing
 here imports FastAPI or the ORM.
 """
 
 import hashlib
 import json
 import math
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
@@ -19,6 +22,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 PROTOCOL_VERSION = "learning.v1"
 MANIFEST_SCHEMA = "dada-coco-pai/1"
 STAGES = ("training", "evaluating", "selecting")
+EXHAUSTIVELY_LABELED = "EXHAUSTIVELY_LABELED"
+PARTIALLY_LABELED = "PARTIALLY_LABELED"
+UNLABELED = "UNLABELED"
+CONFIRMED_OBJECT = "CONFIRMED_OBJECT"
+EXPLICIT_HARD_NEGATIVE = "EXPLICIT_HARD_NEGATIVE"
+FULL_IMAGE_ORIGIN = "FULL_IMAGE"
+TARGET_ORIGIN = "AL_OBJECT_QUERY"
+ASSISTANCE_MODEL_FILE = "model.json"
 TaskName = Literal["classification", "detection", "segmentation"]
 SplitName = Literal["validation", "test"]
 StageReporter = Callable[[str], None]
@@ -63,8 +74,12 @@ class BatchRequest(Frozen):
     """Everything a solution needs to evaluate and choose one batch.
 
     ``requested_size`` is authoritative (P7-09) and is zero for the final
-    evaluation. ``artifact_dir`` belongs to this attempt; ``state_dir`` keeps
-    solution state across iterations of the same project.
+    evaluation; for detection and segmentation it counts object targets.
+    ``artifact_dir`` belongs to this attempt; ``state_dir`` keeps solution
+    state across iterations of the same project. ``assistance_dir`` is where
+    a solution that evaluates its target model keeps the latest one for
+    assisted annotation (D18), described by an :class:`AssistanceModel`
+    written last as ``model.json``.
     """
 
     protocol_version: Literal["learning.v1"] = PROTOCOL_VERSION
@@ -86,6 +101,7 @@ class BatchRequest(Frozen):
     evaluation: EvaluationPlan | None
     artifact_dir: str
     state_dir: str
+    assistance_dir: str
     retain_helper_models: bool
 
 
@@ -110,10 +126,16 @@ class Evaluation(Frozen):
 class BatchResult(Frozen):
     """A solution's answer: its evaluations and, unless it stopped, a batch.
 
-    ``selection`` is a manifest in the request's format whose ``images`` are
-    the chosen media, best first. ``shortfall_reason`` explains a batch
-    smaller than requested; ``stop_reason`` reports that the metric target was
-    met, in which case there is no selection.
+    ``selection`` is a manifest in the request's format. For classification
+    its ``images`` are the chosen media, best first, and it has no
+    annotations. For detection and segmentation its ``annotations`` are the
+    chosen object targets, best first: each names its ``image_id``, a
+    ``roi_id`` found in that image's ``queried_rois`` with the padded
+    ``bbox_xyxy`` context area, and the proposed ``bbox`` (``[x, y, width,
+    height]``) or, for segmentation, ``segmentation`` rings. Its ``images``
+    are the images those targets belong to. ``shortfall_reason`` explains a
+    batch smaller than requested; ``stop_reason`` reports that the metric
+    target was met, in which case there is no selection.
     """
 
     protocol_version: Literal["learning.v1"] = PROTOCOL_VERSION
@@ -125,6 +147,59 @@ class BatchResult(Frozen):
     stop_reason: Literal["metric_target"] | None = None
     evaluations: list[Evaluation] = Field(default_factory=list)
     provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class AssistanceModel(Frozen):
+    """The retained target model a solution leaves for assisted annotation.
+
+    It is replaced at every evaluation and removed with its project (D18).
+    ``weights`` is a file inside the assistance folder, when the solution
+    needs one.
+    """
+
+    solution_id: str
+    solution_version: str
+    task: TaskName
+    class_ids: list[str]
+    iteration: int
+    request_id: str
+    weights: str | None
+
+
+class Prompt(Frozen):
+    """An annotator's point ``[x, y]`` or box ``[x, y, width, height]`` in
+    canonical image pixels."""
+
+    type: Literal["point", "box"]
+    coordinates: list[float]
+
+
+class AssistanceRequest(Frozen):
+    """One prompt to answer with the retained target model."""
+
+    request_id: str
+    task: Literal["detection", "segmentation"]
+    image_path: str
+    width: int
+    height: int
+    prompt: Prompt
+    model_dir: str
+    model: AssistanceModel
+
+
+class AssistanceResult(Frozen):
+    """A suggestion in canonical pixels, or the answer that there is none.
+
+    ``geometry`` is a ``rectangle`` for detection and a ``polygon`` for
+    segmentation, in the document format; it is only shown to the annotator
+    and never stored.
+    """
+
+    request_id: str
+    status: Literal["suggestion", "no_suggestion"]
+    geometry: dict[str, Any] | None = None
+    score: float | None = None
+    model: dict[str, Any] = Field(default_factory=dict)
 
 
 class AdapterError(Exception):
@@ -152,6 +227,24 @@ class BaseModelAdapter(ABC):
 
         Returns:
             The evaluations and the chosen batch.
+
+        Raises:
+            AdapterError: For a typed permanent failure.
+        """
+
+
+class AssistanceProvider(ABC):
+    """Answers assisted-annotation prompts with a solution's target model."""
+
+    @abstractmethod
+    def suggest(self, request: AssistanceRequest) -> AssistanceResult:
+        """Return the suggestion for one prompt.
+
+        Args:
+            request: The prompt, its image, and the retained model.
+
+        Returns:
+            The suggestion, or ``no_suggestion`` when the model finds none.
 
         Raises:
             AdapterError: For a typed permanent failure.
@@ -193,3 +286,38 @@ def read_manifest(media_root: str, ref: ManifestRef) -> dict[str, Any]:
     if hashlib.sha256(data).hexdigest() != ref.sha256:
         raise AdapterError("invalid_input", f"manifest {ref.sha256} changed")
     return json.loads(data)
+
+
+def write_assistance_model(directory: str, model: AssistanceModel) -> None:
+    """Publish the description of a retained target model, replacing the last.
+
+    The description is renamed into place, so a reader sees either the
+    previous model or the new one. A solution writes the weights it names
+    before calling this.
+
+    Args:
+        directory: The request's ``assistance_dir``.
+        model: The new retained model.
+    """
+    folder = Path(directory)
+    folder.mkdir(parents=True, exist_ok=True)
+    temporary = folder / f".{ASSISTANCE_MODEL_FILE}.{os.getpid()}.tmp"
+    temporary.write_text(model.model_dump_json())
+    os.replace(temporary, folder / ASSISTANCE_MODEL_FILE)
+
+
+def read_assistance_model(directory: str) -> AssistanceModel | None:
+    """Return the retained target model of an assistance folder, if any.
+
+    Args:
+        directory: The project's assistance folder.
+
+    Returns:
+        The description, or None when no readable model is retained.
+    """
+    try:
+        return AssistanceModel.model_validate_json(
+            (Path(directory) / ASSISTANCE_MODEL_FILE).read_text()
+        )
+    except (OSError, ValueError):
+        return None

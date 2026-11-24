@@ -651,6 +651,7 @@ async def _load_input(
         sources=sources,
         candidates=source_input.candidate_mapping.get("candidates"),
         calibration=snapshot.parameters if snapshot is not None else None,
+        target_region=item.target_region,
     )
 
 

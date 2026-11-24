@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     consensus_standard_memory_bytes: int = Field(default=1024**3, gt=0)
     consensus_mask_memory_bytes: int = Field(default=4 * 1024**3, gt=0)
     learning_timeout_seconds: int = Field(default=86_400, ge=60, le=7 * 86_400)
+    assistance_timeout_seconds: int = Field(default=30, ge=1, le=300)
     jwt_secret_key: SecretStr = Field(
         default=SecretStr("change-this-development-secret"),
         repr=False,

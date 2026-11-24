@@ -753,3 +753,114 @@ Executado contra PostgreSQL 16 e Redis 7 locais.
 | `uv.lock` | A dependência `pillow-heif` foi acrescentada ao `pyproject.toml`. O lock precisa ser regenerado com `uv lock` numa máquina que alcance `download.pytorch.org` |
 | `.env` local | Acrescentar `image/heic` e `image/heif` a `DADA_SUPPORTED_IMAGE_MEDIA_TYPES` |
 | App | O assistente ainda não envia `max_acquisition_iterations`, que passou a ser obrigatório em projetos `split`; entra no bloco 3 |
+
+### Bloco 2: DADA, alvos por objeto e segmentação assistida
+
+Status: implementado em 2026-11-24, na branch `phase_7`, sem commit. Continua
+sujeito à revisão do Meirelles.
+
+Guia de operação: [development.md](../development.md#object-targets) e
+[assistência](../development.md#assisted-annotation-phase-7).
+
+#### Persistência
+
+Migração `20261124_0012`, exercitada upgrade → downgrade → upgrade, com
+`alembic check` limpo.
+
+- **Item do lote:** `target_key`, `target_geometry` e `target_region` (D16).
+- **Unicidade:** `uq_batch_item` passa a ser (lote, imagem, alvo) com
+  `NULLS NOT DISTINCT`, então o item de imagem inteira continua único por
+  imagem.
+
+#### Código
+
+| Onde | O quê |
+| --- | --- |
+| `services/learning_runs.py` | Validação dos alvos da seleção e pasta do modelo retido (D16, D18) |
+| `services/learning_snapshots.py` | `PARTIALLY_LABELED`, `queried_rois` e anotações `AL_OBJECT_QUERY` nos manifestos (D16) |
+| `services/batches.py`, `services/datasets.py` | Um item por alvo; imagem com alvos respondidos continua elegível (D16) |
+| `services/assignments.py`, `services/annotation_documents.py` | Documento do alvo com no máximo um objeto (D16) |
+| `consensus/candidates.py`, `consensus/protocol.py` | Consenso do alvo sem casamento (D17) |
+| `services/assistance.py`, `workers/assistance.py`, `api/v1/endpoints/inference.py` | Segmentação assistida (D18) |
+| `active_learning/contract.py`, `active_learning/catalog.py` | Pasta de assistência no pedido, interface de assistência e registro da DADA |
+| `active_learning/deterministic.py` | Alvos e assistência também na solução de desenvolvimento |
+| `active_learning/dada_al/` | Solução DADA com a estrutura da especificação |
+
+#### Rotas e comandos
+
+| Rota ou comando | Função |
+| --- | --- |
+| `POST /inference/sam-predict` | Sugestão para um ponto ou caixa na tarefa aberta da própria pessoa |
+| `make worker-assistance` | Worker da fila `assistance` |
+
+As tarefas (`/assignments`), o detalhe da tarefa e as evidências do gerente
+ganharam o campo `target`. `/capabilities` lista a DADA, com
+`dependency_missing` onde o extra `learning` não está instalado, e os
+descritores ganharam o tipo `string`. O `openapi.json` ficou com 65 caminhos
+e foi de 106 para 107 schemas.
+
+#### Leituras feitas na implementação
+
+| Ponto | Leitura |
+| --- | --- |
+| Formato do alvo na seleção | Cada anotação da seleção é um alvo, com `image_id`, `roi_id` e a geometria (`bbox`, ou `segmentation` na segmentação); a região é o `bbox_xyxy` da entrada de mesmo `roi_id` em `queried_rois` da imagem |
+| Validação na API | Imagem elegível, geometria válida da tarefa, região dentro da imagem e contendo a geometria, nada repetido e no máximo o tamanho pedido. Classificação não pode devolver alvos; detecção e segmentação só devolvem alvos |
+| Identidade do alvo | `target_key` vem do hash da geometria; a região fica como `[x, y, largura, altura]` |
+| Semente importada | Não vale para alvo, porque descreve a imagem inteira |
+| Elegibilidade | Item de alvo resolvido não segura a imagem; item em lote ainda aberto segura |
+| Estado da imagem no manifesto | `EXHAUSTIVELY_LABELED` quando há resolução de imagem inteira; `PARTIALLY_LABELED` quando só há alvos respondidos; `al_iteration` é a iteração da execução que escolheu o alvo |
+| Consenso do alvo | A entrada do resolvedor recebe só a região do alvo (`target_region`); a geometria proposta nunca entra, então não há como virar voto |
+| Solução determinística | Propõe um alvo no centro de cada imagem nunca consultada; a métrica sintética conta imagens distintas; deixa um modelo descritivo para a assistência |
+| Assistência | Um único prompt por pedido; resultado no Redis só para essa tarefa, por até 5 minutos; geometria conferida antes de responder; `409 assistance_unavailable` (`no_target_model`, `incompatible_target_model` ou `solution_unavailable`), `422 invalid_prompt` ou `assistance_not_supported`, `503 assistance_timeout` ou `assistance_failed` |
+| Configuração da DADA | `DADASettings` é o que o projeto guarda; `DADAAlConfig` acrescenta a tarefa e o orçamento do pedido. A tarefa chega como contexto da validação, que preenche os padrões e recusa método, modelo ou pesos incompatíveis |
+| Campos acrescentados | `proxy_epochs` (10), `target_epochs` (50), `batch_size` (16) e `image_size` (640 no YOLO, a do alvo no timm), porque a especificação cita épocas e tamanho sem defini-los |
+| Divergências da especificação | `acquisition_budget_q` aceita zero, para a avaliação final; o `CandidateItem` guarda anéis de polígono (`segmentation`) no lugar de `mask_rle`, porque o manifesto troca polígonos; não há `config.yml`, porque a configuração já é persistida pela API em cada projeto e execução |
+| Ordem dentro da execução | Treina e avalia o alvo, decide a parada, depois treina o proxy e seleciona (D8); as etapas informadas são `training`, `evaluating`, `training` e `selecting` |
+| Modo 1 | Imagens só com letterbox, sem aumento geométrico, para as regiões caírem exatamente na imagem de treino; âncora positiva e âncora de imagem exaustiva têm peso 1 |
+| Modo 2 | O professor é o último modelo-alvo retido; pseudorrótulos com confiança de 0,80 ou mais e centro fora das regiões; na segmentação, o pseudorrótulo é o contorno |
+| Ensemble | Sementes 1 a N, como na especificação, treinadas lado a lado e uma a uma quando falta memória; o TTA multivista treina um proxy |
+| Pré-NMS | Sobreviventes por NMS (IoU 0,7) sobre o ramo um-para-muitos e os 300 melhores do um-para-um; objeto sem proposta no grupo usa a si mesmo (K = 1); casamento do um-para-um com IoU de 0,30 |
+| TTA | Os objetos são os da passada original; o termo de máscara é só a entropia da borda, a única medida que a especificação define para esse método |
+| Polígonos | Contorno simplificado em 1 pixel e conferido com a mesma regra de simplicidade da API, com o fecho convexo como reserva; coordenadas numa grade de 1/64 de pixel, para `x + largura` fechar exatamente |
+| Métricas | `map50` da validação do Ultralytics; `mean_iou` como na D9, valendo 1 quando nenhuma classe aparece; acurácia e F1 macro nas classes presentes na referência ou na predição; só imagens de uma classe (D10), com a quantidade excluída na procedência |
+| Modelo retido | Detecção e segmentação trocam o modelo da assistência a cada avaliação; classificação não tem assistência |
+| JPEG com orientação EXIF | Exposto ao treino como PNG sem girar, porque a anotação está no plano de pixels guardado |
+| Pesos pré-treinados | Baixados para `learning/state/dada/weights/` (YOLO, do GitHub) e pelo Hugging Face (timm) |
+
+#### Verificação
+
+Executado contra PostgreSQL 16 e Redis 7 locais.
+
+- `ruff check` e `ruff format --check`: limpos. `alembic check`: sem
+  divergência.
+- Testes da API: **677 passaram** com integração habilitada, contra 648 no
+  início do bloco; `tests/test_dada_models.py` fica pulado sem o extra
+  `learning`.
+- Num ambiente à parte com torch 2.15 (CPU), ultralytics 8.4.218, timm 1.0.31 e
+  scikit-learn 1.9.1: `tests/test_dada_models.py` passou (8 testes), e a DADA
+  rodou de ponta a ponta em dados sintéticos para detecção e segmentação
+  (pré-NMS e TTA, modos 1 e 2) e classificação (ensemble e multivista), com
+  as seleções aceitas pela validação da API.
+- `openapi.json` regenerado.
+
+| Critério do bloco | Como foi provado |
+| --- | --- |
+| Limites da incerteza | `test_classification_uncertainty_is_bounded_and_positive_on_a_boundary`, `test_object_uncertainties_stay_bounded_in_every_edge_case`, `test_a_lone_proposal_falls_back_to_its_own_measures`, `test_a_one_to_one_miss_counts_as_disagreement`, `test_pre_nms_candidates_are_bounded_and_embedded` |
+| Conservação das cotas e casos da P7-09 | `test_quotas_conserve_the_budget_and_respect_capacity`, `test_selection_fills_each_cluster_with_its_most_uncertain_candidates`, `test_ties_and_zero_uncertainty_are_resolved_by_identifier`, `test_too_few_or_no_candidates_are_reported`, `test_clustering_is_reproducible_and_capped_by_the_candidates` |
+| Deduplicação | `test_the_gatekeeper_drops_known_objects_and_caps_candidates` |
+| Gradiente zero fora das regiões (modo 1) e neutralização (modo 2) | `test_mode_1_gives_unqueried_background_an_exact_zero_gradient` (YOLO26 nas duas cabeças, YOLO11 e YOLO12), `test_mode_2_neutralizes_unqueried_pixels_and_adds_confident_labels` |
+| Alvos por objeto | `test_object_targets_are_answered_one_object_at_a_time`, `test_a_target_that_does_not_fit_fails_the_run`, `test_classification_acquires_whole_images` |
+| O alvo nunca conta como voto | `test_an_object_target_is_one_candidate_without_matching`, `test_an_empty_answer_to_a_target_votes_that_there_is_no_object`, `test_a_target_nobody_found_resolves_to_an_empty_document` |
+| A assistência recusa tarefa alheia e não mexe no rascunho | `test_assistance_answers_the_owner_and_never_touches_the_draft` |
+
+O teste de velocidade em GPU da especificação (critério 2) fica para quando a
+máquina estiver disponível.
+
+#### Pendências do bloco
+
+| Item | Situação |
+| --- | --- |
+| `uv.lock` | O extra `learning` ganhou `timm` e `scikit-learn`, e o `ultralytics` passou a exigir 8.4 (YOLO26). O lock precisa ser regenerado com `uv lock` |
+| Ambiente da DADA | A API e os dois workers precisam do extra `learning` para a DADA aparecer como disponível |
+| App | O campo `target`, o novo contrato da `sam-predict` (o App ainda manda `image_id` e espera `polygons`) e o tipo `string` dos descritores entram no bloco 3 |
+| GPU | Verificação com GPU e modelos reais quando a máquina estiver disponível |

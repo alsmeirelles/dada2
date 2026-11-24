@@ -34,6 +34,7 @@ help:
 	  'worker-standard  Run the classification and detection consensus worker.' \
 	  'worker-mask      Run the segmentation consensus worker.' \
 	  'worker-learning  Run the active-learning worker.' \
+	  'worker-assistance Run the assisted-annotation worker.' \
 	  'openapi          Export the generated OpenAPI document.' \
 	  'lint             Run Ruff lint and formatting checks.' \
 	  'test             Run the pytest suite.' \
@@ -77,7 +78,7 @@ bootstrap-admin:
 run:
 	uv run uvicorn dada_api.main:app --host '$(DADA_API_HOST)' --port '$(DADA_API_PORT)' --reload
 
-.PHONY: relay worker-standard worker-mask worker-learning
+.PHONY: relay worker-standard worker-mask worker-learning worker-assistance
 relay:
 	uv run dada-api consensus-relay
 
@@ -89,6 +90,9 @@ worker-mask:
 
 worker-learning:
 	uv run celery -A dada_api.workers.celery_app worker -Q learning -n 'learning@%h' --pool '$(CELERY_POOL)' -c 1
+
+worker-assistance:
+	uv run celery -A dada_api.workers.celery_app worker -Q assistance -n 'assistance@%h' --pool '$(CELERY_POOL)' -c 1
 
 .PHONY: consensus
 consensus:

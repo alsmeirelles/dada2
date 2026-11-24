@@ -18,11 +18,12 @@ class ParameterDescriptor(BaseModel):
 
     ``name`` is dotted for fields inside a nested group. Ratio bounds and
     defaults are ``{"numerator", "denominator"}`` objects; an ``area`` value
-    is ``{"pixels", "image_ratio"}``.
+    is ``{"pixels", "image_ratio"}``; a ``string`` is free text, such as a
+    model name, that the API validates.
     """
 
     name: str
-    kind: Literal["ratio", "number", "integer", "enum", "boolean", "area"]
+    kind: Literal["ratio", "number", "integer", "enum", "boolean", "area", "string"]
     default: Any
     nullable: bool
     options: list[str] | None
