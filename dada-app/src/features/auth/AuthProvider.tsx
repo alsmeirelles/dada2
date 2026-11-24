@@ -6,7 +6,7 @@ import {
   useState,
 } from 'react'
 
-import { ApiError, apiRequest } from '../../api/client'
+import { ApiError, apiRequest, onUnauthorized } from '../../api/client'
 import type { LoginRequest, TokenResponse, User } from '../../api/types'
 import { AuthContext, type AuthContextValue } from './auth-context'
 import { authStorage } from './auth-storage'
@@ -14,6 +14,7 @@ import { authStorage } from './auth-storage'
 export function AuthProvider({ children }: PropsWithChildren) {
   const queryClient = useQueryClient()
   const [token, setToken] = useState(authStorage.get)
+  const [sessionExpired, setSessionExpired] = useState(false)
   const me = useQuery({
     queryKey: ['auth', 'me', token],
     queryFn: () => apiRequest<User>('/api/v1/auth/me', { token }),
@@ -31,6 +32,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (me.error instanceof ApiError && me.error.status === 401) logout()
   }, [logout, me.error])
 
+  useEffect(() => {
+    onUnauthorized(() => {
+      setSessionExpired(true)
+      logout()
+    })
+    return () => onUnauthorized(null)
+  }, [logout])
+
   const login = useCallback(
     async (credentials: LoginRequest) => {
       const result = await apiRequest<TokenResponse>('/api/v1/auth/token', {
@@ -38,6 +47,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         body: credentials,
       })
       authStorage.set(result.access_token)
+      setSessionExpired(false)
       setToken(result.access_token)
     },
     [],
@@ -51,6 +61,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     // is created, without treating a recoverable request error as a permanent
     // loading state.
     isLoading: token !== null && me.isPending,
+    sessionExpired,
     login,
     logout,
   }

@@ -9,8 +9,8 @@ Record each resolution with its root cause, affected surface, remediation, verif
 | `I7-01` | Annotator selection in project creation | Replace ambiguous typed usernames with selection from existing eligible users | **RESOLVED** |
 | `I7-02` | Annotation settings: class strategy availability | Present concise, actionable availability guidance without internal IDs or raw evidence diagnostics | **RESOLVED** |
 | `I7-03` | `dada-api` quote-named directory replication | Identify and remove the configuration/command path that creates the spurious directory hierarchy; verify `make infra-up` no longer creates it | **RESOLVED** |
-| `I7-04` | `dada-app` image position in annotation canvas | images should be displayed in the center of the canvas | **PENDING** |
-| `I7-05` | `dada-app` Unauthorized requests | If user session has expired or anauthorized responses arrive, go to login | **PENDING** |
+| `I7-04` | `dada-app` image position in annotation canvas | images should be displayed in the center of the canvas | **RESOLVED** |
+| `I7-05` | `dada-app` Unauthorized requests | If user session has expired or anauthorized responses arrive, go to login | **RESOLVED** |
 
 
 ## I7-01
@@ -102,6 +102,44 @@ screen, requiring a zoom out and the use of the "Pan" function to properly place
 initially displaying an image it should always be centered and occupying the full canvas width. The zoom in/out should 
 keep its position and only make the zoom in/out from the position the mouse is placed over the image.
 
+**Cause.** Found by reading the canvas code; the exact browser sequence is
+still to be confirmed live. The canvas could leave its fitted position in
+three ways. The zoom buttons and the `+`/`-` keys changed the scale around the
+image's top-left corner, which pushed the image right and down. The wheel
+handler was registered by React as a passive listener, so its
+`preventDefault` was ignored and a trackpad pinch or Ctrl+wheel also zoomed the
+whole page. The stage was a hidden-overflow scroll box, which the browser may
+scroll on its own and so move the image without the canvas knowing. The first
+view also fitted the whole image with a 56-pixel margin instead of the canvas
+width.
+
+**Resolution record:** **RESOLVED.** An image now opens centred across the full
+canvas width, computed before the first paint and again whenever the canvas
+changes size; "Fit image" (and the `0` key) shows the whole image, centred. The
+buttons zoom around the canvas centre and the keys around the pointer when it
+is over the canvas; the wheel keeps zooming around the pointer through a
+non-passive listener, so the page itself never zooms or scrolls; and the stage
+clips its content instead of being scrollable. Verification: the new canvas
+tests (`ImageStage.test.tsx`: full-width centring, zoom around the centre, fit
+of the whole image) and the viewport tests passed, as did the complete App
+suite (230 tests), lint, and the production build. The check in the two latest
+Chrome and Firefox releases is pending the test machine. Owner: DADA App
+maintainers. Completed: 2026-11-24.
+
 ## I7-05
 
 If a user session has timed-out and the user starts getting 401 unauthorized responses, redirect to the login page again.
+
+**Cause.** Only the `/auth/me` request made at start-up cleared the session on
+`401`. The App has no refresh flow, and an access token lasts 60 minutes by
+default, so after it expired every other request failed with `401` and the page
+only showed an error while the user stayed signed in.
+
+**Resolution record:** **RESOLVED.** The API client reports every `401` to a
+request sent with an access token. The App then signs out, the protected
+routes return to the login page with the page the user was on, the login page
+says the session ended, and signing in again returns to that page. A failed
+login, which carries no token, is unaffected. Verification: the client tests
+(`client.test.ts`) and the end-to-end session test (`session-expiry.test.tsx`)
+passed, as did the complete App suite (230 tests). Owner: DADA App
+maintainers. Completed: 2026-11-24.

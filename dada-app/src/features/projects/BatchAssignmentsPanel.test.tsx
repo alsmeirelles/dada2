@@ -49,7 +49,7 @@ async function renderPanel(purpose: BatchPurpose) {
   vi.stubGlobal('fetch', fetch)
   const context: AuthContextValue = {
     user: { id: 'owner', username: 'owner', display_name: 'Owner', is_administrator: false, is_active: true, version: 1, created_at: '2026-09-30T12:00:00Z' },
-    token: 'token', isLoading: false, login: vi.fn(), logout: vi.fn(),
+    token: 'token', isLoading: false, sessionExpired: false, login: vi.fn(), logout: vi.fn(),
   }
   const { container } = render(<QueryClientProvider client={new QueryClient()}>
     <AuthContext.Provider value={context}>

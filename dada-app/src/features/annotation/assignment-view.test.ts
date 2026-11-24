@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { submissionKey } from './annotation-api'
-import { filterAssignments, finalDocument, isEditable, neighbor, openWork, validateDocument } from './assignment-view'
+import { ApiError } from '../../api/client'
+import { assistError, filterAssignments, finalDocument, isEditable, neighbor, openWork, targetPrompt, validateDocument } from './assignment-view'
 import type { AnnotationDocument, AssignmentDetail, AssignmentQueueItem } from './types'
 
 function item(id: string, overrides: Partial<AssignmentQueueItem> = {}): AssignmentQueueItem {
@@ -119,5 +120,21 @@ describe('final annotation view', () => {
 
     expect(finalDocument(resolved)).toEqual({ media_id: 'media-1', task_type: 'detection', version: 3, objects: [final] })
     expect(openWork(resolved, null)).toMatchObject({ document: { objects: [box] }, notice: 'Submission received. This image is resolved and read-only.' })
+  })
+})
+
+describe('assisted segmentation helpers (A7-03)', () => {
+  it('asks about an object target with the bounds of its proposed geometry', () => {
+    expect(targetPrompt({ geometry: { type: 'rectangle', coordinates: [10, 20, 30, 40] }, region: [0, 0, 60, 80] }))
+      .toEqual({ type: 'box', coordinates: [10, 20, 30, 40] })
+    expect(targetPrompt({ geometry: { type: 'polygon', coordinates: [[10, 20, 50, 20, 30, 70]] }, region: [0, 0, 60, 80] }))
+      .toEqual({ type: 'box', coordinates: [10, 20, 40, 50] })
+  })
+
+  it('explains each failure and always says the draft is unchanged when it could have been touched', () => {
+    expect(assistError(new ApiError('x', 409, 'assistance_unavailable', undefined, { reason: 'no_target_model' })))
+      .toBe('Assistance is not available yet: this project has no trained target model.')
+    expect(assistError(new ApiError('x', 503, 'assistance_timeout'))).toBe('The model did not answer in time. Your draft is unchanged.')
+    expect(assistError(new TypeError('Failed to fetch'))).toBe('Assistance needs a connection to the API. Your draft is unchanged.')
   })
 })

@@ -104,7 +104,7 @@ function ProjectCard({ project }: { project: Project }) {
         <Link className="project-card__action" to={`/projects/${project.id}/settings`}>
           <Settings size={16} aria-hidden="true" /> Annotation settings
         </Link>
-        {(project.status === 'training' || project.status === 'completed' || project.status === 'failed') && (
+        {((project.status === 'active' && project.dataset_layout === 'split') || project.status === 'training' || project.status === 'completed' || project.status === 'failed') && (
           <Link className="project-card__action" to={`/projects/${project.id}/activity`}>
             <Activity size={16} aria-hidden="true" /> View iteration activity
           </Link>

@@ -6,6 +6,8 @@ export type AuthContextValue = {
   user: User | null
   token: string | null
   isLoading: boolean
+  /** True after a request was refused because the session ended, until the next login. */
+  sessionExpired: boolean
   login: (credentials: LoginRequest) => Promise<void>
   logout: () => void
 }

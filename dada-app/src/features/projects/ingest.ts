@@ -1,10 +1,40 @@
-export const SUPPORTED_IMAGE_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-])
+/** One image format the App can select: its MIME type, file extensions, and display name. */
+export type ImageFormat = { mediaType: string; extensions: string[]; label: string }
 
-const SUPPORTED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
+/**
+ * Every format the App knows (P7-06). The API's `supported_image_media_types`
+ * decides which of them are offered; HEIC and HEIF are uploaded as they are
+ * and shown through the API's lossless WebP copy.
+ */
+export const IMAGE_FORMATS: ImageFormat[] = [
+  { mediaType: 'image/jpeg', extensions: ['jpg', 'jpeg'], label: 'JPEG' },
+  { mediaType: 'image/png', extensions: ['png'], label: 'PNG' },
+  { mediaType: 'image/webp', extensions: ['webp'], label: 'WebP' },
+  { mediaType: 'image/heic', extensions: ['heic'], label: 'HEIC' },
+  { mediaType: 'image/heif', extensions: ['heif'], label: 'HEIF' },
+]
+
+/** The known formats the API accepts; every known format until its capabilities arrive. */
+export function supportedFormats(mediaTypes?: string[]) {
+  if (!mediaTypes) return IMAGE_FORMATS
+  const accepted = new Set(mediaTypes.map((type) => type.toLowerCase()))
+  return IMAGE_FORMATS.filter((format) => accepted.has(format.mediaType))
+}
+
+/** The `accept` value of a file input: MIME types first, then extensions, for files without a type. */
+export function acceptValue(formats: ImageFormat[]) {
+  return [
+    ...formats.map((format) => format.mediaType),
+    ...formats.flatMap((format) => format.extensions.map((extension) => `.${extension}`)),
+  ].join(',')
+}
+
+/** The formats as a readable list, such as `JPEG, PNG, and WebP`. */
+export function formatList(formats: ImageFormat[]) {
+  const labels = formats.map((format) => format.label)
+  if (labels.length < 3) return labels.join(' and ')
+  return `${labels.slice(0, -1).join(', ')}, and ${labels.at(-1)}`
+}
 
 export type LocalImage = {
   clientFileId: string
@@ -46,7 +76,7 @@ export function selectedRelativePaths(files: Iterable<File>) {
   }))
 }
 
-export function scanImageFiles(files: Iterable<File>): ScanResult {
+export function scanImageFiles(files: Iterable<File>, formats: ImageFormat[] = IMAGE_FORMATS): ScanResult {
   const images: LocalImage[] = []
   const rejected: RejectedLocalFile[] = []
   let totalBytes = 0
@@ -66,7 +96,8 @@ export function scanImageFiles(files: Iterable<File>): ScanResult {
       rejected.push({ relativePath, reason: 'empty' })
       continue
     }
-    if (!isSupportedImage(file)) {
+    const mediaType = imageMediaType(file, formats)
+    if (!mediaType) {
       rejected.push({ relativePath, reason: 'unsupported' })
       continue
     }
@@ -77,7 +108,7 @@ export function scanImageFiles(files: Iterable<File>): ScanResult {
       relativePath,
       selectionRoot: selectedRoot,
       pathInSelection: relativePath,
-      mediaType: inferMediaType(file),
+      mediaType,
       sizeBytes: file.size,
     })
     totalBytes += file.size
@@ -151,18 +182,12 @@ function commonSelectedRoot(paths: string[]) {
   return root && paths.every((path) => path.split('/')[0] === root) ? root : null
 }
 
-function isSupportedImage(file: File) {
-  if (SUPPORTED_IMAGE_TYPES.has(file.type.toLowerCase())) return true
-  const extension = file.name.split('.').pop()?.toLowerCase()
-  return extension ? SUPPORTED_EXTENSIONS.has(extension) : false
-}
-
-function inferMediaType(file: File) {
-  if (SUPPORTED_IMAGE_TYPES.has(file.type.toLowerCase())) return file.type.toLowerCase()
-  const extension = file.name.split('.').pop()?.toLowerCase()
-  if (extension === 'png') return 'image/png'
-  if (extension === 'webp') return 'image/webp'
-  return 'image/jpeg'
+/** The file's media type when it is a selectable format: its own type, or the one of its extension. */
+export function imageMediaType(file: File, formats: ImageFormat[]) {
+  const type = file.type.toLowerCase()
+  if (formats.some((format) => format.mediaType === type)) return type
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  return formats.find((format) => format.extensions.includes(extension))?.mediaType ?? null
 }
 
 function toHex(buffer: ArrayBuffer) {

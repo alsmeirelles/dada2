@@ -12,11 +12,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
-import { getCapabilities, type PipelineCapability } from '../../api/capabilities'
+import { getCapabilities, type Capabilities, type PipelineCapability } from '../../api/capabilities'
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
 import { DatasetPreparationPanel } from './DatasetPreparationPanel'
+import { LearningSettingsForm } from './LearningSettingsForm'
+import { defaultLearning, iterationLimitProblem, learningProblem, learningSummary } from './learning-settings'
 import {
   createProjectWithDataset,
   deleteProject,
@@ -30,10 +32,13 @@ import { configurationIsValid, defaultConfiguration, summarizeSettings } from '.
 import { resolverLabel } from './resolver-label'
 import { clearSetup, loadSetup } from './setup-recovery'
 import {
+  acceptValue,
   findDuplicateGroups,
+  formatList,
   hashImages,
   mergeSelections,
   scanImageFiles,
+  supportedFormats,
   type LocalImage,
   type RejectedLocalFile,
 } from './ingest'
@@ -47,7 +52,6 @@ const taskOptions: Array<{ value: TaskType; title: string; description: string }
   { value: 'segmentation', title: 'Segmentation', description: 'Trace precise object polygons and masks.' },
 ]
 const defaultColors = ['#6558D3', '#E5484D', '#16A085', '#E67E22', '#2980B9']
-const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp'
 const RANDOM_ACQUISITION = 'Randomly selected from the remaining eligible training images.'
 
 const initialDraft: ProjectDraft = {
@@ -61,6 +65,8 @@ const initialDraft: ProjectDraft = {
   validationSetSize: 10,
   validationSetUnit: 'percentage',
   iterationBatchSize: 20,
+  maxAcquisitionIterations: 10,
+  learning: null,
   collaborators: [],
   annotationPolicy: { mode: 'single' },
 }
@@ -90,6 +96,7 @@ export function NewProjectPage() {
     staleTime: Infinity,
   })
   const pipeline = capabilities.data?.consensus_pipelines[draft.taskType]
+  const formats = supportedFormats(capabilities.data?.supported_image_media_types)
   const users = useQuery({
     queryKey: ['eligible-annotators'],
     queryFn: () => listEligibleAnnotators(token!),
@@ -103,7 +110,7 @@ export function NewProjectPage() {
     ...draft.collaborators,
   ])]
 
-  const validationError = validateStep(step, draft, images, pipeline)
+  const validationError = validateStep(step, draft, images, pipeline, capabilities.data)
 
   useEffect(() => {
     if (!pipeline || draft.annotationPolicy.mode !== 'consensus' || draft.annotationPolicy.resolver === pipeline.id) return
@@ -111,6 +118,12 @@ export function NewProjectPage() {
       ? { ...current, annotationPolicy: { ...current.annotationPolicy, resolver: pipeline.id, configuration: defaultConfiguration(current.taskType, pipeline) } }
       : current)
   }, [draft.annotationPolicy, pipeline])
+
+  useEffect(() => {
+    if (draft.acquisitionStrategy !== 'active_learning' || draft.learning || !capabilities.data) return
+    const catalog = capabilities.data
+    setDraft((current) => ({ ...current, learning: defaultLearning(catalog, current.taskType) }))
+  }, [capabilities.data, draft.acquisitionStrategy, draft.learning])
 
   function updateDraft(patch: Partial<ProjectDraft>) {
     setDraft((current) => ({ ...current, ...patch }))
@@ -145,7 +158,7 @@ export function NewProjectPage() {
     event.currentTarget.value = ''
     if (!files.length) return
     setError(null)
-    const scan = scanImageFiles(files)
+    const scan = scanImageFiles(files, formats)
     setHashProgress(0)
     try {
       const hashed = await hashImages(scan.images, (done, total) => {
@@ -167,7 +180,7 @@ export function NewProjectPage() {
   }
 
   async function submit() {
-    if (!token || validateAll(draft, images, pipeline)) return
+    if (!token || validateAll(draft, images, pipeline, capabilities.data)) return
     setIsSubmitting(true)
     setError(null)
     const before = loadSetup()?.projectId
@@ -242,7 +255,7 @@ export function NewProjectPage() {
             <fieldset className="task-picker"><legend>Annotation task</legend>
               {taskOptions.map((task) => (
                 <label aria-label={task.title} htmlFor={`task-${task.value}`} key={task.value} className={draft.taskType === task.value ? 'task-option selected' : 'task-option'}>
-                  <input id={`task-${task.value}`} type="radio" name="task" value={task.value} checked={draft.taskType === task.value} onChange={() => updateDraft({ taskType: task.value })} />
+                  <input id={`task-${task.value}`} type="radio" name="task" value={task.value} checked={draft.taskType === task.value} onChange={() => updateDraft({ taskType: task.value, learning: null })} />
                   <span><strong>{task.title}</strong><small>{task.description}</small></span>
                 </label>
               ))}
@@ -273,12 +286,12 @@ export function NewProjectPage() {
             <div><p className="eyebrow">Step 3</p><h2 id="step-2-title">Acquisition, layout, and sizes</h2><p className="muted">The acquisition strategy only decides how later training batches are chosen. It never changes the fixed validation and test sets or the initial annotation batches.</p></div>
             <fieldset className="task-picker"><legend>Acquisition strategy</legend>
               <label aria-label="Random acquisition" htmlFor="acquisition-random" className={draft.acquisitionStrategy === 'random' ? 'task-option selected' : 'task-option'}>
-                <input id="acquisition-random" type="radio" name="acquisition-strategy" checked={draft.acquisitionStrategy === 'random'} onChange={() => updateDraft({ acquisitionStrategy: 'random' })} />
+                <input id="acquisition-random" type="radio" name="acquisition-strategy" checked={draft.acquisitionStrategy === 'random'} onChange={() => updateDraft({ acquisitionStrategy: 'random', learning: null })} />
                 <span><strong>Random acquisition</strong><small>{RANDOM_ACQUISITION}</small></span>
               </label>
               <label aria-label="Active learning" htmlFor="acquisition-active-learning" className={draft.acquisitionStrategy === 'active_learning' ? 'task-option selected' : 'task-option'}>
                 <input id="acquisition-active-learning" type="radio" name="acquisition-strategy" checked={draft.acquisitionStrategy === 'active_learning'} onChange={() => updateDraft({ acquisitionStrategy: 'active_learning', datasetLayout: 'split' })} />
-                <span><strong>Active learning</strong><small>A learning model chooses later training batches once the learning adapter is available.</small></span>
+                <span><strong>Active learning</strong><small>The selected solution trains on the accepted annotations and chooses which images or objects to annotate next.</small></span>
               </label>
             </fieldset>
             <fieldset className="task-picker"><legend>Dataset layout</legend>
@@ -297,7 +310,11 @@ export function NewProjectPage() {
                 <SplitSizeField label="Test set" help="Fixed when the dataset is prepared and held out from acquisition." value={draft.testSetSize} unit={draft.testSetUnit} onValueChange={(value) => updateDraft({ testSetSize: value })} onUnitChange={(unit) => updateDraft({ testSetUnit: unit })} />
                 <NumberField label="Images per iteration" help="Size of each later acquisition batch." value={draft.iterationBatchSize} onChange={(value) => updateDraft({ iterationBatchSize: value })} />
                 <OptionalNumberField label="First training batch" help={`Optional. Leave empty to use the images-per-iteration size (${draft.iterationBatchSize}).`} value={draft.initialTrainingSize} onChange={(value) => updateDraft({ initialTrainingSize: value })} />
+                <NumberField label="Maximum acquisition iterations" help="The loop stops after this many acquisition batches, or earlier when the training pool runs out." value={draft.maxAcquisitionIterations} onChange={(value) => updateDraft({ maxAcquisitionIterations: value })} />
               </div>
+              {draft.acquisitionStrategy === 'active_learning' && (draft.learning && capabilities.data
+                ? <LearningSettingsForm taskType={draft.taskType} capabilities={capabilities.data} value={draft.learning} onChange={(learning) => updateDraft({ learning })} />
+                : <p className="notice">{capabilities.isError ? 'The active-learning catalog could not be loaded from the API. Reload the page to try again.' : 'Loading the active-learning catalog from the API…'}</p>)}
               <p className="notice">Preparation annotates every validation and test image plus the first training batch. The other training images stay in the unlabeled pool until acquisition, which starts only after every initial image has an accepted resolution. Validation and test images are never eligible, and a final batch may be smaller than the images-per-iteration size.</p>
             </> : <p className="notice">Single or consensus annotation still applies. The project closes when its one batch is resolved.</p>}
           </div>
@@ -358,12 +375,12 @@ export function NewProjectPage() {
         {step === 4 && (
           <div className="wizard-section">
             <div><p className="eyebrow">Step 5</p><h2 id="step-4-title">Select images</h2><p className="muted">Add one or more folders, or individual files. Subfolders are scanned recursively. Relative paths are preserved; the local root path is never uploaded.</p></div>
-            <input ref={(node) => { folderInputRef.current = node; node?.setAttribute('webkitdirectory', '') }} className="sr-only" type="file" multiple accept={IMAGE_ACCEPT} onChange={handleFiles} aria-label="Image folder" />
-            <input ref={filesInputRef} className="sr-only" type="file" multiple accept={IMAGE_ACCEPT} onChange={handleFiles} aria-label="Image files" />
+            <input ref={(node) => { folderInputRef.current = node; node?.setAttribute('webkitdirectory', '') }} className="sr-only" type="file" multiple accept={acceptValue(formats)} onChange={handleFiles} aria-label="Image folder" />
+            <input ref={filesInputRef} className="sr-only" type="file" multiple accept={acceptValue(formats)} onChange={handleFiles} aria-label="Image files" />
             <button className="folder-drop" type="button" onClick={() => folderInputRef.current?.click()} disabled={hashProgress !== null}>
               <FolderUp size={34} aria-hidden="true" />
               <strong>{images.length ? 'Add another folder' : 'Choose a folder'}</strong>
-              <span>JPEG, PNG, and WebP · nested folders included</span>
+              <span>{formatList(formats)} · nested folders included</span>
             </button>
             <div className="selection-actions">
               <Button variant="secondary" onClick={() => filesInputRef.current?.click()} disabled={hashProgress !== null}><Plus size={17} /> {images.length ? 'Add more files' : 'Choose files'}</Button>
@@ -393,7 +410,8 @@ export function NewProjectPage() {
               {draft.datasetLayout === 'split' ? <>
                 <ReviewItem label="Validation / test / first training" value={splitSummary(draft, images.length)} detail="fixed when the dataset is prepared" />
                 <ReviewItem label="Unlabeled training pool" value={`${trainingPoolSize(draft, images.length)} images`} detail={`later batches of ${draft.iterationBatchSize}`} />
-                <ReviewItem label="Acquisition" value={draft.acquisitionStrategy === 'random' ? 'Random acquisition' : 'Active learning'} detail={draft.acquisitionStrategy === 'random' ? 'Randomly selected from the eligible unlabeled training pool after the preceding image batch has an accepted canonical resolution' : 'Chosen by the learning adapter once it is available'} />
+                <ReviewItem label="Acquisition" value={draft.acquisitionStrategy === 'random' ? 'Random acquisition' : 'Active learning'} detail={draft.acquisitionStrategy === 'random' || !draft.learning ? 'Randomly selected from the eligible unlabeled training pool after the preceding image batch has an accepted canonical resolution' : learningSummary(draft.learning, capabilities.data)} />
+                <ReviewItem label="Iteration limit" value={`${draft.maxAcquisitionIterations} acquisition iteration${draft.maxAcquisitionIterations === 1 ? '' : 's'}`} detail={draft.acquisitionStrategy === 'active_learning' && draft.learning?.target != null ? 'or earlier, at the metric target or when the training pool runs out' : 'or earlier, when the training pool runs out'} />
               </> : <ReviewItem label="Dataset layout" value="One static batch" detail="every image annotated once; random acquisition, no later batches" />}
               <ReviewItem label="Strategy" value={draft.annotationPolicy.mode === 'single' ? 'Single annotation' : 'Consensus'} detail={strategySummary(draft, images.length)} />
               {draft.annotationPolicy.mode === 'consensus' && <>
@@ -420,7 +438,7 @@ export function NewProjectPage() {
           {step < PREPARE_STEP - 1 ? (
             <Button onClick={() => setStep((current) => current + 1)} disabled={Boolean(validationError) || hashProgress !== null}>Continue <ArrowRight size={17} /></Button>
           ) : (
-            <Button onClick={submit} disabled={Boolean(validateAll(draft, images, pipeline)) || isSubmitting}>{isSubmitting ? 'Creating…' : 'Create and prepare'} <Check size={17} /></Button>
+            <Button onClick={submit} disabled={Boolean(validateAll(draft, images, pipeline, capabilities.data)) || isSubmitting}>{isSubmitting ? 'Creating…' : 'Create and prepare'} <Check size={17} /></Button>
           )}
         </footer>}
       </section>
@@ -463,7 +481,7 @@ function settingsLine(settings: Record<string, unknown>) {
   return summarizeSettings(settings).map((line) => `${line.label}: ${line.value}`).join(' · ')
 }
 
-function validateStep(step: number, draft: ProjectDraft, images: LocalImage[], pipeline: PipelineCapability | undefined) {
+function validateStep(step: number, draft: ProjectDraft, images: LocalImage[], pipeline: PipelineCapability | undefined, capabilities: Capabilities | undefined) {
   if (step === 0 && draft.name.trim().length < 3) return 'Use at least 3 characters for the project name.'
   if (step === 1) {
     if (draft.classes.some((item) => !item.name.trim())) return 'Every class needs a name.'
@@ -477,6 +495,12 @@ function validateStep(step: number, draft: ProjectDraft, images: LocalImage[], p
       if (value <= 0 || (unit === 'count' && !Number.isInteger(value)) || (unit === 'percentage' && value >= 100)) return 'Validation and test sizes must be positive whole-image counts or percentages below 100.'
     }
     if (minimumDatasetSize(draft) === null) return 'Together, the validation and test percentages must stay below 100% to leave room for training images.'
+    const limit = iterationLimitProblem(draft.maxAcquisitionIterations)
+    if (limit) return limit
+    if (draft.acquisitionStrategy === 'active_learning') {
+      const learning = learningProblem(draft.learning, capabilities, draft.taskType)
+      if (learning) return learning
+    }
   }
   if (step === 3 && draft.annotationPolicy.mode === 'consensus') {
     if (!Number.isInteger(draft.annotationPolicy.requiredAnnotations) || draft.annotationPolicy.requiredAnnotations < 2) return 'Initial consensus annotations must be a whole number of at least two.'
@@ -534,9 +558,9 @@ function trainingPoolSize(draft: ProjectDraft, totalMedia: number) {
   return Math.max(0, totalMedia - validation - test - firstTraining)
 }
 
-function validateAll(draft: ProjectDraft, images: LocalImage[], pipeline: PipelineCapability | undefined) {
+function validateAll(draft: ProjectDraft, images: LocalImage[], pipeline: PipelineCapability | undefined, capabilities: Capabilities | undefined) {
   for (const candidate of [0, 1, 2, 3, 4]) {
-    const error = validateStep(candidate, draft, images, pipeline)
+    const error = validateStep(candidate, draft, images, pipeline, capabilities)
     if (error) return error
   }
   return ''

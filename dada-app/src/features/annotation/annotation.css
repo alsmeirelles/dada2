@@ -43,7 +43,7 @@
 .annotation-toolbar button:hover:not(:disabled), .annotation-toolbar button.active { color: white; border-color: #4a435f; background: #38344a; }
 .annotation-toolbar button:disabled { opacity: .4; cursor: not-allowed; }
 .tool-divider { width: 1px; height: 25px; margin: 0 .35rem; background: #3c414b; }
-.image-stage { min-width: 0; min-height: 0; position: relative; overflow: hidden; touch-action: none; user-select: none; background-color: #111318; background-image: linear-gradient(45deg, #161920 25%, transparent 25%), linear-gradient(-45deg, #161920 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #161920 75%), linear-gradient(-45deg, transparent 75%, #161920 75%); background-size: 24px 24px; background-position: 0 0, 0 12px, 12px -12px, -12px 0; }
+.image-stage { min-width: 0; min-height: 0; position: relative; overflow: hidden; overflow: clip; touch-action: none; user-select: none; background-color: #111318; background-image: linear-gradient(45deg, #161920 25%, transparent 25%), linear-gradient(-45deg, #161920 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #161920 75%), linear-gradient(-45deg, transparent 75%, #161920 75%); background-size: 24px 24px; background-position: 0 0, 0 12px, 12px -12px, -12px 0; }
 .image-stage--pan { cursor: grab; }
 .image-stage--dragging { cursor: grabbing; }
 .image-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; box-shadow: 0 8px 30px rgb(0 0 0 / 35%); }
@@ -51,7 +51,13 @@
 .annotation-overlay { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: auto; }
 .annotation-overlay--box { cursor: crosshair; }
 .annotation-overlay--polygon { cursor: crosshair; }
-.annotation-overlay--sam-point { cursor: cell; }
+.annotation-overlay--assist { cursor: cell; }
+.target-shade { fill: rgb(17 19 24 / 45%); pointer-events: none; }
+.target-region { fill: none; stroke: #fcd34d; stroke-width: 2; stroke-dasharray: 8 6; vector-effect: non-scaling-stroke; pointer-events: none; }
+.target-cue { fill: none; stroke: #fbbf24; stroke-width: 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.assist-suggestion { fill: rgb(167 139 250 / 22%); stroke: #c4b5fd; stroke-width: 3; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+.assist-draft { color: #c4b5fd; }
+.target-hint { grid-column: 1 / -1; padding: .55rem; border: 1px solid #5d522f; border-radius: 6px; color: #fcdca4; background: #2c2618; }
 .annotation-shape { fill: color-mix(in srgb, currentColor 18%, transparent); stroke: currentColor; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; }
 .annotation-shape:hover, .annotation-shape.selected { fill: color-mix(in srgb, currentColor 30%, transparent); stroke-width: 3; }
 .annotation-shape.selected { stroke-dasharray: 7 4; }
@@ -76,6 +82,9 @@ polyline.shape-draft { fill: none; }
 .workspace-notice { position: absolute; left: 50%; bottom: 58px; max-width: min(620px, calc(100% - 2rem)); transform: translateX(-50%); padding: .7rem .8rem; border: 1px solid #5d522f; border-radius: 8px; display: flex; align-items: center; gap: .55rem; color: #fcdca4; background: #3c321e; box-shadow: 0 10px 30px rgb(0 0 0 / 30%); z-index: 6; font-size: .75rem; }
 .workspace-notice button { margin-left: auto; border: 0; color: #fcdca4; background: transparent; cursor: pointer; text-decoration: underline; }
 .workspace-notice--conflict button + button { margin-left: .4rem; }
+.assist-preview { position: absolute; left: 50%; top: 58px; max-width: min(620px, calc(100% - 2rem)); transform: translateX(-50%); padding: .7rem .8rem; border: 1px solid #514985; border-radius: 8px; display: flex; align-items: center; gap: .55rem; color: #ddd8ff; background: #302b4b; box-shadow: 0 10px 30px rgb(0 0 0 / 30%); z-index: 6; font-size: .75rem; }
+.assist-preview button { border: 1px solid #6d62b5; border-radius: 6px; padding: .3rem .6rem; color: #ddd8ff; background: transparent; cursor: pointer; white-space: nowrap; }
+.assist-preview button:first-of-type { margin-left: auto; color: #1f1b35; background: #c4b5fd; }
 
 .class-panel { grid-row: 2; min-width: 0; border-left: 1px solid #30343d; background: #20242c; outline: 0; display: grid; grid-template-rows: auto auto 1fr; }
 .class-panel__heading { min-height: 54px; padding: .7rem .65rem .7rem .85rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30343d; }

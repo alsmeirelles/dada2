@@ -1,9 +1,11 @@
 """Phase 7 acquisition loop: settings, random and active-learning iterations,
-worker attempts, retries, stale results, stopping, object targets, and
-assisted annotation, over real HTTP."""
+worker attempts, retries, stale results, stopping, object targets, assisted
+annotation, and the dataset export, over real HTTP."""
 
+import io
 import json
 import os
+import zipfile
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
@@ -463,6 +465,159 @@ async def test_random_acquisition_opens_iterations_until_the_pool_runs_out(
     assert {splits[media_id] for media_id in chosen} == {"train"}
     assert len(events) == 5
     assert all(event.published_at is not None for event in events)
+
+
+def _archive(content: bytes) -> dict[str, object]:
+    """Read an exported ZIP: JSON as data, text as strings, images as bytes."""
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        assert archive.testzip() is None
+        files: dict[str, object] = {}
+        for name in archive.namelist():
+            data = archive.read(name)
+            if name.endswith(".json"):
+                files[name] = json.loads(data)
+            elif name.startswith("images/"):
+                files[name] = data
+            else:
+                files[name] = data.decode()
+        return files
+
+
+async def test_an_export_holds_only_accepted_resolutions(database: None) -> None:
+    token = await _user("owner")
+    annotator = await _user("annie")
+    async with _client() as client:
+        project = await _project(client, token, DRAFT)
+        box = {
+            "id": "bottle-1",
+            "class_id": project["class_id"],
+            "geometry": {"type": "rectangle", "coordinates": [10.0, 20.0, 30.0, 40.0]},
+            "attributes": {},
+        }
+        await _annotate_everything(client, token, project["id"], [box])
+        await _relay()
+        joined = await client.post(
+            f"/api/v1/projects/{project['id']}/members",
+            headers=_auth(token),
+            json={"username": "annie", "role": "annotator"},
+        )
+        assert joined.status_code == 201, joined.text
+        base = f"/api/v1/projects/{project['id']}/export"
+        coco = await client.get(base, headers=_auth(token))
+        yolo = await client.get(base, params={"format": "yolo"}, headers=_auth(token))
+        wrong = await client.get(base, params={"format": "csv"}, headers=_auth(token))
+        forbidden = await client.get(base, headers=_auth(annotator))
+
+    assert coco.status_code == 200, coco.text
+    assert coco.headers["content-type"] == "application/zip"
+    assert coco.headers["content-disposition"] == 'attachment; filename="Belt-coco.zip"'
+    assert wrong.status_code == 422
+    assert wrong.json()["error"]["code"] == "export_format_not_supported"
+    assert forbidden.status_code == 403
+
+    async with async_session_factory() as session:
+        resolutions = {
+            resolution.id: resolution.version
+            for resolution in await session.scalars(select(ResolvedAnnotation))
+        }
+        selected = set(
+            await session.scalars(
+                select(BatchItem.media_id)
+                .join(AnnotationBatch, AnnotationBatch.id == BatchItem.batch_id)
+                .where(AnnotationBatch.purpose == "acquisition")
+            )
+        )
+    assert len(resolutions) == 4 and len(selected) == 2
+
+    files = _archive(coco.content)
+    images = sorted(name for name in files if name.startswith("images/"))
+    assert [name.split("/")[1] for name in images] == ["test", "train", "train", "val"]
+    train = files["annotations/train.json"]
+    assert [image["file_name"] for image in train["images"]] == [
+        name.removeprefix("images/train/") for name in images if "/train/" in name
+    ]
+    assert train["categories"] == [{"id": 0, "name": "bottle"}]
+    for annotation in train["annotations"]:
+        assert annotation["bbox"] == [10.0, 20.0, 30.0, 40.0]
+        assert annotation["area"] == 1200.0
+        assert annotation["category_id"] == 0
+        assert (
+            resolutions[annotation["resolution_id"]] == annotation["resolution_version"]
+        )
+    provenance = files["provenance.json"]
+    assert provenance["schema"] == "dada-export/1"
+    assert set(provenance["splits"]) == {"train", "val", "test"}
+    recorded = {
+        entry["resolution_id"]: entry["resolution_version"]
+        for split in provenance["splits"].values()
+        for image in split
+        for entry in image["resolutions"]
+    }
+    assert recorded == resolutions
+    exported = {
+        image["media_id"] for split in provenance["splits"].values() for image in split
+    }
+    assert len(exported) == 4
+    assert not exported & selected
+    for split in provenance["splits"].values():
+        for image in split:
+            assert image["annotation_status"] == "EXHAUSTIVELY_LABELED"
+            assert image["rendition"] == "source"
+            assert (
+                files[image["file"]]
+                == (
+                    get_settings().media_root
+                    / f"{project['id']}/{image['source_sha256'][:2]}"
+                    f"/{image['source_sha256'][2:4]}/{image['source_sha256']}"
+                ).read_bytes()
+            )
+
+    labels = _archive(yolo.content)
+    assert labels["data.yaml"] == (
+        "path: .\ntrain: images/train\nval: images/val\ntest: images/test\n"
+        'names:\n  0: "bottle"\n'
+    )
+    label_files = sorted(name for name in labels if name.startswith("labels/"))
+    assert [name.split("/")[1] for name in label_files] == [
+        "test",
+        "train",
+        "train",
+        "val",
+    ]
+    for name in label_files:
+        assert labels[name] == "0 0.039062 0.083333 0.046875 0.083333\n"
+
+
+async def test_a_classification_export_is_a_table_of_classes(database: None) -> None:
+    token = await _user("owner")
+    async with _client() as client:
+        project = await _project(
+            client, token, {**DRAFT, "task_type": "classification"}
+        )
+        label = {
+            "id": "label",
+            "class_id": project["class_id"],
+            "geometry": None,
+            "attributes": {},
+        }
+        await _annotate_everything(client, token, project["id"], [label])
+        exported = await client.get(
+            f"/api/v1/projects/{project['id']}/export", headers=_auth(token)
+        )
+        coco = await client.get(
+            f"/api/v1/projects/{project['id']}/export",
+            params={"format": "coco"},
+            headers=_auth(token),
+        )
+
+    assert exported.status_code == 200, exported.text
+    files = _archive(exported.content)
+    rows = files["annotations/train.csv"].splitlines()
+    assert rows[0] == "path,bottle"
+    assert len(rows) == 3
+    assert all(row.startswith("images/train/belt/frame-") for row in rows[1:])
+    assert all(row.endswith(",1") for row in rows[1:])
+    assert coco.status_code == 422
 
 
 async def test_random_acquisition_stops_at_the_iteration_limit(database: None) -> None:
@@ -991,6 +1146,23 @@ async def test_object_targets_are_answered_one_object_at_a_time(
         image["queried_rois"] for image in partial
     ]
     assert [annotation["roi_id"] for annotation in pool["annotations"]] == [items[0].id]
+
+    async with _client() as client:
+        exported = await client.get(
+            f"/api/v1/projects/{project['id']}/export", headers=_auth(token)
+        )
+    assert exported.status_code == 200, exported.text
+    provenance = _archive(exported.content)["provenance.json"]
+    partial_export = {
+        image["media_id"]: image
+        for image in provenance["splits"]["train"]
+        if image["annotation_status"] == "PARTIALLY_LABELED"
+    }
+    assert set(partial_export) == set(by_item)
+    assert partial_export[items[0].media_id]["queried_rois"] == [rois[items[0].id]]
+    [answer] = partial_export[items[0].media_id]["resolutions"]
+    assert answer["origin"] == "AL_OBJECT_QUERY"
+    assert answer["roi_id"] == items[0].id
 
 
 class Targets(DeterministicAdapter):

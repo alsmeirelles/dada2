@@ -14,6 +14,7 @@ from dada_api.api.v1.endpoints import (
     iterations,
     label_imports,
     media,
+    outputs,
     project_classes,
     project_members,
     projects,
@@ -36,6 +37,7 @@ router.include_router(assignments.router, tags=["assignments"])
 router.include_router(review_assignments.router, tags=["review-assignments"])
 router.include_router(resolutions.router, tags=["resolutions"])
 router.include_router(iterations.router, tags=["iterations"])
+router.include_router(outputs.router, tags=["outputs"])
 router.include_router(uploads.router, tags=["uploads"])
 router.include_router(media.router, tags=["media"])
 router.include_router(users.router, tags=["users"])

@@ -235,7 +235,6 @@ function CandidateStage({ detail, taskType, classes, draft, region, writable, pa
       selectedClassId={draft.class_id ?? null}
       selectedObjectId={null}
       locked={!writable}
-      samPending={false}
       onChange={(next) => {
         const drawn = next.objects.at(-1)
         if (!drawn?.geometry) return
@@ -243,7 +242,6 @@ function CandidateStage({ detail, taskType, classes, draft, region, writable, pa
         onChange({ ...draft, decision: 'object', class_id: drawn.class_id, geometry: drawn.geometry })
       }}
       onSelectObject={() => undefined}
-      onSamPoint={() => undefined}
       onNotice={onNotice}
       overlay={region && <RegionOverlay region={region} width={detail.media.width} height={detail.media.height} />}
     />

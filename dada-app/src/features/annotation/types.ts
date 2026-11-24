@@ -1,24 +1,60 @@
-import type { BatchPurpose, Project, ProjectClassInput, TaskType } from '../projects/types'
+import type { EvaluationMetric } from '../../api/capabilities'
+import type {
+  AcquisitionStrategy,
+  BatchPurpose,
+  CompletionReason,
+  Project,
+  ProjectClassInput,
+  TaskType,
+} from '../projects/types'
 
-export type IterationStatus = 'preparing' | 'annotating' | 'consolidating' | 'closing' | 'training' | 'ready' | 'failed'
+/**
+ * Iteration n is run n plus batch n (D6): `training` while the run is queued or
+ * working, then the batch's state; `ready` once its images are resolved.
+ */
+export type IterationStatus = 'training' | 'preparing' | 'annotating' | 'consolidating' | 'ready' | 'failed'
+export type IterationStage = 'training' | 'evaluating' | 'selecting'
+
+/** One target-model evaluation, on validation during the loop and on test at its end. */
+export type Evaluation = {
+  iteration: number
+  split: 'validation' | 'test'
+  metric: EvaluationMetric
+  value: number
+  metrics: Record<string, number>
+  model: Record<string, unknown>
+  created_at: string
+}
 
 export type Iteration = {
   id: string
   number: number
+  purpose: 'selection' | 'final_evaluation'
   status: IterationStatus
-  available_count: number
-  leased_count: number
-  completed_count: number
+  stage: IterationStage | null
+  strategy: AcquisitionStrategy
+  attempt: number
+  solution: string | null
+  solution_version: string | null
+  batch_id: string | null
+  requested_size: number
+  selected_count: number | null
+  shortfall_reason: string | null
+  stop_reason: 'metric_target' | null
+  failure_code: string | null
+  failure_detail: string | null
   total_count: number
-  submitted_assignment_count?: number
-  total_assignment_count?: number
-  resolved_count?: number
-  review_required_count?: number
-  training_progress?: number | null
-  eta_seconds?: number | null
-  started_at?: string | null
-  completed_at?: string | null
-  metrics?: Record<string, number>
+  resolved_count: number
+  review_required_count: number
+  available_count: number
+  total_assignment_count: number
+  submitted_assignment_count: number
+  /** Always null in Phase 7; shown only when the API provides it. */
+  eta_seconds: number | null
+  metrics: Record<string, number>
+  evaluations: Evaluation[]
+  started_at: string
+  completed_at: string | null
 }
 
 export type IterationList = {
@@ -43,6 +79,18 @@ export type AssignmentQueueItem = {
   version: number
   seeded_from_import: boolean
   updated_at: string
+  target?: AssignmentTarget | null
+}
+
+/**
+ * The object target an assignment answers (D16): the solution's proposed box or
+ * polygon and the context region around it, in canonical image pixels. It is a
+ * cue, never an annotation or a vote; the document holds at most that one
+ * object, and an empty document means there is none.
+ */
+export type AssignmentTarget = {
+  geometry: RectangleGeometry | PolygonGeometry
+  region: [number, number, number, number]
 }
 
 export type AssignmentQueue = {
@@ -74,6 +122,7 @@ export type AssignmentDetail = {
   submitted_at: string | null
   /** Present only once the image is resolved; it never names peers or carries votes. */
   resolution: FinalResolution | null
+  target?: AssignmentTarget | null
 }
 
 export type ResolutionSource = 'single_submission' | 'automatic_consensus' | 'expert_adjudication'
@@ -139,18 +188,26 @@ export type AnnotationDocument = {
   objects: AnnotationObject[]
 }
 
-export type AnnotationTool = 'select' | 'pan' | 'box' | 'polygon' | 'sam-point'
+export type AnnotationTool = 'select' | 'pan' | 'box' | 'polygon' | 'assist'
 
-export type SamPrompt = {
+/** A point `[x, y]` or a box `[x, y, width, height]` in canonical image pixels. */
+export type AssistPrompt = {
   type: 'point' | 'box'
   coordinates: number[]
-  label?: string
 }
 
-export type SamPrediction = {
-  image_id: string
-  polygons: Array<{ coordinates: number[][] } | number[][]>
-  embedding_cache_key?: string | null
+/**
+ * The model's answer to one prompt (A7-03): a box for detection, a polygon for
+ * segmentation, or `no_suggestion`. Nothing is saved until the annotator
+ * accepts it into the draft.
+ */
+export type AssistResult = {
+  request_id: string
+  assignment_id: string
+  status: 'suggestion' | 'no_suggestion'
+  geometry: RectangleGeometry | PolygonGeometry | null
+  score: number | null
+  model: Record<string, unknown>
 }
 
 export type WorkspaceBootstrap = {
@@ -159,19 +216,36 @@ export type WorkspaceBootstrap = {
 }
 
 export type ProjectStatistics = {
-  iterations: Array<{
-    iteration_id: string
-    iteration_number: number
-    annotated_images: number
-    metrics: Record<string, number>
-    completed_at?: string | null
-  }>
-  totals: {
-    images: number
-    annotated_images: number
-    iterations_completed: number
-  }
+  project_id: string
+  acquisition_strategy: AcquisitionStrategy
+  max_acquisition_iterations: number | null
+  completed_iterations: number
+  completion_reason: CompletionReason | null
+  evaluation_metric: EvaluationMetric | null
+  metric_target: number | null
+  evaluations: Evaluation[]
 }
+
+export type AgreementMetric = 'winner_support' | 'box_iou' | 'mask_iou' | 'mask_dice'
+
+/**
+ * Project-level quality for owners and managers (D20). Every rate and median
+ * is null until `minimum_decisions` items are resolved, and a median backed by
+ * fewer than `minimum_cell` candidates is null too. It never names anyone.
+ */
+export type QualityReport = {
+  task_type: TaskType
+  total_items: number
+  resolved_items: number
+  minimum_decisions: number
+  minimum_cell: number
+  suppressed: boolean
+  review_rate: number | null
+  resolution_rate: number | null
+  agreement: Array<{ metric: AgreementMetric; observations: number; median: number | null }>
+}
+
+export type ExportFormat = 'coco' | 'yolo' | 'csv'
 
 export type ProjectEventType =
   | 'upload.progress'

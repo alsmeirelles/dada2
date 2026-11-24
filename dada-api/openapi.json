@@ -212,6 +212,43 @@
         "title": "AdministratorPasswordReset",
         "type": "object"
       },
+      "AgreementSummary": {
+        "description": "The median first-round agreement of one consensus metric.\n\n``median`` is null when the report is suppressed or fewer than\n``minimum_cell`` candidates measured it.",
+        "properties": {
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median"
+          },
+          "metric": {
+            "enum": [
+              "winner_support",
+              "box_iou",
+              "mask_iou",
+              "mask_dice"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "observations": {
+            "title": "Observations",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "metric",
+          "observations",
+          "median"
+        ],
+        "title": "AgreementSummary",
+        "type": "object"
+      },
       "AnnotationImportCreate": {
         "description": "Create-import request naming the source format and its files.",
         "properties": {
@@ -4122,6 +4159,82 @@
           "created_at"
         ],
         "title": "ProposalView",
+        "type": "object"
+      },
+      "QualityReport": {
+        "description": "Project-level quality measures for owners and managers (D20).\n\nAn item is one image or one object target. Every rate and median is null\nuntil ``minimum_decisions`` items are resolved, and a value backed by\nfewer than ``minimum_cell`` observations is null as well. Nothing here\nnames or ranks an annotator.",
+        "properties": {
+          "agreement": {
+            "items": {
+              "$ref": "#/components/schemas/AgreementSummary"
+            },
+            "title": "Agreement",
+            "type": "array"
+          },
+          "minimum_cell": {
+            "title": "Minimum Cell",
+            "type": "integer"
+          },
+          "minimum_decisions": {
+            "title": "Minimum Decisions",
+            "type": "integer"
+          },
+          "resolution_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Rate"
+          },
+          "resolved_items": {
+            "title": "Resolved Items",
+            "type": "integer"
+          },
+          "review_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Rate"
+          },
+          "suppressed": {
+            "title": "Suppressed",
+            "type": "boolean"
+          },
+          "task_type": {
+            "enum": [
+              "classification",
+              "detection",
+              "segmentation"
+            ],
+            "title": "Task Type",
+            "type": "string"
+          },
+          "total_items": {
+            "title": "Total Items",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "task_type",
+          "total_items",
+          "resolved_items",
+          "minimum_decisions",
+          "minimum_cell",
+          "suppressed",
+          "review_rate",
+          "resolution_rate",
+          "agreement"
+        ],
+        "title": "QualityReport",
         "type": "object"
       },
       "ReadinessResponse": {
@@ -10089,6 +10202,101 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/export": {
+      "get": {
+        "description": "Download the annotated dataset as a ZIP archive (D19).\n\nIt holds only current accepted resolutions, split by training,\nvalidation, and test (or ``all`` for a static project), with the display\ncopies of the images and ``provenance.json``. Detection and segmentation\nuse ``coco`` (the default) or ``yolo``; classification uses ``csv``.\n\nArgs:\n    export_format: Label format; the task's default when omitted.\n    project: Project authorized to manage learning.\n    session: Active database session.\n\nReturns:\n    The archive, streamed while it is written.",
+        "operationId": "export_dataset_api_v1_projects__project_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coco",
+                    "yolo",
+                    "csv"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {}
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Dataset",
+        "tags": [
+          "outputs"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/iterations": {
       "get": {
         "description": "List a project's acquisition iterations, oldest first.\n\nIterations carry aggregate progress only, never peer identity or content.\n\nArgs:\n    cursor: Opaque cursor from a previous page.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    One page of iterations, the current one, and the next cursor.",
@@ -10890,6 +11098,84 @@
         "summary": "Change Member Role",
         "tags": [
           "members"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/quality": {
+      "get": {
+        "description": "Return the project's review rate, resolution rate, and agreement.\n\nArgs:\n    project: Project authorized for performance reading.\n    session: Active database session.\n\nReturns:\n    The quality report, suppressed below the minimum sample.",
+        "operationId": "read_quality_api_v1_projects__project_id__quality_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Quality",
+        "tags": [
+          "outputs"
         ]
       }
     },

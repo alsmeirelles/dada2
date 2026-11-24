@@ -28,7 +28,7 @@ describe('UsersPage', () => {
     const context: AuthContextValue = {
       user: { ...created, id: 'admin-1', username: 'admin', is_administrator: true },
       token: 'token',
-      isLoading: false,
+      isLoading: false, sessionExpired: false,
       login: vi.fn(),
       logout: vi.fn(),
     }

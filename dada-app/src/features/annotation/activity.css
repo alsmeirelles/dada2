@@ -8,12 +8,13 @@
 .activity-hero--complete { grid-template-columns: auto 1fr; color: #d1fadf; background: linear-gradient(135deg, #173c2e, #246b50); }
 .activity-hero__icon { width: 58px; height: 58px; border-radius: 14px; display: grid; place-items: center; background: rgb(255 255 255 / 10%); }
 .activity-hero__icon svg { width: 28px; height: 28px; }
-.activity-hero--training .activity-hero__icon svg, .activity-hero--preparing .activity-hero__icon svg, .activity-hero--closing .activity-hero__icon svg { animation: spin 2s linear infinite; }
+.activity-hero--training .activity-hero__icon svg, .activity-hero--consolidating .activity-hero__icon svg { animation: spin 2s linear infinite; }
 .activity-hero h2 { margin-bottom: .5rem; font-size: clamp(1.5rem, 3vw, 2rem); }
 .activity-hero p { margin-bottom: 0; color: rgb(255 255 255 / 68%); }
 .activity-hero .eyebrow { color: #b9afff; }
 .activity-hero__aside { display: grid; justify-items: end; gap: 1rem; text-align: right; }
 .activity-hero__aside > p { max-width: 220px; font-size: .8rem; }
+.activity-hero .activity-failure { margin-top: .6rem; color: #fff; font-weight: 700; overflow-wrap: anywhere; }
 .eta { display: grid; grid-template-columns: auto auto; justify-content: end; align-items: center; gap: .25rem .5rem; }
 .eta svg { grid-row: 1 / 3; }
 .eta span { color: rgb(255 255 255 / 60%); font-size: .7rem; }
@@ -46,6 +47,8 @@
 .iteration-status--ready, .iteration-status--annotating { color: #067647; background: #ecfdf3; }
 .iteration-status--training, .iteration-status--preparing { color: #6941c6; background: #f4f3ff; }
 .iteration-status--failed { color: var(--danger); background: #fef3f2; }
+.export-actions { margin-top: 1rem; display: flex; flex-wrap: wrap; align-items: end; gap: 1rem; }
+.export-actions .field { min-width: 220px; }
 
 @media (max-width: 760px) {
   .activity-page { width: min(100% - 2rem, 1120px); padding-top: 2rem; }
@@ -55,4 +58,8 @@
   .activity-hero__aside { justify-items: start; text-align: left; }
   .summary-grid { grid-template-columns: 1fr; }
   .iteration-table th, .iteration-table td { min-width: 110px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-hero__icon svg { animation: none !important; }
 }

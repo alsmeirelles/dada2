@@ -864,3 +864,103 @@ máquina estiver disponível.
 | Ambiente da DADA | A API e os dois workers precisam do extra `learning` para a DADA aparecer como disponível |
 | App | O campo `target`, o novo contrato da `sam-predict` (o App ainda manda `image_id` e espera `polygons`) e o tipo `string` dos descritores entram no bloco 3 |
 | GPU | Verificação com GPU e modelos reais quando a máquina estiver disponível |
+
+### Bloco 3: saídas, App e fechamento
+
+Status: implementado em 2026-11-24, na branch `phase_7`, sem commit. A
+verificação no navegador fica para quando a máquina estiver disponível. Continua
+sujeito à revisão do Meirelles.
+
+Guia de operação: [exportação](../development.md#dataset-export-phase-7) e
+[qualidade](../development.md#quality-statistics-phase-7). Contrato do App:
+[Phase 7 implemented shapes](../../../dada-app/docs/api-contract.md#phase-7-implemented-shapes).
+
+#### Persistência
+
+Nenhuma migração. A exportação e a qualidade leem o que já existe.
+
+#### Código da API
+
+| Onde | O quê |
+| --- | --- |
+| `services/exports.py` | ZIP escrito enquanto é enviado, por divisão, em COCO, YOLO ou CSV, com `provenance.json` (D19) |
+| `services/quality.py`, `schemas/quality.py` | Fórmulas e supressão da qualidade (D20, P7-05) |
+| `api/v1/endpoints/outputs.py` | Rotas de exportação e qualidade |
+| `services/learning_snapshots.py` | A consulta das resoluções aceitas e a descrição de cada imagem passam a ser públicas, para a exportação usar as mesmas dos manifestos |
+
+#### Rotas
+
+| Rota | Função |
+| --- | --- |
+| `GET /projects/{id}/export?format=coco\|yolo\|csv` | Conjunto anotado em ZIP (`manage_learning`) |
+| `GET /projects/{id}/quality` | Taxa de revisão, taxa de resolução e concordância (`read_annotator_performance`) |
+
+O `openapi.json` foi de 65 para 67 caminhos e de 107 para 109 schemas. A matriz
+de autorização não mudou (15 ações).
+
+#### App
+
+| Superfície | Onde (`dada-app/src/`) |
+| --- | --- |
+| Contrato da fase: capabilities, projeto, iterações, estatísticas, qualidade, alvo e assistência | `api/capabilities.ts`, `features/projects/types.ts`, `features/annotation/types.ts`, `features/annotation/annotation-api.ts` |
+| Máximo de iterações e configuração do aprendizado ativo na criação e nas configurações: solução, descritores (com o tipo `string`), métrica, K e meta | `features/projects/NewProjectPage.tsx`, `ProjectSettingsPage.tsx`, `LearningSettingsForm.tsx`, `learning-settings.ts`, `ResolverConfigForm.tsx`, `resolver-config.ts`, `project-api.ts` |
+| HEIC/HEIF: um registro de formatos filtrado pelo `/capabilities`, nos dois campos de arquivo da criação e da retomada, com o texto de ajuda (P7-06) | `features/projects/ingest.ts`, `NewProjectPage.tsx`, `DraftProjectSetupPage.tsx` |
+| Cartão de atividade, avaliações do modelo-alvo, iterações e nova tentativa (A7-01) | `features/annotation/ProjectActivityPage.tsx`, `activity.css` |
+| Qualidade e exportação, só para dono e gerente (A7-02, D19) | `features/annotation/ProjectActivityPage.tsx` |
+| Alvo destacado com a região, um objeto por alvo e entrega "sem objeto" (D16) | `features/annotation/AnnotationWorkspacePage.tsx`, `ImageStage.tsx` |
+| Assist segmentation com prévia, aceitar e descartar, e o novo contrato da `sam-predict` (A7-03, D18) | `features/annotation/AnnotationWorkspacePage.tsx`, `ImageStage.tsx`, `assignment-view.ts` |
+| I7-04 | `features/annotation/ImageStage.tsx`, `viewport.ts`, `annotation.css` |
+| I7-05 | `api/client.ts`, `features/auth/AuthProvider.tsx`, `LoginPage.tsx` |
+| Atividade visível nos projetos `split` ativos | `features/projects/ProjectsPage.tsx` |
+
+#### Leituras feitas na implementação
+
+| Ponto | Leitura |
+| --- | --- |
+| Divisões da exportação | `train` (treino inicial e aquisições), `val` e `test`; `all` num projeto `single_batch` |
+| Nome das imagens | O caminho relativo do envio; uma origem HEIC/HEIF vira `<caminho>.webp`, porque a imagem exportada é a cópia de exibição |
+| Índice de classe | O `display_order`, no COCO e no YOLO, como na importação de rótulos; no COCO, cada anotação também traz `resolution_id` e `resolution_version` |
+| YOLO de segmentação | Uma linha por objeto, com o maior anel, como no treino da DADA; o COCO mantém todos os anéis |
+| CSV da classificação | Uma coluna 0/1 por classe, porque a classificação é multirrótulo (D10 da Fase 6) |
+| Formato padrão | `coco` na detecção e na segmentação, `csv` na classificação; um formato fora da tarefa é `422 export_format_not_supported` |
+| Item da qualidade | Um alvo conta como um item; as "imagens" da D20 são os itens de lote |
+| Decisões elegíveis (P7-05) | Os itens resolvidos: abaixo de 30, nenhum valor aparece; uma mediana com menos de 5 candidatos fica oculta |
+| Passou por revisão | O item tem item de trabalho na geração de evidência vigente, seja de revisores, seja de especialista |
+| Primeira rodada | A execução mais recente sobre a entrada de número 1 da geração vigente. Métricas: `winner_support` na classificação, `box_iou` na detecção e `mask_iou` ou `mask_dice` na segmentação, conforme a métrica de casamento do lote |
+| Seções de gerente no App | Qualidade, exportação e nova tentativa aparecem só para dono, gerente e administrador; a API continua decidindo |
+| Assistência num alvo | O botão pergunta direto, com a caixa da geometria proposta; sem alvo, o anotador clica um ponto ou arrasta uma caixa |
+| Editar a sugestão | O canvas não edita vértices. Aceitar põe a sugestão no rascunho, já selecionada, e ela se edita como qualquer anotação (classe, apagar, desfazer) |
+| Assistência por tarefa | O botão aparece na detecção e na segmentação, as duas tarefas que a API atende |
+| I7-04 | A imagem abre centrada e na largura total do canvas, como pede a issue; "Fit image" mostra a imagem inteira |
+
+#### Verificação
+
+Executado contra PostgreSQL 16 e Redis 7 locais.
+
+- API: `ruff check` e `ruff format --check` limpos; `alembic check` sem
+  divergência. Testes: **683 passaram** com integração habilitada, contra
+  677 no início do bloco. `openapi.json` regenerado.
+- App: `npm run check` verde: lint, **230 testes** em 43 arquivos (eram 200 em
+  37) e o build de produção.
+- **Não verificado:** o navegador e a GPU.
+
+| Critério do bloco | Como foi provado |
+| --- | --- |
+| A exportação só contém resoluções aceitas | `test_an_export_holds_only_accepted_resolutions`, `test_a_classification_export_is_a_table_of_classes`, e o `provenance.json` parcial em `test_object_targets_are_answered_one_object_at_a_time` |
+| A qualidade respeita a supressão | `tests/test_quality.py`, a rota em `test_detection_resolves_with_box_agreement_observations`, a revisão em `test_low_agreement_reaches_a_reviewer_then_a_second_round` e o acesso em `test_only_owners_and_managers_reach_the_resolution_routes` |
+| `npm run check` passa | 230 testes, lint e build |
+| I7-04 e I7-05 registradas como resolvidas | `dada-app/docs/issues_before_phase7.md`; `ImageStage.test.tsx`, `viewport.test.ts`, `client.test.ts` e `session-expiry.test.tsx` |
+
+| Critério de saída do App na Fase 7 | Testes | Navegador |
+| --- | --- | --- |
+| Submissões não resolvidas nunca aparecem como dado de treino | A tela mostra só as contagens e avaliações da API; a exportação só traz resoluções aceitas | Pendente |
+| A assistência fica restrita à tarefa aberta | `AnnotationWorkspacePage.test.tsx` (prévia, aceite, falha sem mudar o rascunho, um objeto por alvo) e `test_assistance_answers_the_owner_and_never_touches_the_draft` | Pendente |
+| Uma amostra HEIC/HEIF passa por seleção, envio, anotação, recarga e revisão sem mudar dimensões nem geometria | `ingest.test.ts` e `NewProjectPage.test.tsx` (seleção); os testes HEIF da API do bloco 1 | Pendente |
+
+#### Pendências do bloco
+
+| Item | Situação |
+| --- | --- |
+| Navegador | Percorrer no Chrome e no Firefox: criação com aprendizado ativo, cartão de atividade com nova tentativa, qualidade, exportação, alvo com assistência, HEIC/HEIF de ponta a ponta e as issues I7-04 e I7-05 |
+| GPU | Verificação com GPU e modelos reais, como nos blocos 1 e 2 |
+

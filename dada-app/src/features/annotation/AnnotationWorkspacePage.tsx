@@ -31,7 +31,7 @@ import {
   getAssignment,
   getWorkspaceBootstrap,
   listAssignments,
-  predictSegmentation,
+  requestAssistance,
   saveDraft,
   submitAssignment,
 } from './annotation-api'
@@ -39,13 +39,16 @@ import {
   AUTOSAVE_MS,
   RESOLUTION_SOURCE_LABELS,
   STATUS_LABELS,
+  assistError,
   filterAssignments,
   finalDocument,
   isEditable,
   neighbor,
   openWork,
+  targetPrompt,
   validateDocument,
 } from './assignment-view'
+import { ringsPath } from './geometry'
 import { ImageStage } from './ImageStage'
 import { clearRecovery, loadRecovery, saveRecovery, type RecoverySnapshot } from './recovery'
 import { useProjectEvents } from './useProjectEvents'
@@ -55,7 +58,12 @@ import type {
   AnnotationTool,
   AssignmentDetail,
   AssignmentQueueItem,
+  AssignmentTarget,
+  AssistPrompt,
+  AssistResult,
+  PolygonGeometry,
   QueueState,
+  RectangleGeometry,
 } from './types'
 import './annotation.css'
 
@@ -89,6 +97,8 @@ export function AnnotationWorkspacePage() {
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [showFinal, setShowFinal] = useState(false)
+  const [suggestion, setSuggestion] = useState<AssistResult | null>(null)
+  const assistRequest = useRef<string | null>(null)
   const classPanelRef = useRef<HTMLElement>(null)
 
   const bootstrap = useQuery({
@@ -173,6 +183,8 @@ export function AnnotationWorkspacePage() {
     setTool(defaultTool(opened.document.task_type))
     setSaveState(opened.dirty ? 'dirty' : 'idle')
     setShowFinal(false)
+    setSuggestion(null)
+    assistRequest.current = null
     setNotice(message ?? opened.notice)
   }, [bootstrap.data?.classes, projectId, setCurrentDocument])
 
@@ -232,32 +244,53 @@ export function AnnotationWorkspacePage() {
     return () => window.clearTimeout(timer)
   }, [editable, saveNow, saveState])
 
-  const sam = useMutation({
-    mutationFn: (point: { x: number; y: number }) => predictSegmentation(
-      projectId,
-      assignment!,
-      [{ type: 'point', coordinates: [point.x, point.y], label: 'foreground' }],
-      token!,
+  const { mutate: requestSuggestion, isPending: assistPending } = useMutation({
+    mutationFn: ({ prompt, requestId }: { prompt: AssistPrompt; requestId: string }) => requestAssistance(
+      projectId, assignment!.id, requestId, prompt, token!,
     ),
-    onSuccess: (prediction) => {
-      const current = documentRef.current
-      if (!current || !selectedClassId) return
-      const objects: AnnotationObject[] = prediction.polygons
-        .map((polygon) => Array.isArray(polygon) ? polygon : polygon.coordinates)
-        .filter((coordinates) => (coordinates[0]?.length ?? 0) >= 6)
-        .map((coordinates) => ({
-          id: crypto.randomUUID(),
-          class_id: selectedClassId,
-          geometry: { type: 'polygon', coordinates },
-          attributes: { assisted: true },
-        }))
-      if (!objects.length) return setNotice('The model did not return a usable mask for that point.')
-      changeDocument({ ...current, objects: [...current.objects, ...objects] })
-      setSelectedObjectId(objects[0]!.id)
-      setNotice(`Added ${objects.length} assisted mask${objects.length === 1 ? '' : 's'}.`)
+    onSuccess: (result) => {
+      if (result.request_id !== assistRequest.current) return
+      if (result.status === 'no_suggestion' || !result.geometry) return setNotice('The model found no object there. Your draft is unchanged.')
+      setSuggestion(result)
     },
-    onError: (error) => setNotice(error instanceof Error ? error.message : 'Assisted segmentation failed.'),
+    onError: (error, { requestId }) => {
+      if (requestId === assistRequest.current) setNotice(assistError(error))
+    },
   })
+
+  /** Asks for a suggestion; only the latest prompt's answer is shown, and nothing reaches the draft yet. */
+  const askAssistance = useCallback((prompt: AssistPrompt) => {
+    const requestId = crypto.randomUUID()
+    assistRequest.current = requestId
+    setSuggestion(null)
+    setNotice(null)
+    requestSuggestion({ prompt, requestId })
+  }, [requestSuggestion])
+
+  function acceptSuggestion() {
+    const current = documentRef.current
+    if (!suggestion?.geometry || !current) return
+    if (!selectedClassId) return setNotice('Select a class before accepting the suggestion.')
+    if (assignment?.target && current.objects.length) return setNotice('This assignment answers only the highlighted object. Delete the current one first.')
+    const object: AnnotationObject = { id: crypto.randomUUID(), class_id: selectedClassId, geometry: suggestion.geometry, attributes: { assisted: true } }
+    changeDocument({ ...current, objects: [...current.objects, object] })
+    setSelectedObjectId(object.id)
+    setSuggestion(null)
+    assistRequest.current = null
+    setTool('select')
+    setNotice('The suggestion is now in your draft. Change its class, delete it, or undo it like any annotation.')
+  }
+
+  const discardSuggestion = useCallback(() => {
+    setSuggestion(null)
+    assistRequest.current = null
+  }, [])
+
+  const target = assignment?.target
+  const startAssist = useCallback(() => {
+    if (target) return askAssistance(targetPrompt(target))
+    setTool('assist')
+  }, [askAssistance, target])
 
   const selectClass = useCallback((classId: string) => {
     setSelectedClassId(classId)
@@ -311,7 +344,10 @@ export function AnnotationWorkspacePage() {
     if (!assignment || !document || !editable) return
     const problem = validateDocument(document)
     if (problem) return setNotice(problem)
-    if (!document.objects.length && !window.confirm('Submit this image as empty? This records that it contains no objects.')) return
+    const empty = assignment.target
+      ? 'Submit with no object? This records that the highlighted area holds no object.'
+      : 'Submit this image as empty? This records that it contains no objects.'
+    if (!document.objects.length && !window.confirm(empty)) return
     try {
       setSaveState('saving')
       await submitAssignment(projectId, assignment.id, document.version, document.objects, token!)
@@ -356,7 +392,8 @@ export function AnnotationWorkspacePage() {
       if (event.key.toLowerCase() === 'h') setTool('pan')
       if (event.key.toLowerCase() === 'b' && bootstrap.data?.project.task_type === 'detection') setTool('box')
       if (event.key.toLowerCase() === 'p' && bootstrap.data?.project.task_type === 'segmentation') setTool('polygon')
-      if (event.key.toLowerCase() === 'm' && bootstrap.data?.project.task_type === 'segmentation') setTool('sam-point')
+      if (event.key.toLowerCase() === 'm' && editable && bootstrap.data?.project.task_type !== 'classification') startAssist()
+      if (event.key === 'Escape') discardSuggestion()
       if (event.key.toLowerCase() === 'n' && editable && bootstrap.data?.project.task_type !== 'classification') {
         setTool(bootstrap.data?.project.task_type === 'detection' ? 'box' : 'polygon')
       }
@@ -371,7 +408,7 @@ export function AnnotationWorkspacePage() {
     }
     window.addEventListener('keydown', keyboard)
     return () => window.removeEventListener('keydown', keyboard)
-  }, [bootstrap.data, editable, navigateQueue, redo, removeSelected, saveNow, selectClass, selectedObjectId, undo])
+  }, [bootstrap.data, discardSuggestion, editable, navigateQueue, redo, removeSelected, saveNow, selectClass, selectedObjectId, startAssist, undo])
 
   if (bootstrap.isLoading) return <div className="centered-status">Loading annotation workspace…</div>
   if (bootstrap.isError) return <WorkspaceError error={bootstrap.error} />
@@ -418,7 +455,7 @@ export function AnnotationWorkspacePage() {
           {visible.map((item, index) => (
             <button key={item.id} className={`queue-item queue-item--${item.status} ${assignment?.id === item.id ? 'selected' : ''}`} onClick={() => void openItem(item)} aria-current={assignment?.id === item.id}>
               <span className="queue-thumb">{index + 1}</span>
-              <span><strong>{item.relative_path.split('/').at(-1)}</strong><small>{PURPOSE_LABELS[item.batch_purpose]} · {STATUS_LABELS[item.status]}</small></span>
+              <span><strong>{item.relative_path.split('/').at(-1)}</strong><small>{PURPOSE_LABELS[item.batch_purpose]}{item.target ? ' · one object' : ''} · {STATUS_LABELS[item.status]}</small></span>
               {item.status === 'submitted' && <Check size={14} />}
             </button>
           ))}
@@ -431,10 +468,8 @@ export function AnnotationWorkspacePage() {
           <button className={tool === 'pan' ? 'active' : ''} onClick={() => setTool('pan')} title="Pan (H or Space)"><Hand size={19} /><span>Pan</span></button>
           <span className="tool-divider" />
           {bootstrap.data.project.task_type === 'detection' && <button className={tool === 'box' ? 'active' : ''} onClick={() => setTool('box')} disabled={!editable} title="Bounding box (B)"><Square size={19} /><span>Box</span></button>}
-          {bootstrap.data.project.task_type === 'segmentation' && <>
-            <button className={tool === 'polygon' ? 'active' : ''} onClick={() => setTool('polygon')} disabled={!editable} title="Polygon (P)"><Pentagon size={19} /><span>Polygon</span></button>
-            <button className={tool === 'sam-point' ? 'active' : ''} onClick={() => setTool('sam-point')} disabled={!editable || sam.isPending} title="Assisted mask point (M)"><Sparkles size={19} /><span>Assist</span></button>
-          </>}
+          {bootstrap.data.project.task_type === 'segmentation' && <button className={tool === 'polygon' ? 'active' : ''} onClick={() => setTool('polygon')} disabled={!editable} title="Polygon (P)"><Pentagon size={19} /><span>Polygon</span></button>}
+          {bootstrap.data.project.task_type !== 'classification' && <button className={tool === 'assist' ? 'active' : ''} onClick={startAssist} disabled={!editable || assistPending} aria-label="Assist segmentation" title={assignment?.target ? 'Assist segmentation: ask the model about the highlighted object (M)' : 'Assist segmentation: click a point or drag a box (M)'}><Sparkles size={19} /><span>Assist</span></button>}
           <span className="tool-divider" />
           <button onClick={undo} disabled={!undoStack.current.length || !editable} title="Undo (Ctrl Z)"><Undo2 size={18} /><span>Undo</span></button>
           <button onClick={redo} disabled={!redoStack.current.length || !editable} title="Redo (Ctrl Y)"><Redo2 size={18} /><span>Redo</span></button>
@@ -462,11 +497,16 @@ export function AnnotationWorkspacePage() {
             selectedClassId={selectedClassId}
             selectedObjectId={selectedObjectId}
             locked={!editable || Boolean(finalView)}
-            samPending={sam.isPending}
+            assistPending={assistPending}
+            maxObjects={assignment.target ? 1 : undefined}
             onChange={changeDocument}
             onSelectObject={setSelectedObjectId}
-            onSamPoint={(point) => sam.mutate(point)}
+            onAssist={askAssistance}
             onNotice={setNotice}
+            overlay={<>
+              {assignment.target && <TargetCue target={assignment.target} width={assignment.media.width} height={assignment.media.height} />}
+              {suggestion?.geometry && <SuggestionShape geometry={suggestion.geometry} />}
+            </>}
           />
         ) : (
           <div className="canvas-empty">
@@ -483,6 +523,12 @@ export function AnnotationWorkspacePage() {
             <button onClick={takeServerVersion}>Use server version</button>
           </div>
         )}
+        {suggestion && <div className="assist-preview" role="status">
+          <Sparkles size={17} />
+          <span>Suggestion{suggestion.score !== null ? ` · confidence ${suggestion.score.toFixed(2)}` : ''}. It is not in your draft until you accept it.</span>
+          <button onClick={acceptSuggestion}>Accept</button>
+          <button onClick={discardSuggestion}>Discard</button>
+        </div>}
         {notice && !conflict && <div className="workspace-notice" role="status"><AlertTriangle size={17} /><span>{notice}</span><button onClick={() => setNotice(null)}>Dismiss</button></div>}
         <div className="image-navigation">
           <Button variant="ghost" onClick={() => navigateQueue(-1)} aria-label="Previous image"><ChevronLeft size={18} /></Button>
@@ -509,6 +555,7 @@ export function AnnotationWorkspacePage() {
               })}
               {!shown?.objects.length && <p>{finalView ? 'The final annotation has no objects.' : 'No annotations yet.'}</p>}
             </div>
+            {assignment?.target && <p className="target-hint">This assignment asks about the highlighted object only. Draw or accept at most one object for it, or submit with no object when nothing is there.</p>}
           </div>
         </aside>
       )}
@@ -516,6 +563,32 @@ export function AnnotationWorkspacePage() {
       {showShortcuts && <ShortcutPanel onClose={() => setShowShortcuts(false)} />}
     </main>
   )
+}
+
+/**
+ * The object target's cue (D16): the context region stays clear while the rest
+ * of the image is shaded, and the proposed geometry is outlined. It is drawn
+ * beneath the annotation and is never part of it.
+ */
+function TargetCue({ target, width, height }: { target: AssignmentTarget; width: number; height: number }) {
+  const [x, y, regionWidth, regionHeight] = target.region
+  return <>
+    <path className="target-shade" fillRule="evenodd" d={`M0 0H${width}V${height}H0Z M${x} ${y}H${x + regionWidth}V${y + regionHeight}H${x}Z`} />
+    <rect className="target-region" x={x} y={y} width={regionWidth} height={regionHeight} />
+    <OutlineShape className="target-cue" geometry={target.geometry} />
+  </>
+}
+
+function SuggestionShape({ geometry }: { geometry: RectangleGeometry | PolygonGeometry }) {
+  return <OutlineShape className="assist-suggestion" geometry={geometry} />
+}
+
+function OutlineShape({ className, geometry }: { className: string; geometry: RectangleGeometry | PolygonGeometry }) {
+  if (geometry.type === 'rectangle') {
+    const [x, y, width, height] = geometry.coordinates
+    return <rect className={className} x={x} y={y} width={width} height={height} />
+  }
+  return <path className={className} d={ringsPath(geometry.coordinates)} fillRule="evenodd" />
 }
 
 function SaveIndicator({ state }: { state: SaveState }) {
@@ -528,7 +601,7 @@ function WorkspaceError({ error }: { error: Error }) {
 }
 
 function ShortcutPanel({ onClose }: { onClose: () => void }) {
-  return <div className="shortcut-popover" role="dialog" aria-modal="false" aria-label="Keyboard shortcuts"><div><strong>Keyboard shortcuts</strong><button onClick={onClose}>×</button></div><dl><dt>N / Enter</dt><dd>Start or finish object</dd><dt>B / P / M</dt><dd>Box / polygon / assisted mask</dd><dt>V / H</dt><dd>Select / pan</dd><dt>1–9</dt><dd>Choose class</dd><dt>C</dt><dd>Focus classes</dd><dt>Delete</dt><dd>Remove selected object</dd><dt>Ctrl Z / Y</dt><dd>Undo / redo</dd><dt>← / →</dt><dd>Previous / next image</dd><dt>Space</dt><dd>Pan image</dd><dt>+ / −</dt><dd>Zoom</dd><dt>0</dt><dd>Fit image</dd><dt>Ctrl S</dt><dd>Save draft</dd></dl></div>
+  return <div className="shortcut-popover" role="dialog" aria-modal="false" aria-label="Keyboard shortcuts"><div><strong>Keyboard shortcuts</strong><button onClick={onClose}>×</button></div><dl><dt>N / Enter</dt><dd>Start or finish object</dd><dt>B / P / M</dt><dd>Box / polygon / assist</dd><dt>Esc</dt><dd>Discard a suggestion</dd><dt>V / H</dt><dd>Select / pan</dd><dt>1–9</dt><dd>Choose class</dd><dt>C</dt><dd>Focus classes</dd><dt>Delete</dt><dd>Remove selected object</dd><dt>Ctrl Z / Y</dt><dd>Undo / redo</dd><dt>← / →</dt><dd>Previous / next image</dd><dt>Space</dt><dd>Pan image</dd><dt>+ / −</dt><dd>Zoom</dd><dt>0</dt><dd>Fit image</dd><dt>Ctrl S</dt><dd>Save draft</dd></dl></div>
 }
 
 function defaultTool(taskType: AnnotationDocument['task_type']): AnnotationTool {

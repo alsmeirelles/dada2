@@ -33,6 +33,8 @@ const baseDraft: ProjectDraft = {
   validationSetSize: 10,
   validationSetUnit: 'percentage',
   iterationBatchSize: 5,
+  maxAcquisitionIterations: 4,
+  learning: null,
   collaborators: ['ana', 'bruno'],
   annotationPolicy: { mode: 'single' },
 }
@@ -85,6 +87,22 @@ describe('split sizing', () => {
       validation_set_size: null,
       validation_set_percentage: 10,
     })
+  })
+
+  it('sends the iteration limit, and the learning settings only with active learning', () => {
+    const learning = { solution: 'deterministic', configuration: { retain_helper_models: false }, metric: 'map50' as const, interval: 2, target: 0.8 }
+
+    expect(buildProjectCreateBody({ ...baseDraft, learning })).toMatchObject({ max_acquisition_iterations: 4 })
+    expect(buildProjectCreateBody({ ...baseDraft, learning })).not.toHaveProperty('learning_solution')
+    expect(buildProjectCreateBody({ ...baseDraft, acquisitionStrategy: 'active_learning', learning })).toMatchObject({
+      max_acquisition_iterations: 4,
+      learning_solution: 'deterministic',
+      learning_configuration: { retain_helper_models: false },
+      evaluation_metric: 'map50',
+      evaluation_interval: 2,
+      metric_target: 0.8,
+    })
+    expect(buildProjectCreateBody({ ...baseDraft, datasetLayout: 'single_batch' })).not.toHaveProperty('max_acquisition_iterations')
   })
 
   it('rounds percentage sizes up like the API', () => {

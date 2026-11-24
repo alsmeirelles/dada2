@@ -14,7 +14,7 @@ const project: Project = {
   id: 'project-1', name: 'Road defects', description: null, task_type: 'detection',
   status: 'draft', owner_id: 'owner', acquisition_strategy: 'random', dataset_layout: 'split',
   initial_training_size: null, test_set_size: 1, test_set_percentage: null, validation_set_size: 1,
-  validation_set_percentage: null, iteration_batch_size: 2, dataset_prepared_at: null, version: 1,
+  validation_set_percentage: null, iteration_batch_size: 2, max_acquisition_iterations: 5, learning_solution: null, learning_solution_version: null, learning_configuration: {}, evaluation_metric: null, evaluation_interval: null, metric_target: null, completion_reason: null, dataset_prepared_at: null, version: 1,
   created_at: '2026-09-30T12:00:00Z', updated_at: '2026-09-30T12:00:00Z',
 }
 
@@ -36,7 +36,7 @@ function renderAt(path: string, page: ReactNode) {
   vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
   const context: AuthContextValue = {
     user: { id: 'owner', username: 'owner', display_name: 'Owner', is_administrator: false, is_active: true, version: 1, created_at: '2026-09-30T12:00:00Z' },
-    token: 'token', isLoading: false, login: vi.fn(), logout: vi.fn(),
+    token: 'token', isLoading: false, sessionExpired: false, login: vi.fn(), logout: vi.fn(),
   }
   render(<QueryClientProvider client={new QueryClient()}>
     <AuthContext.Provider value={context}>

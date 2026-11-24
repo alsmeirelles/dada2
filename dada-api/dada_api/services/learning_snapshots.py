@@ -152,9 +152,19 @@ def _manifest(
     }
 
 
-def _resolved(project: Project, purposes: Sequence[str]):
+def resolved_items(project: Project, purposes: Sequence[str]):
     """Select every resolved item of some purposes with its image, current
-    resolution, and the acquisition iteration that chose it."""
+    resolution, and the acquisition iteration that chose it.
+
+    Args:
+        project: Project whose batches are read.
+        purposes: Batch purposes to include.
+
+    Returns:
+        A statement yielding ``(Media, ContentObject, BatchItem,
+        ResolvedAnnotation, iteration)`` rows ordered by relative path, so
+        the rows of one image are adjacent.
+    """
     return (
         select(
             Media, ContentObject, BatchItem, ResolvedAnnotation, LearningRun.iteration
@@ -179,14 +189,25 @@ def _resolved(project: Project, purposes: Sequence[str]):
     )
 
 
-def _describe(
+def describe(
     media: Media,
     content: ContentObject,
     answered: list[tuple[BatchItem, ResolvedAnnotation, int | None]],
     index_of: dict[str, int],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Describe one image from its answered items: exhaustive when a whole
-    image was annotated, partial when only object targets were (D16)."""
+    image was annotated, partial when only object targets were (D16).
+
+    Args:
+        media: The image.
+        content: Its stored content.
+        answered: Its resolved items, their current resolutions, and the
+            iteration that chose each one.
+        index_of: Class index by class identifier.
+
+    Returns:
+        The manifest image and its annotations.
+    """
     status = PARTIALLY_LABELED if answered else UNLABELED
     if any(item.target_key is None for item, _, _ in answered):
         status = EXHAUSTIVELY_LABELED
@@ -212,13 +233,13 @@ async def accepted(session: AsyncSession, project: Project, role: str) -> dict:
     """
     classes = await categories(session, project)
     index_of = {item["class_id"]: item["id"] for item in classes}
-    rows = await session.execute(_resolved(project, ROLE_PURPOSES[role]))
+    rows = await session.execute(resolved_items(project, ROLE_PURPOSES[role]))
     images: list[dict[str, Any]] = []
     annotations: list[dict[str, Any]] = []
     for _, group in groupby(rows, key=lambda row: row[0].id):
         group = list(group)
         media, content = group[0][0], group[0][1]
-        image, found = _describe(
+        image, found = describe(
             media,
             content,
             [
@@ -253,7 +274,7 @@ async def pool(
     index_of = {item["class_id"]: item["id"] for item in classes}
     answered: dict[str, list[tuple[BatchItem, ResolvedAnnotation, int | None]]] = {}
     for _, _, item, resolution, iteration in await session.execute(
-        _resolved(project, ROLE_PURPOSES["training"]).where(
+        resolved_items(project, ROLE_PURPOSES["training"]).where(
             Media.id.in_(list(media_ids)), BatchItem.target_key.is_not(None)
         )
     ):
@@ -267,7 +288,7 @@ async def pool(
     images: list[dict[str, Any]] = []
     annotations: list[dict[str, Any]] = []
     for media, content in rows:
-        image, found = _describe(media, content, answered.get(media.id, []), index_of)
+        image, found = describe(media, content, answered.get(media.id, []), index_of)
         images.append(image)
         annotations.extend(found)
     return _manifest(project, "pool", classes, images, annotations)

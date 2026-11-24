@@ -3,11 +3,12 @@ import { Trash2 } from 'lucide-react'
 import { useRef, useState, type ChangeEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
+import { getCapabilities } from '../../api/capabilities'
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
 import { DatasetPreparationPanel } from './DatasetPreparationPanel'
-import { hashImages, mergeSelections, scanImageFiles, type LocalImage } from './ingest'
+import { acceptValue, formatList, hashImages, mergeSelections, scanImageFiles, supportedFormats, type LocalImage } from './ingest'
 import {
   createClass,
   createProjectWithDataset,
@@ -37,6 +38,8 @@ export function DraftProjectSetupPage() {
   const classes = useQuery({ queryKey: ['project-classes', projectId], queryFn: () => listClasses(projectId, token!), enabled: Boolean(token && projectId) })
   const members = useQuery({ queryKey: ['project-members', projectId], queryFn: () => listMembers(projectId, token!), enabled: Boolean(token && projectId) })
   const policy = useQuery({ queryKey: ['project-policy', projectId], queryFn: () => getAnnotationPolicy(projectId, token!), enabled: Boolean(token && projectId) })
+  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: getCapabilities, staleTime: Infinity })
+  const formats = supportedFormats(capabilities.data?.supported_image_media_types)
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['project', projectId] })
@@ -79,6 +82,8 @@ export function DraftProjectSetupPage() {
       validationSetSize: current.validation_set_percentage ?? current.validation_set_size ?? 1,
       validationSetUnit: current.validation_set_percentage !== null ? 'percentage' : 'count',
       iterationBatchSize: current.iteration_batch_size ?? 1,
+      maxAcquisitionIterations: current.max_acquisition_iterations ?? 1,
+      learning: null,
       collaborators: (members.data?.items ?? []).filter((member) => member.role !== 'owner').map((member) => member.username),
       annotationPolicy: policy.data?.mode === 'consensus' ? { mode: 'consensus', annotatorUsernames: policy.data.annotator_ids.map((id) => policyMembers.get(id)).filter((name): name is string => Boolean(name)), requiredAnnotations: policy.data.required_consensus_annotations ?? 2, requiredReviewers: policy.data.required_consensus_reviewers ?? 1, resolver: policy.data.resolver ?? '', configuration: { parameters: policy.data.parameters ?? {}, review_thresholds: policy.data.review_thresholds ?? {} }, requireIndependentAdjudicator: policy.data.require_independent_adjudicator ?? false } : { mode: 'single' },
     }
@@ -89,7 +94,7 @@ export function DraftProjectSetupPage() {
     if (!files.length) return
     setMessage('Checking selected images…')
     try {
-      const merged = mergeSelections(images, await hashImages(scanImageFiles(files).images, () => {}))
+      const merged = mergeSelections(images, await hashImages(scanImageFiles(files, formats).images, () => {}))
       setImages(merged.images)
       setMessage(merged.rejected.length ? `${merged.rejected.length} already-selected path(s) were skipped.` : null)
     } catch { setMessage('The selected images could not be read. Choose them again.') }
@@ -105,7 +110,7 @@ export function DraftProjectSetupPage() {
       <form className="field-grid" onSubmit={(event) => { event.preventDefault(); editProject.mutate(event.currentTarget) }}><label className="field">Project name<input name="name" key={project.data!.version} defaultValue={project.data!.name} /></label><label className="field">Description<input name="description" key={project.data!.updated_at} defaultValue={project.data!.description ?? ''} /></label><Button disabled={editProject.isPending}>{editProject.isPending ? 'Saving…' : 'Save project details'}</Button></form>
       <div><h2>Classes</h2><div className="class-list">{classes.data!.items.map((entry) => <div className="class-row" key={entry.id}><span className="class-index">{entry.display_order + 1}</span><label className="color-control" aria-label={`Color for ${entry.name}`}><input type="color" defaultValue={entry.color} onChange={(event) => changeClass(entry, { color: event.target.value.toUpperCase() })} /></label><input aria-label={`Name for ${entry.name}`} defaultValue={entry.name} onBlur={(event) => { const name = event.target.value.trim(); if (name && name !== entry.name) changeClass(entry, { name }) }} /><Button variant="ghost" aria-label={`Remove ${entry.name}`} title={`Remove ${entry.name}`} onClick={() => deleteClass.mutate(entry.id)} disabled={classes.data!.items.length <= 1}><Trash2 size={18} aria-hidden="true" /></Button></div>)}</div><div className="class-actions"><Button variant="secondary" onClick={() => addClass.mutate()} disabled={addClass.isPending}>Add class</Button></div></div>
       <div><h2>Team and strategy</h2><p className="muted">Manage members and the annotation policy before resuming the dataset upload.</p><Link className="button button--secondary" to={`/projects/${projectId}/settings`}>Open project settings</Link></div>
-      <div><h2>Dataset</h2><input ref={(node) => { fileInput.current = node; node?.setAttribute('webkitdirectory', '') }} className="sr-only" type="file" multiple accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={selectFiles} aria-label="Image folder" /><input ref={filesInput} className="sr-only" type="file" multiple accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={selectFiles} aria-label="Image files" /><Button variant="secondary" onClick={() => fileInput.current?.click()}>{images.length ? 'Add another folder' : 'Choose image folder'}</Button><Button variant="secondary" onClick={() => filesInput.current?.click()}>{images.length ? 'Add more files' : 'Choose image files'}</Button>{images.length > 0 && <Button variant="ghost" onClick={() => setImages([])}>Clear selection</Button>}{activeUploadId && <Button variant="ghost" disabled={cancel.isPending} onClick={() => { if (window.confirm('Cancel this upload? Its temporary files will be permanently purged.')) cancel.mutate() }}>{cancel.isPending ? 'Cancelling…' : 'Cancel interrupted upload'}</Button>}{images.length > 0 && <p className="notice">{images.length} images ready. Upload resumes from the server-confirmed byte offset.</p>}</div>
+      <div><h2>Dataset</h2><input ref={(node) => { fileInput.current = node; node?.setAttribute('webkitdirectory', '') }} className="sr-only" type="file" multiple accept={acceptValue(formats)} onChange={selectFiles} aria-label="Image folder" /><input ref={filesInput} className="sr-only" type="file" multiple accept={acceptValue(formats)} onChange={selectFiles} aria-label="Image files" /><p className="muted">{formatList(formats)} images; nested folders included.</p><Button variant="secondary" onClick={() => fileInput.current?.click()}>{images.length ? 'Add another folder' : 'Choose image folder'}</Button><Button variant="secondary" onClick={() => filesInput.current?.click()}>{images.length ? 'Add more files' : 'Choose image files'}</Button>{images.length > 0 && <Button variant="ghost" onClick={() => setImages([])}>Clear selection</Button>}{activeUploadId && <Button variant="ghost" disabled={cancel.isPending} onClick={() => { if (window.confirm('Cancel this upload? Its temporary files will be permanently purged.')) cancel.mutate() }}>{cancel.isPending ? 'Cancelling…' : 'Cancel interrupted upload'}</Button>}{images.length > 0 && <p className="notice">{images.length} images ready. Upload resumes from the server-confirmed byte offset.</p>}</div>
       {(message || resume.isError || editProject.isError || saveClass.isError || deleteClass.isError || discard.isError) && <p className="form-error" role="alert">{message ?? errorText(resume.error ?? editProject.error ?? saveClass.error ?? deleteClass.error ?? discard.error)}</p>}
       {project.data!.dataset_prepared_at && <p className="notice">The dataset is prepared. Adding or removing classes, reordering them, or uploading new images resets the preparation and discards imported labels.</p>}
       {images.length > 0 && <Button onClick={() => { saveSetup({ projectId, stage: 'policy' }); resume.mutate() }} disabled={resume.isPending}>{resume.isPending ? 'Resuming…' : 'Resume upload and prepare'}</Button>}

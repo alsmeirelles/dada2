@@ -733,6 +733,34 @@ or `no_suggestion`; nothing is saved. A project with no compatible target
 model answers `409 assistance_unavailable`; a timeout or worker failure
 answers `503` and leaves the draft untouched.
 
+## Dataset export (Phase 7)
+
+`GET /api/v1/projects/{id}/export?format=coco|yolo|csv` streams a ZIP of the
+current accepted resolutions; owners and managers only (`manage_learning`).
+Detection and segmentation take `coco` (the default) or `yolo`, classification
+takes `csv`. The archive is written while it is sent, so memory stays bounded
+by one image block, and nothing is kept on the server afterwards.
+
+| Path | Content |
+| --- | --- |
+| `images/<split>/` | The display copies, under their relative paths; an HEIC/HEIF source gains `.webp` |
+| `annotations/<split>.json` | COCO, with `display_order` as `category_id` and the resolution of every annotation |
+| `labels/<split>/`, `data.yaml` | YOLO, normalized; a segmentation line keeps the largest ring |
+| `annotations/<split>.csv` | Classification: path and one 0/1 column per class |
+| `provenance.json` | Source digest, rendition, size, annotation status, queried regions, and resolution versions of every image |
+
+Splits are `train`, `val`, and `test`, or `all` for a `single_batch` project.
+Unresolved, raw, imported, and proposed annotations never enter the archive.
+
+## Quality statistics (Phase 7)
+
+`GET /api/v1/projects/{id}/quality` reports, for owners and managers
+(`read_annotator_performance`), the review rate, the resolution rate, and the
+median first-round agreement of each consensus metric. Nothing is shown below
+30 resolved items, and a median of fewer than 5 candidates stays hidden. The
+report is computed on read from the batch items, the work items, and the
+first-round proposals; it names no one.
+
 ## HEIC/HEIF ingestion (Phase 7)
 
 `image/heic` and `image/heif` are accepted. At upload completion the API

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthContext, type AuthContextValue } from '../auth/auth-context'
 import { NewProjectPage } from './NewProjectPage'
+import { learningCatalog } from './learning-catalog.fixture'
 import { consensusPipelines } from './resolver-catalog.fixture'
 
 function image(path: string) {
@@ -38,11 +39,11 @@ function renderWizard(stepsAfterClasses = 3) {
           { id: 'ana-id', username: 'ana', display_name: 'Ana' },
           { id: 'bruno-id', username: 'bruno', display_name: 'Bruno' },
         ], next_cursor: null }
-      : { consensus_pipelines: consensusPipelines },
+      : { consensus_pipelines: consensusPipelines, supported_image_media_types: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'], ...learningCatalog },
   ), { status: 200, headers: { 'Content-Type': 'application/json' } }))))
   const context: AuthContextValue = {
     user: { id: 'owner', username: 'owner', display_name: 'Owner', is_administrator: false, is_active: true, version: 1, created_at: '2026-09-30T12:00:00Z' },
-    token: 'token', isLoading: false, login: vi.fn(), logout: vi.fn(),
+    token: 'token', isLoading: false, sessionExpired: false, login: vi.fn(), logout: vi.fn(),
   }
   render(<QueryClientProvider client={new QueryClient()}>
     <AuthContext.Provider value={context}><MemoryRouter><NewProjectPage /></MemoryRouter></AuthContext.Provider>
@@ -123,5 +124,39 @@ describe('consensus resolution settings in the wizard', () => {
 
     expect(screen.getByText('Minimum support: 3/4 · Minimum median IoU: 0.5')).toBeInTheDocument()
     expect(screen.getByText('Must be independent')).toBeInTheDocument()
+  })
+})
+
+describe('acquisition loop settings in the wizard', () => {
+  it('asks for the iteration limit and the solution settings, and shows them before creation', HASHING_TIMEOUT, async () => {
+    renderWizard(1)
+    expect(screen.getByRole('heading', { name: 'Acquisition, layout, and sizes' })).toBeInTheDocument()
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: /Maximum acquisition iterations/ }), { target: { value: '6' } })
+    fireEvent.click(screen.getByLabelText('Active learning'))
+    expect(await screen.findByRole('radio', { name: /Deterministic/ })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /DADA/ })).toBeDisabled()
+    expect(screen.getByText(/a required library is not installed/)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/Metric target/), { target: { value: '1.5' } })
+    expect(screen.getByText('The metric target must be greater than 0 and at most 1.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Continue/ })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText(/Metric target/), { target: { value: '0.8' } })
+    fireEvent.change(screen.getByLabelText(/Evaluate every/), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+    await chooseFolder('north', names(40))
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+
+    expect(screen.getByText('Deterministic (development) · mAP@50 every 2 iterations · stops at 0.8')).toBeInTheDocument()
+    expect(screen.getByText('6 acquisition iterations')).toBeInTheDocument()
+  })
+
+  it('offers HEIC and HEIF when the API accepts them', () => {
+    renderWizard()
+
+    expect(screen.getByLabelText('Image folder')).toHaveAttribute('accept', expect.stringContaining('image/heic'))
+    expect(screen.getByText(/HEIC, and HEIF · nested folders included/)).toBeInTheDocument()
   })
 })

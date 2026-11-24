@@ -21,7 +21,7 @@ describe('ChangePasswordPage', () => {
         created_at: '2026-09-15T12:00:00Z',
       },
       token: 'token',
-      isLoading: false,
+      isLoading: false, sessionExpired: false,
       login: vi.fn(),
       logout: vi.fn(),
     }

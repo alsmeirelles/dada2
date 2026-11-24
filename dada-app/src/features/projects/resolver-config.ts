@@ -163,6 +163,8 @@ export function valueProblem(descriptor: ParameterDescriptor, value: unknown): s
       return typeof value === 'boolean' ? null : 'Choose on or off.'
     case 'enum':
       return typeof value === 'string' && (descriptor.options ?? []).includes(value) ? null : 'Choose one of the listed options.'
+    case 'string':
+      return typeof value === 'string' && value.trim() ? null : 'Enter a value.'
     case 'integer':
     case 'number':
       if (typeof value !== 'number' || !Number.isFinite(value)) return 'Enter a number.'

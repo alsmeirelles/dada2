@@ -1,3 +1,4 @@
+import { ApiError } from '../../api/client'
 import type { BatchPurpose } from '../projects/types'
 import type { RecoverySnapshot } from './recovery'
 import type {
@@ -5,6 +6,8 @@ import type {
   AssignmentDetail,
   AssignmentQueueItem,
   AssignmentStatus,
+  AssignmentTarget,
+  AssistPrompt,
   QueueState,
   ResolutionSource,
 } from './types'
@@ -116,4 +119,30 @@ export function validateDocument(document: AnnotationDocument) {
   if (document.task_type === 'segmentation' && document.objects.some((item) => item.geometry?.type !== 'polygon')) return 'Segmentation annotations must use polygons or masks.'
   if (document.task_type === 'classification' && document.objects.some((item) => item.geometry !== null)) return 'Classification labels cannot contain geometry.'
   return ''
+}
+
+/** The box prompt that asks the model about an object target: its proposed geometry's bounds. */
+export function targetPrompt(target: AssignmentTarget): AssistPrompt {
+  if (target.geometry.type === 'rectangle') return { type: 'box', coordinates: [...target.geometry.coordinates] }
+  const xs = target.geometry.coordinates.flatMap((ring) => ring.filter((_, index) => index % 2 === 0))
+  const ys = target.geometry.coordinates.flatMap((ring) => ring.filter((_, index) => index % 2 === 1))
+  const x = Math.min(...xs)
+  const y = Math.min(...ys)
+  return { type: 'box', coordinates: [x, y, Math.max(...xs) - x, Math.max(...ys) - y] }
+}
+
+const UNAVAILABLE_TEXT: Record<string, string> = {
+  no_target_model: 'Assistance is not available yet: this project has no trained target model.',
+  incompatible_target_model: 'Assistance is not available: the trained model no longer matches the project classes.',
+  solution_unavailable: 'Assistance is not available on this server.',
+}
+
+/** What the annotator reads when a suggestion fails; the draft never changes (A7-03). */
+export function assistError(error: unknown) {
+  if (!(error instanceof ApiError)) return 'Assistance needs a connection to the API. Your draft is unchanged.'
+  const reason = (error.details as { reason?: string } | undefined)?.reason
+  if (error.code === 'assistance_unavailable') return UNAVAILABLE_TEXT[reason ?? ''] ?? 'Assistance is not available for this project.'
+  if (error.code === 'assistance_timeout') return 'The model did not answer in time. Your draft is unchanged.'
+  if (error.code === 'invalid_prompt') return 'Point or drag inside the image to ask for a suggestion.'
+  return `The model could not answer: ${error.message} Your draft is unchanged.`
 }
