@@ -148,7 +148,12 @@ def _protos(
     geometry: Geometry,
     shapes: list[list[Shape]],
 ) -> tuple[list[Proto], list[dict[str, str]]]:
-    """Group raw objects into candidates, or reuse the frozen first round."""
+    """Group raw objects into candidates, or reuse the frozen first round.
+
+    An object target needs no matching: every annotator answered the same
+    object, so their objects form its one candidate, shown with the
+    target's region (D17).
+    """
     if resolver_input.candidates is not None:
         index = {
             (shape.source_id, shape.object_id): shape
@@ -170,6 +175,21 @@ def _protos(
             )
             for frozen in resolver_input.candidates
             if frozen["scope"] == "candidate"
+        ], []
+
+    if resolver_input.target_region is not None:
+        members = [shape for rater in shapes for shape in rater]
+        if not members:
+            return [], []
+        return [
+            Proto(
+                _key(members),
+                0,
+                members,
+                [],
+                list(resolver_input.target_region),
+                False,
+            )
         ], []
 
     grouping = matching.group(
@@ -293,7 +313,8 @@ def resolve(
 
     Stage 1 matches objects without their class and decides each candidate's
     existence and class from every initial annotator's vote, where an
-    annotator who drew nothing there votes ``no_object``. Stage 2 refines the
+    annotator who drew nothing there votes ``no_object``. An object target
+    skips the matching and has a single candidate. Stage 2 refines the
     geometry of accepted objects only. On a second round the first round's
     candidates are reused as frozen, and each reviewer adds one vote and,
     for an object, one supporting geometry.

@@ -22,7 +22,7 @@ function renderRoute(isAdministrator: boolean) {
   const context: AuthContextValue = {
     user: { ...user, is_administrator: isAdministrator },
     token: 'token',
-    isLoading: false,
+    isLoading: false, sessionExpired: false,
     login: vi.fn(),
     logout: vi.fn(),
   }

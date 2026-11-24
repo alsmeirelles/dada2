@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   buildPolicyBody,
   buildProjectCreateBody,
+  listEligibleAnnotators,
   minimumDatasetSize,
   resolveAnnotatorIds,
   resolveDraftSplitSize,
@@ -10,6 +11,8 @@ import {
   type ProjectMember,
 } from './project-api'
 import type { ProjectDraft } from './types'
+
+afterEach(() => vi.unstubAllGlobals())
 
 const members: ProjectMember[] = [
   { user_id: 'id-owner', username: 'owner', display_name: 'Owner', role: 'owner' },
@@ -30,9 +33,32 @@ const baseDraft: ProjectDraft = {
   validationSetSize: 10,
   validationSetUnit: 'percentage',
   iterationBatchSize: 5,
+  maxAcquisitionIterations: 4,
+  learning: null,
   collaborators: ['ana', 'bruno'],
   annotationPolicy: { mode: 'single' },
 }
+
+describe('eligible annotators', () => {
+  it('loads every page of active users', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{ id: 'id-ana', username: 'ana', display_name: 'Ana' }],
+        next_cursor: 'next page',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{ id: 'id-bruno', username: 'bruno', display_name: 'Bruno' }],
+        next_cursor: null,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(listEligibleAnnotators('token')).resolves.toEqual([
+      { id: 'id-ana', username: 'ana', display_name: 'Ana' },
+      { id: 'id-bruno', username: 'bruno', display_name: 'Bruno' },
+    ])
+    expect(fetch).toHaveBeenNthCalledWith(2, expect.stringContaining('cursor=next%20page'), expect.anything())
+  })
+})
 
 describe('resolveAnnotatorIds', () => {
   it('maps usernames to persisted member IDs in order', () => {
@@ -61,6 +87,22 @@ describe('split sizing', () => {
       validation_set_size: null,
       validation_set_percentage: 10,
     })
+  })
+
+  it('sends the iteration limit, and the learning settings only with active learning', () => {
+    const learning = { solution: 'deterministic', configuration: { retain_helper_models: false }, metric: 'map50' as const, interval: 2, target: 0.8 }
+
+    expect(buildProjectCreateBody({ ...baseDraft, learning })).toMatchObject({ max_acquisition_iterations: 4 })
+    expect(buildProjectCreateBody({ ...baseDraft, learning })).not.toHaveProperty('learning_solution')
+    expect(buildProjectCreateBody({ ...baseDraft, acquisitionStrategy: 'active_learning', learning })).toMatchObject({
+      max_acquisition_iterations: 4,
+      learning_solution: 'deterministic',
+      learning_configuration: { retain_helper_models: false },
+      evaluation_metric: 'map50',
+      evaluation_interval: 2,
+      metric_target: 0.8,
+    })
+    expect(buildProjectCreateBody({ ...baseDraft, datasetLayout: 'single_batch' })).not.toHaveProperty('max_acquisition_iterations')
   })
 
   it('rounds percentage sizes up like the API', () => {

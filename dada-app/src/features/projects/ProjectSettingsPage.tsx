@@ -8,6 +8,8 @@ import { Button } from '../../components/ui/Button'
 import { useAuth } from '../auth/auth-context'
 import { consensusKeys, getPolicyHistory, getResolverEligibility } from '../consensus/consensus-api'
 import { detailErrorLines } from './error-details'
+import { LearningSettingsForm } from './LearningSettingsForm'
+import { defaultLearning, iterationLimitProblem, learningBody, learningProblem, projectLearning } from './learning-settings'
 import {
   addMember,
   changeMemberRole,
@@ -30,7 +32,7 @@ import {
 } from './resolver-config'
 import { resolverLabel } from './resolver-label'
 import { clearSetup, loadSetup } from './setup-recovery'
-import type { AcquisitionStrategy, AnnotationMode } from './types'
+import type { AcquisitionStrategy, AnnotationMode, LearningDraft } from './types'
 
 export function ProjectSettingsPage() {
   const { projectId = '' } = useParams()
@@ -50,10 +52,22 @@ export function ProjectSettingsPage() {
   const [username, setUsername] = useState('')
   const [memberRole, setMemberRole] = useState<'manager' | 'annotator' | 'viewer'>('annotator')
   const [strategy, setStrategy] = useState<AcquisitionStrategy>('random')
+  const [iterationLimit, setIterationLimit] = useState(1)
+  const [learning, setLearning] = useState<LearningDraft | null>(null)
 
   useEffect(() => {
-    if (project.data) setStrategy(project.data.acquisition_strategy)
+    if (!project.data) return
+    setStrategy(project.data.acquisition_strategy)
+    setIterationLimit(project.data.max_acquisition_iterations ?? 1)
   }, [project.data])
+
+  useEffect(() => {
+    if (project.data?.acquisition_strategy === 'active_learning' && capabilities.data) setLearning(projectLearning(project.data, capabilities.data))
+  }, [capabilities.data, project.data])
+
+  useEffect(() => {
+    if (strategy === 'active_learning' && !learning && capabilities.data && project.data) setLearning(defaultLearning(capabilities.data, project.data.task_type))
+  }, [capabilities.data, learning, project.data, strategy])
 
   useEffect(() => {
     if (!policy.data) return
@@ -134,8 +148,15 @@ export function ProjectSettingsPage() {
     mutationFn: (userId: string) => removeMember(projectId, userId, token!),
     onSuccess: refreshMembers,
   })
+  const acquisitionError = iterationLimitProblem(iterationLimit) ??
+    (strategy === 'active_learning' && taskType ? learningProblem(learning, capabilities.data, taskType) : null)
   const saveStrategy = useMutation({
-    mutationFn: () => updateProject(projectId, { acquisition_strategy: strategy, version: project.data!.version }, token!),
+    mutationFn: () => updateProject(projectId, {
+      acquisition_strategy: strategy,
+      max_acquisition_iterations: iterationLimit,
+      ...(strategy === 'active_learning' && learning ? learningBody(learning) : {}),
+      version: project.data!.version,
+    }, token!),
     onSuccess: (updated) => {
       queryClient.setQueryData(['project', projectId], updated)
       queryClient.invalidateQueries({ queryKey: ['projects'] })
@@ -211,7 +232,7 @@ export function ProjectSettingsPage() {
     </section>}
     <section className="wizard-card">
       <div className="wizard-section">
-        <div><p className="eyebrow">Acquisition</p><h2>Acquisition strategy</h2><p className="muted">Decides how later training batches are chosen. It never changes the fixed validation and test sets or the initial batches.</p></div>
+        <div><p className="eyebrow">Acquisition</p><h2>Acquisition strategy</h2><p className="muted">Decides how later training batches are chosen and when the loop stops. It never changes the fixed validation and test sets or the initial batches, and a change applies from the next iteration.</p></div>
         {project.data?.dataset_layout === 'single_batch'
           ? <p className="notice">Random acquisition. A static single-batch project has no later training batches, so the strategy cannot change.</p>
           : <>
@@ -220,10 +241,17 @@ export function ProjectSettingsPage() {
                 <option value="random">Random acquisition</option>
                 <option value="active_learning">Active learning</option>
               </select>
-              <small>{strategy === 'random' ? 'Randomly selected from the remaining eligible training images.' : 'A learning model chooses later training batches once the learning adapter is available.'}</small>
+              <small>{strategy === 'random' ? 'Randomly selected from the remaining eligible training images.' : 'The selected solution trains on the accepted annotations and chooses which images or objects to annotate next.'}</small>
             </label>
+            <label className="field" htmlFor="iteration-limit">Maximum acquisition iterations
+              <input id="iteration-limit" type="number" min={1} step={1} value={iterationLimit} onChange={(event) => setIterationLimit(Number(event.target.value))} />
+              <small>The loop stops after this many acquisition batches, or earlier when the training pool runs out.</small>
+            </label>
+            {strategy === 'active_learning' && (learning && capabilities.data && taskType
+              ? <LearningSettingsForm taskType={taskType} capabilities={capabilities.data} value={learning} onChange={setLearning} />
+              : <p className="notice">Loading the active-learning catalog from the API…</p>)}
             {saveStrategy.isError && <p className="form-error" role="alert">{saveError(saveStrategy.error)}</p>}
-            <footer className="wizard-actions"><span /><Button onClick={() => saveStrategy.mutate()} disabled={strategy === project.data?.acquisition_strategy || saveStrategy.isPending}>{saveStrategy.isPending ? 'Saving…' : 'Save strategy'}</Button></footer>
+            <footer className="wizard-actions"><span className="validation-message" aria-live="polite">{acquisitionError}</span><Button onClick={() => saveStrategy.mutate()} disabled={Boolean(acquisitionError) || saveStrategy.isPending}>{saveStrategy.isPending ? 'Saving…' : 'Save acquisition'}</Button></footer>
           </>}
       </div>
     </section>

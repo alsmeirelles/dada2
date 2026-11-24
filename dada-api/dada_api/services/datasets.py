@@ -356,9 +356,11 @@ async def eligible_training_pool(
     """Return the train-split media a later training batch may select.
 
     A train image leaves the pool while a live training batch holds it and for
-    good once its item is resolved. A cancelled item, or one left unresolved in
-    a closed or failed batch, returns its image to the pool. Validation and
-    test media are never in it because they are not in the train split.
+    good once it is resolved as a whole image. An image whose object targets
+    alone were resolved stays in the pool, because its other objects may still
+    be queried (D16). A cancelled item, or one left unresolved in a closed or
+    failed batch, returns its image to the pool. Validation and test media are
+    never in it because they are not in the train split.
 
     Args:
         session: Active database session.
@@ -374,10 +376,15 @@ async def eligible_training_pool(
             AnnotationBatch.project_id == project.id,
             AnnotationBatch.purpose.in_(TRAINING_PURPOSES),
             or_(
-                BatchItem.status == ItemStatus.resolved,
+                and_(
+                    BatchItem.status == ItemStatus.resolved,
+                    BatchItem.target_key.is_(None),
+                ),
                 and_(
                     AnnotationBatch.status.not_in(FINISHED_BATCH_STATUSES),
-                    BatchItem.status != ItemStatus.cancelled,
+                    BatchItem.status.not_in(
+                        (ItemStatus.cancelled, ItemStatus.resolved)
+                    ),
                 ),
             ),
         )

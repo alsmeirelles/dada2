@@ -4,6 +4,7 @@ availability."""
 import types
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from importlib import metadata
 from typing import Any, Literal, Union, get_args, get_origin
 
@@ -300,6 +301,10 @@ def _kind(annotation: Any) -> tuple[str, list[str] | None]:
     """Map a field annotation to a descriptor kind and its enum options."""
     if get_origin(annotation) is Literal:
         return "enum", [str(option) for option in get_args(annotation)]
+    if isinstance(annotation, type) and issubclass(annotation, Enum):
+        return "enum", [str(option.value) for option in annotation]
+    if annotation is str:
+        return "string", None
     if annotation is config.Ratio:
         return "ratio", None
     if annotation is config.AreaThreshold:

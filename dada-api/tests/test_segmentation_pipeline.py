@@ -291,3 +291,20 @@ def test_replay_is_byte_identical() -> None:
     assert protocol.fingerprint(first.model_dump(mode="json")) == protocol.fingerprint(
         again.model_dump(mode="json")
     )
+
+
+def test_an_object_target_refines_every_answer_without_matching() -> None:
+    region = [0.0, 0.0, 60.0, 60.0]
+    output = segmentation.resolve(
+        _input(
+            {
+                "ana": [_instance("a1", CAT, _square(10, 10, 20))],
+                "bia": [_instance("b1", CAT, _square(11, 10, 20))],
+            }
+        ).model_copy(update={"target_region": region})
+    )
+
+    [candidate] = output.candidates
+    assert candidate.region == region
+    assert candidate.passed is True
+    assert [entry["class_id"] for entry in candidate.objects] == [CAT]

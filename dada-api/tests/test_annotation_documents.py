@@ -123,3 +123,18 @@ def test_the_content_hash_ignores_key_order_but_not_content() -> None:
 
     assert digest(first) == digest(reordered)
     assert digest(first) != digest(moved)
+
+
+def test_an_object_target_document_holds_at_most_one_object() -> None:
+    one = [box("one", [1, 1, 5, 5])]
+    two = one + [box("two", [10, 10, 5, 5])]
+
+    def target(objects: list[dict]) -> list[DocumentError]:
+        return annotation_documents.validate_submission(
+            "detection", objects, CLASSES, 100, 80, target=True
+        )
+
+    assert target([]) == []
+    assert target(one) == []
+    assert target(two) == [DocumentError(None, "too_many_objects")]
+    assert check("detection", two) == []

@@ -54,12 +54,14 @@ def validate_submission(
     class_ids: Collection[str],
     width: int,
     height: int,
+    target: bool = False,
 ) -> list[DocumentError]:
     """Return every rule a document breaks before it may be submitted.
 
     An image may carry several classes. An empty document is the explicit
     "nothing here" answer for detection and segmentation; a classification
-    needs at least one class, and each class only once.
+    needs at least one class, and each class only once. The document of an
+    object target describes that one object, so it holds at most one (D16).
 
     Args:
         task_type: The project's task.
@@ -67,6 +69,7 @@ def validate_submission(
         class_ids: Identifiers of the project's classes.
         width: Original image width in pixels.
         height: Original image height in pixels.
+        target: Whether the document answers an object target.
 
     Returns:
         The errors found, empty when the document may be submitted.
@@ -74,6 +77,8 @@ def validate_submission(
     errors: list[DocumentError] = []
     if not objects and task_type not in EMPTY_ALLOWED_TASKS:
         errors.append(DocumentError(None, "empty_not_allowed"))
+    if target and len(objects) > 1:
+        errors.append(DocumentError(None, "too_many_objects"))
 
     seen_ids: set[str] = set()
     seen_classes: set[str] = set()
@@ -90,21 +95,37 @@ def validate_submission(
                 errors.append(DocumentError(object_id, "duplicate_class"))
             seen_classes.add(item["class_id"])
 
-        geometry = item["geometry"]
-        kind = geometry["type"] if geometry else None
-        if kind != GEOMETRY_BY_TASK[task_type]:
-            errors.append(DocumentError(object_id, "wrong_geometry"))
-        elif kind == "rectangle":
-            code = _rectangle_error(geometry["coordinates"], width, height)
-            if code:
-                errors.append(DocumentError(object_id, code))
-        elif kind == "polygon":
-            for ring in geometry["coordinates"]:
-                code = _ring_error(ring, width, height)
-                if code:
-                    errors.append(DocumentError(object_id, code))
-                    break
+        code = geometry_error(task_type, item["geometry"], width, height)
+        if code:
+            errors.append(DocumentError(object_id, code))
     return errors
+
+
+def geometry_error(
+    task_type: str, geometry: dict[str, Any] | None, width: int, height: int
+) -> str | None:
+    """Return why a geometry cannot belong to a task's document, or None.
+
+    Args:
+        task_type: The project's task.
+        geometry: A stored geometry, None for a classification label.
+        width: Original image width in pixels.
+        height: Original image height in pixels.
+
+    Returns:
+        The error code, or None when the geometry is valid.
+    """
+    kind = geometry["type"] if geometry else None
+    if kind != GEOMETRY_BY_TASK[task_type]:
+        return "wrong_geometry"
+    if kind == "rectangle":
+        return _rectangle_error(geometry["coordinates"], width, height)
+    if kind == "polygon":
+        for ring in geometry["coordinates"]:
+            code = _ring_error(ring, width, height)
+            if code:
+                return code
+    return None
 
 
 def _rectangle_error(coordinates: list[float], width: int, height: int) -> str | None:

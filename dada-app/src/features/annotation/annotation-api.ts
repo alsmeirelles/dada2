@@ -1,18 +1,21 @@
-import { apiRequest } from '../../api/client'
+import { apiDownload, apiRequest } from '../../api/client'
 import { requestKey } from '../../api/idempotency'
 import { config } from '../../config/env'
 import type { Page, Project, ProjectClassInput } from '../projects/types'
 import type {
   AnnotationObject,
-  AssignmentDetail,
   AssignmentQueue,
+  AssignmentDetail,
   AssignmentQueueItem,
+  AssistPrompt,
+  AssistResult,
   DraftSaved,
   EventTicket,
+  ExportFormat,
+  Iteration,
   IterationList,
   ProjectStatistics,
-  SamPrediction,
-  SamPrompt,
+  QualityReport,
   SubmissionReceived,
   WorkspaceBootstrap,
 } from './types'
@@ -81,30 +84,59 @@ export function submissionKey(assignmentId: string, body: { version: number; obj
   return requestKey(`submit:${assignmentId}`, body)
 }
 
-export function predictSegmentation(
+/** Asks the project's latest target model for a suggestion on the caller's open assignment (D18). */
+export function requestAssistance(
   projectId: string,
-  assignment: AssignmentDetail,
-  prompts: SamPrompt[],
+  assignmentId: string,
+  requestId: string,
+  prompt: AssistPrompt,
   token: string,
 ) {
-  return apiRequest<SamPrediction>('/api/v1/inference/sam-predict', {
+  return apiRequest<AssistResult>('/api/v1/inference/sam-predict', {
     method: 'POST', token,
-    body: {
-      project_id: projectId,
-      assignment_id: assignment.id,
-      image_id: assignment.media.id,
-      prompts,
-    },
+    body: { project_id: projectId, assignment_id: assignmentId, request_id: requestId, prompts: [prompt] },
   })
+}
+
+/** Every iteration, oldest first, and the current one. */
+export async function listIterations(projectId: string, token: string): Promise<IterationList> {
+  const items: Iteration[] = []
+  let page: IterationList | null = null
+  do {
+    const query: string = page?.next_cursor ? `?cursor=${encodeURIComponent(page.next_cursor)}` : ''
+    page = await apiRequest<IterationList>(`/api/v1/projects/${projectId}/iterations${query}`, { token })
+    items.push(...page.items)
+  } while (page.next_cursor)
+  return { items, current_iteration: page.current_iteration, next_cursor: null }
 }
 
 export async function getProjectActivity(projectId: string, token: string) {
   const [project, iterations, statistics] = await Promise.all([
     apiRequest<Project>(`/api/v1/projects/${projectId}`, { token }),
-    apiRequest<IterationList>(`/api/v1/projects/${projectId}/iterations`, { token }),
+    listIterations(projectId, token),
     apiRequest<ProjectStatistics>(`/api/v1/projects/${projectId}/statistics`, { token }),
   ])
   return { project, iterations, statistics }
+}
+
+/** Queues a new attempt of a failed iteration over the same snapshots. */
+export function retryIteration(projectId: string, iterationId: string, token: string) {
+  return apiRequest<Iteration>(`/api/v1/projects/${projectId}/iterations/${iterationId}/retry`, { method: 'POST', token })
+}
+
+export function getQuality(projectId: string, token: string) {
+  return apiRequest<QualityReport>(`/api/v1/projects/${projectId}/quality`, { token })
+}
+
+/** Downloads the annotated dataset as a ZIP archive and saves it in the browser. */
+export async function downloadDataset(projectId: string, format: ExportFormat, token: string) {
+  const { blob, name } = await apiDownload(`/api/v1/projects/${projectId}/export?format=${format}`, { token })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 export function createEventTicket(projectId: string, token: string) {

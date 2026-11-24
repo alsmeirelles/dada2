@@ -1,3 +1,4 @@
+import type { EvaluationMetric } from '../../api/capabilities'
 import type { ResolverConfiguration } from './resolver-config'
 
 export type TaskType = 'classification' | 'detection' | 'segmentation'
@@ -25,6 +26,14 @@ export type Project = {
   validation_set_size: number | null
   validation_set_percentage: number | null
   iteration_batch_size: number | null
+  max_acquisition_iterations: number | null
+  learning_solution: string | null
+  learning_solution_version: string | null
+  learning_configuration: ResolverSettings
+  evaluation_metric: EvaluationMetric | null
+  evaluation_interval: number | null
+  metric_target: number | null
+  completion_reason: CompletionReason | null
   dataset_prepared_at: string | null
   version: number
   created_at: string
@@ -33,6 +42,20 @@ export type Project = {
 }
 
 export type AcquisitionStrategy = 'random' | 'active_learning'
+export type CompletionReason = 'max_iterations' | 'metric_target' | 'pool_exhausted'
+
+/**
+ * The active-learning choices of a project: the solution, its configuration,
+ * the target-model metric, how many acquisitions pass between evaluations, and
+ * an optional target that stops the loop once reached.
+ */
+export type LearningDraft = {
+  solution: string
+  configuration: ResolverSettings
+  metric: EvaluationMetric
+  interval: number
+  target: number | null
+}
 /** `single_batch` annotates every image once and never trains or acquires. */
 export type DatasetLayout = 'split' | 'single_batch'
 
@@ -97,6 +120,10 @@ export type ProjectDraft = {
   validationSetSize: number
   validationSetUnit: SplitSizeUnit
   iterationBatchSize: number
+  /** Acquisition iterations before the loop stops; required for `split`. */
+  maxAcquisitionIterations: number
+  /** Null until the active-learning catalog is known, and for random acquisition. */
+  learning: LearningDraft | null
   collaborators: string[]
   annotationPolicy: AnnotationPolicyDraft
 }

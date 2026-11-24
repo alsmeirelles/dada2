@@ -2,6 +2,7 @@ import { apiRequest } from '../../api/client'
 import { config } from '../../config/env'
 import { prepareDataset } from './dataset-api'
 import { sha256Hex, type LocalImage } from './ingest'
+import { learningBody } from './learning-settings'
 import {
   confirmProjectCreated,
   loadSetup,
@@ -47,15 +48,49 @@ export type ProjectMember = {
   role: string
 }
 
+export type EligibleAnnotator = {
+  id: string
+  username: string
+  display_name: string
+}
+
 export async function listProjects(token: string): Promise<Page<Project>> {
   return apiRequest('/api/v1/projects', { token })
+}
+
+export async function listEligibleAnnotators(token: string): Promise<EligibleAnnotator[]> {
+  const users: EligibleAnnotator[] = []
+  let cursor: string | null = null
+  do {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
+    const page: Page<EligibleAnnotator> = await apiRequest(
+      `/api/v1/users/eligible-annotators${query}`,
+      { token },
+    )
+    users.push(...page.items)
+    cursor = page.next_cursor
+  } while (cursor)
+  return users
 }
 
 export function getProject(projectId: string, token: string) {
   return apiRequest<Project>(`/api/v1/projects/${projectId}`, { token })
 }
 
-export function updateProject(projectId: string, body: { name?: string; description?: string | null; acquisition_strategy?: AcquisitionStrategy; version: number }, token: string) {
+export type ProjectUpdate = {
+  name?: string
+  description?: string | null
+  acquisition_strategy?: AcquisitionStrategy
+  max_acquisition_iterations?: number
+  learning_solution?: string | null
+  learning_configuration?: Record<string, unknown> | null
+  evaluation_metric?: string | null
+  evaluation_interval?: number | null
+  metric_target?: number | null
+  version: number
+}
+
+export function updateProject(projectId: string, body: ProjectUpdate, token: string) {
   return apiRequest<Project>(`/api/v1/projects/${projectId}`, { method: 'PATCH', token, headers: idempotencyHeaders(), body })
 }
 
@@ -233,6 +268,8 @@ export function buildProjectCreateBody(draft: ProjectDraft) {
       draft.validationSetUnit,
     ),
     iteration_batch_size: draft.iterationBatchSize,
+    max_acquisition_iterations: draft.maxAcquisitionIterations,
+    ...(draft.acquisitionStrategy === 'active_learning' && draft.learning ? learningBody(draft.learning) : {}),
   }
 }
 

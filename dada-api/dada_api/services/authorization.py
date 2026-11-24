@@ -32,6 +32,7 @@ class ProjectAction(StrEnum):
     run_resolution = "run_resolution"
     adjudicate = "adjudicate"
     read_annotator_performance = "read_annotator_performance"
+    manage_learning = "manage_learning"
 
 
 ROLE_ACTIONS: dict[ProjectRole, frozenset[ProjectAction]] = {
@@ -50,6 +51,7 @@ ROLE_ACTIONS: dict[ProjectRole, frozenset[ProjectAction]] = {
             ProjectAction.run_resolution,
             ProjectAction.adjudicate,
             ProjectAction.read_annotator_performance,
+            ProjectAction.manage_learning,
         }
     ),
     ProjectRole.annotator: frozenset(

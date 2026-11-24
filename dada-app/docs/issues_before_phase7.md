@@ -1,16 +1,37 @@
-# Phase 7 issues
+# Phase 7 App implementation issues
 
-| ID | Pending solution | Required documented outcome |
-| --- | --- | --- |
-| `I7-01` | Annotator definition in project creation | User selection by writting is ambigous. Select from existing users |
-| `I7-02` | Annotation settings - class strategy | Present only required user actionable messages |
-| `I7-03` | dada-api folder replication | Missbehavior on folder creation - should now occur |
+I7-04 and I7-05 are implementation stages to resolve and verify when Phase 7 implementation begins; they do not block its start. Phase 7 decisions and the start gate are maintained in the canonical [Phase 7 decision record](../../dada-api/docs/phases/phase_7.md).
+
+Record each resolution with its root cause, affected surface, remediation, verification, owner, and completion date.
+
+| ID | Issue | Required documented outcome | Status |
+| --- | --- | --- | --- |
+| `I7-01` | Annotator selection in project creation | Replace ambiguous typed usernames with selection from existing eligible users | **RESOLVED** |
+| `I7-02` | Annotation settings: class strategy availability | Present concise, actionable availability guidance without internal IDs or raw evidence diagnostics | **RESOLVED** |
+| `I7-03` | `dada-api` quote-named directory replication | Identify and remove the configuration/command path that creates the spurious directory hierarchy; verify `make infra-up` no longer creates it | **RESOLVED** |
+| `I7-04` | `dada-app` image position in annotation canvas | images should be displayed in the center of the canvas | **RESOLVED** |
+| `I7-05` | `dada-app` Unauthorized requests | If user session has expired or anauthorized responses arrive, go to login | **RESOLVED** |
+
 
 ## I7-01
 
-At the team definition stage of project creation, annotators should be selected for the project. Current implementation
-requires that usernames are typed. Make a user selection dropbox or some better looking widget to let the project owner
-select multiple annotators from existent users.
+At the team definition stage of project creation, annotators should be selected
+from existing users. The current implementation requires typed usernames. Add a
+multiple-user selection control appropriate to the project owner/manager flow.
+
+**Cause.** The App had no user-discovery surface available to ordinary project
+creators. The only API user list was the administrator-only global management
+route, so the wizard fell back to an unchecked free-text username field.
+
+**Resolution record:** **RESOLVED.** `GET /api/v1/users/eligible-annotators`
+now lets any authenticated active user retrieve only the `id`, `username`, and
+`display_name` of active users; global user administration remains restricted
+to administrators. The project wizard loads every page of that directory and
+offers the other active users as a checkbox list. Selected users are added as
+annotators and kept in sync with the consensus pool. Verification: the live
+HTTP authorization/filtering test passed; the wizard selection test passed;
+the complete App suite passed (200 tests), as did App lint and the production
+build. Owner: DADA App/API maintainers. Completed: 2026-10-20.
 
 ## I7-02
 
@@ -22,7 +43,25 @@ observations per outcome (rater 1aca8eed-346e-4afb-81b9-8b42a774b716, outcome e0
 5, found 0); observations per outcome (rater 1aca8eed-346e-4afb-81b9-8b42a774b716, outcome bb26a385-3007-4d8e-8dd9-e15601474ba3, 
 required 5, found 0);"
 
-That goes on longer. Present only what the user needs to know to access these options and be succinct.
+That goes on longer. Present only what the user needs to know to access these
+options, succinctly.
+
+**Cause.** The App rendered every field in the API's internal `missing`
+evidence array. Per-rater and per-outcome entries therefore repeated UUIDs,
+thresholds, and observed counts in the option's help text.
+
+**Resolution record:** **RESOLVED.** Conditional strategies still use the full
+API report to decide whether they are enabled, but repeated per-rater and
+per-class gaps are collapsed into one short requirement for each evidence type.
+For example, the App says that reliability weighting needs 30 reference
+decisions per selected annotator and 5 for every class, without showing IDs or
+the repeated current counts. Loading, lookup failure, pre-project, dependency,
+and quarantine states retain distinct actionable messages. Raw diagnostics
+remain in the API response for operational use and are not rendered in the
+form. Verification: resolver unit and component tests cover hidden internal
+user/class IDs, collapsed repeated gaps, and the concise accessible
+description; the complete App suite passed (200 tests). Owner: DADA App
+maintainers. Completed: 2026-10-20.
 
 ## I7-03
 
@@ -30,4 +69,77 @@ When executing the infra containers with make infra-up, a folder is being create
 only a double quote (") and inside it there's a folder hierarchy recreating all folders from my drive's root to the path 
 where dada-api is. This shouldn't happen and this double quote folder shouldn't be created.
 
-I don't know what's triggering this.
+Removing the generated folder previously exposed the malformed root when the
+annotation canvas requested media:
+
+```text
+FileNotFoundError: [Errno 2] No such file or directory: '/home/meirelles/IA/dada2/dada-api/"/home/meirelles/IA/dada2/dada-api/data/media"/69fc7098-7ada-49e3-8c20-3da24c52c25e/bd/fd/bdfd7968ae8e2e80b7ef9c123a2de301b39d8ac9e9044195acf6aa84f982f9ee'
+```
+
+**Cause.** The local `.env` surrounded both absolute storage roots with double
+quotes. A dotenv parser removes those quotes, but the Makefile's GNU Make
+`include`/`export` path preserved them. The API then received a value beginning
+with `"`, treated it as relative, and resolved it below `dada-api`, reproducing
+the absolute hierarchy inside a directory named `"`. `make infra-up` exposed
+the same environment-loading path but starts only PostgreSQL and Redis; the
+first later API storage access created the hierarchy.
+
+**Resolution record:** **RESOLVED.** The local storage-root values no longer
+carry quotes, and API configuration now removes one matching outer quote pair
+before testing whether a storage root is absolute. This makes values exported
+by GNU Make resolve identically to values read directly by the dotenv parser.
+Verification: the regression test passed for quoted absolute media and upload
+roots; all 17 storage tests passed; API lint and format checks passed; from an
+artifact-free `dada-api` directory, `make infra-up` brought PostgreSQL and Redis
+to healthy state and no `"` directory existed afterward. Owner: DADA API
+maintainers. Completed: 2026-10-20.
+
+
+## I7-04
+
+When clicking an image from the assignment set in the annotation canvas, it sometimes is displayed displaced down on the
+screen, requiring a zoom out and the use of the "Pan" function to properly place it at the center of the canvas. When 
+initially displaying an image it should always be centered and occupying the full canvas width. The zoom in/out should 
+keep its position and only make the zoom in/out from the position the mouse is placed over the image.
+
+**Cause.** Found by reading the canvas code; the exact browser sequence is
+still to be confirmed live. The canvas could leave its fitted position in
+three ways. The zoom buttons and the `+`/`-` keys changed the scale around the
+image's top-left corner, which pushed the image right and down. The wheel
+handler was registered by React as a passive listener, so its
+`preventDefault` was ignored and a trackpad pinch or Ctrl+wheel also zoomed the
+whole page. The stage was a hidden-overflow scroll box, which the browser may
+scroll on its own and so move the image without the canvas knowing. The first
+view also fitted the whole image with a 56-pixel margin instead of the canvas
+width.
+
+**Resolution record:** **RESOLVED.** An image now opens centred across the full
+canvas width, computed before the first paint and again whenever the canvas
+changes size; "Fit image" (and the `0` key) shows the whole image, centred. The
+buttons zoom around the canvas centre and the keys around the pointer when it
+is over the canvas; the wheel keeps zooming around the pointer through a
+non-passive listener, so the page itself never zooms or scrolls; and the stage
+clips its content instead of being scrollable. Verification: the new canvas
+tests (`ImageStage.test.tsx`: full-width centring, zoom around the centre, fit
+of the whole image) and the viewport tests passed, as did the complete App
+suite (230 tests), lint, and the production build. The check in the two latest
+Chrome and Firefox releases is pending the test machine. Owner: DADA App
+maintainers. Completed: 2026-11-24.
+
+## I7-05
+
+If a user session has timed-out and the user starts getting 401 unauthorized responses, redirect to the login page again.
+
+**Cause.** Only the `/auth/me` request made at start-up cleared the session on
+`401`. The App has no refresh flow, and an access token lasts 60 minutes by
+default, so after it expired every other request failed with `401` and the page
+only showed an error while the user stayed signed in.
+
+**Resolution record:** **RESOLVED.** The API client reports every `401` to a
+request sent with an access token. The App then signs out, the protected
+routes return to the login page with the page the user was on, the login page
+says the session ended, and signing in again returns to that page. A failed
+login, which carries no token, is unaffected. Verification: the client tests
+(`client.test.ts`) and the end-to-end session test (`session-expiry.test.tsx`)
+passed, as did the complete App suite (230 tests). Owner: DADA App
+maintainers. Completed: 2026-11-24.

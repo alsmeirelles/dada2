@@ -30,7 +30,7 @@ function renderPage(data: ImageEvidence, width = 1400) {
     if (method === 'POST' && path === '/api/v1/projects/p1/batch-items/item-1/resolve') return json({ ...run({ id: 'run-2', sequence: 2, status: 'queued', proposal: null }) }, 202)
     return undefined
   })
-  const context: AuthContextValue = { user: manager, token: 'token', isLoading: false, login: vi.fn(), logout: vi.fn() }
+  const context: AuthContextValue = { user: manager, token: 'token', isLoading: false, sessionExpired: false, login: vi.fn(), logout: vi.fn() }
   const view = render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <AuthContext.Provider value={context}>
       <MemoryRouter initialEntries={['/projects/p1/consensus/images/item-1']}>

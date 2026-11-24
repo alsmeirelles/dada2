@@ -48,7 +48,7 @@ function renderPage(url = '/projects/p1/consensus/work-items/w1?item=item-1') {
     if (path === '/api/v1/projects/p1/resolution-work-items/w1/adjudicate') return answerAdjudication(body)
     return undefined
   })
-  const context: AuthContextValue = { user: manager, token: 'token', isLoading: false, login: vi.fn(), logout: vi.fn() }
+  const context: AuthContextValue = { user: manager, token: 'token', isLoading: false, sessionExpired: false, login: vi.fn(), logout: vi.fn() }
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <AuthContext.Provider value={context}>
       <MemoryRouter initialEntries={[url]}>

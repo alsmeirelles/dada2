@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { findDuplicateGroups, mergeSelections, scanImageFiles, type LocalImage } from './ingest'
+import { acceptValue, findDuplicateGroups, formatList, mergeSelections, scanImageFiles, supportedFormats, type LocalImage } from './ingest'
 
 function fileAt(path: string, content: string, type: string) {
   const file = new File([content], path.split('/').at(-1)!, { type })
@@ -70,5 +70,35 @@ describe('mergeSelections', () => {
 
     expect(sameFolder.rejected).toEqual([{ relativePath: '0001.jpg', reason: 'duplicate_path' }])
     expect(merged.images.map((image) => image.relativePath)).toEqual(['0001.jpg', 'day/0002.jpg', 'day.jpg'])
+  })
+})
+
+describe('P7-06: the shared image format registry', () => {
+  it('accepts HEIC and HEIF files with or without a MIME type, as the original bytes', () => {
+    const result = scanImageFiles([
+      fileAt('set/typed.heic', 'a', 'image/heic'),
+      fileAt('set/untyped.HEIC', 'b', ''),
+      fileAt('set/untyped.heif', 'c', ''),
+      fileAt('set/burst.heics', 'd', 'image/heic-sequence'),
+    ])
+
+    expect(result.images.map((image) => [image.relativePath, image.mediaType])).toEqual([
+      ['typed.heic', 'image/heic'],
+      ['untyped.HEIC', 'image/heic'],
+      ['untyped.heif', 'image/heif'],
+    ])
+    expect(result.images[0]!.file.size).toBe(1)
+    expect(result.rejected).toEqual([{ relativePath: 'burst.heics', reason: 'unsupported' }])
+  })
+
+  it('offers only what the API advertises, in both file inputs and the help text', () => {
+    const formats = supportedFormats(['image/jpeg', 'image/png', 'image/webp'])
+
+    expect(acceptValue(formats)).toBe('image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp')
+    expect(formatList(formats)).toBe('JPEG, PNG, and WebP')
+    expect(formatList(supportedFormats(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']))).toBe('JPEG, PNG, WebP, HEIC, and HEIF')
+    expect(scanImageFiles([fileAt('set/photo.heic', 'a', 'image/heic')], formats).rejected).toEqual([
+      { relativePath: 'photo.heic', reason: 'unsupported' },
+    ])
   })
 })

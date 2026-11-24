@@ -73,6 +73,9 @@ class ResolverInput(Envelope):
 
     ``candidates`` holds the frozen first-round candidates when the run
     evaluates review evidence; it is None for a first round.
+    ``target_region`` is the context area of an object target (D17): every
+    answer then describes that same object, so no matching is needed. The
+    target's proposed geometry is never part of the input.
     """
 
     pipeline: str
@@ -85,6 +88,7 @@ class ResolverInput(Envelope):
     sources: list[Source]
     candidates: list[dict[str, Any]] | None = None
     calibration: dict[str, Any] | None = None
+    target_region: list[float] | None = None
 
 
 class Candidate(Envelope):

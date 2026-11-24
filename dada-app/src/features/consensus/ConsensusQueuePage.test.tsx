@@ -35,7 +35,7 @@ const common: ApiRoute = ({ path }) => {
 
 function renderPage(route: ApiRoute) {
   const fetch = stubApi((request) => common(request) ?? route(request))
-  const context: AuthContextValue = { user: manager, token: 'token', isLoading: false, login: vi.fn(), logout: vi.fn() }
+  const context: AuthContextValue = { user: manager, token: 'token', isLoading: false, sessionExpired: false, login: vi.fn(), logout: vi.fn() }
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <AuthContext.Provider value={context}>
       <MemoryRouter initialEntries={['/projects/p1/consensus']}>
@@ -116,7 +116,7 @@ describe('ConsensusQueuePage', () => {
       if (path === '/api/v1/projects/p1/batches') return apiError(403, 'forbidden')
       return common({ path, method: 'GET', search: new URLSearchParams(), body: undefined })
     })
-    const context: AuthContextValue = { user: manager, token: 'token', isLoading: false, login: vi.fn(), logout: vi.fn() }
+    const context: AuthContextValue = { user: manager, token: 'token', isLoading: false, sessionExpired: false, login: vi.fn(), logout: vi.fn() }
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <AuthContext.Provider value={context}>
         <MemoryRouter initialEntries={['/projects/p1/consensus']}>

@@ -18,11 +18,12 @@ class ParameterDescriptor(BaseModel):
 
     ``name`` is dotted for fields inside a nested group. Ratio bounds and
     defaults are ``{"numerator", "denominator"}`` objects; an ``area`` value
-    is ``{"pixels", "image_ratio"}``.
+    is ``{"pixels", "image_ratio"}``; a ``string`` is free text, such as a
+    model name, that the API validates.
     """
 
     name: str
-    kind: Literal["ratio", "number", "integer", "enum", "boolean", "area"]
+    kind: Literal["ratio", "number", "integer", "enum", "boolean", "area", "string"]
     default: Any
     nullable: bool
     options: list[str] | None
@@ -65,6 +66,24 @@ class PipelineCapability(BaseModel):
     review_thresholds: list[ParameterDescriptor]
 
 
+class SolutionCapability(BaseModel):
+    """An active-learning solution a project may select.
+
+    A ``development_only`` solution exists only in development and test
+    environments. A non-null ``unavailable_reason`` means it cannot be
+    selected; nothing is ever substituted for it.
+    """
+
+    id: str
+    version: str
+    display_name: str
+    description: str
+    supported_tasks: list[Literal["classification", "detection", "segmentation"]]
+    development_only: bool
+    unavailable_reason: Literal["dependency_missing"] | None
+    parameters: list[ParameterDescriptor]
+
+
 class CapabilitiesResponse(BaseModel):
     """Limits and features that clients must discover at runtime."""
 
@@ -77,4 +96,6 @@ class CapabilitiesResponse(BaseModel):
     supported_task_types: list[Literal["classification", "detection", "segmentation"]]
     supported_annotation_modes: list[Literal["single", "consensus"]]
     consensus_pipelines: dict[str, PipelineCapability]
+    active_learning_solutions: list[SolutionCapability]
+    evaluation_metrics: dict[str, list[str]]
     realtime_transport: Literal["websocket", "polling"]

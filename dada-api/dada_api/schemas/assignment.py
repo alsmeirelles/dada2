@@ -72,6 +72,21 @@ class CanonicalAnnotationObject(AnnotationObject):
     )
 
 
+class AssignmentTarget(BaseModel):
+    """The object target an assignment answers, shown as a cue (D16).
+
+    ``geometry`` is the solution's proposed box or polygon and ``region`` the
+    ``[x, y, width, height]`` context area around it, in canonical image
+    pixels. The document describes only this object, or is empty when there
+    is none; the cue itself is never an annotation or a vote.
+    """
+
+    geometry: Annotated[
+        RectangleGeometry | CanonicalPolygonGeometry, Field(discriminator="type")
+    ]
+    region: list[float] = Field(min_length=4, max_length=4)
+
+
 class DocumentWrite(BaseModel):
     """A draft save or a final submission of the complete image document.
 
@@ -97,6 +112,7 @@ class AssignmentQueueItem(BaseModel):
     version: int
     seeded_from_import: bool
     updated_at: datetime
+    target: AssignmentTarget | None = None
 
 
 class AssignmentQueueCounts(BaseModel):
@@ -143,7 +159,8 @@ class AssignmentDetail(BaseModel):
     ``objects`` is the caller's draft while the work is open and their latest
     submission once it is submitted. ``seeded_from_import`` says the work began
     from imported labels without exposing the import itself. ``resolution``
-    is present only once the image is resolved.
+    is present only once the image is resolved. ``target`` is present when the
+    assignment answers one object target inside the image.
     """
 
     id: UUID
@@ -160,6 +177,7 @@ class AssignmentDetail(BaseModel):
     revision: int | None
     submitted_at: datetime | None
     resolution: FinalResolution | None = None
+    target: AssignmentTarget | None = None
 
 
 class DraftSaved(BaseModel):

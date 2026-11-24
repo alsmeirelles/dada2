@@ -125,13 +125,16 @@ function StrategyPicker({ legend, name, strategies, selected, eligibility, disab
   </fieldset>
 }
 
-function SettingField({ id, field, value, problem, disabled, onChange }: {
+/** One descriptor-driven input; it also renders active-learning solution settings. */
+export function SettingField({ id, field, value, problem, disabled, onChange, emptyHelp = 'Leave it empty to turn it off.' }: {
   id: string
   field: ConfigField
   value: unknown
   problem: string | undefined
   disabled: boolean
   onChange: (value: unknown) => void
+  /** What an empty nullable value means. */
+  emptyHelp?: string
 }) {
   const { descriptor } = field
   const label = fieldLabel(descriptor.name)
@@ -142,7 +145,7 @@ function SettingField({ id, field, value, problem, disabled, onChange }: {
     descriptor.help,
     descriptor.unit ? `Unit: ${descriptor.unit}.` : null,
     boundsText(descriptor),
-    descriptor.nullable ? 'Leave it empty to turn it off.' : null,
+    descriptor.nullable ? emptyHelp : null,
   ].filter(Boolean).join(' ')
   const common = { disabled, 'aria-invalid': Boolean(problem), 'aria-describedby': describedBy }
   const number = (raw: string) => raw === '' ? null : Number(raw)
@@ -177,13 +180,15 @@ function SettingField({ id, field, value, problem, disabled, onChange }: {
       {footer}
     </div>
   }
+  const text = (raw: string) => raw === '' && descriptor.nullable ? null : raw
   return <div className="resolver-field">
     <label htmlFor={id}>{label}</label>
-    {descriptor.kind === 'enum'
-      ? <select {...common} id={id} value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(event.target.value)}>
-        {(descriptor.options ?? []).map((option) => <option key={option} value={option}>{resolverLabel(option)}</option>)}
-      </select>
-      : <input {...common} id={id} type="number" step={descriptor.kind === 'integer' ? 1 : 'any'} value={typeof value === 'number' ? value : ''} onChange={(event) => onChange(number(event.target.value))} />}
+    {descriptor.kind === 'enum' && <select {...common} id={id} value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(text(event.target.value))}>
+      {descriptor.nullable && <option value="">Default</option>}
+      {(descriptor.options ?? []).map((option) => <option key={option} value={option}>{resolverLabel(option)}</option>)}
+    </select>}
+    {descriptor.kind === 'string' && <input {...common} id={id} type="text" value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(text(event.target.value))} />}
+    {(descriptor.kind === 'number' || descriptor.kind === 'integer') && <input {...common} id={id} type="number" step={descriptor.kind === 'integer' ? 1 : 'any'} value={typeof value === 'number' ? value : ''} onChange={(event) => onChange(number(event.target.value))} />}
     {footer}
   </div>
 }

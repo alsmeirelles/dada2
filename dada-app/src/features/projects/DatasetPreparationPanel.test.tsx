@@ -16,7 +16,7 @@ const project: Project = {
   status: 'draft', owner_id: 'user-1', acquisition_strategy: 'random',
   dataset_layout: 'split', initial_training_size: null, test_set_size: 4,
   test_set_percentage: null, validation_set_size: 2, validation_set_percentage: null,
-  iteration_batch_size: 3, dataset_prepared_at: '2026-09-24T12:00:00Z', version: 1,
+  iteration_batch_size: 3, max_acquisition_iterations: 5, learning_solution: null, learning_solution_version: null, learning_configuration: {}, evaluation_metric: null, evaluation_interval: null, metric_target: null, completion_reason: null, dataset_prepared_at: '2026-09-24T12:00:00Z', version: 1,
   created_at: '2026-09-24T12:00:00Z', updated_at: '2026-09-24T12:00:00Z',
 }
 
@@ -48,7 +48,7 @@ function renderPanel(
       is_administrator: false, is_active: true, version: 1,
       created_at: '2026-09-24T12:00:00Z',
     },
-    token: 'token', isLoading: false, login: vi.fn(), logout: vi.fn(),
+    token: 'token', isLoading: false, sessionExpired: false, login: vi.fn(), logout: vi.fn(),
   }
   render(<QueryClientProvider client={new QueryClient()}>
     <AuthContext.Provider value={context}>

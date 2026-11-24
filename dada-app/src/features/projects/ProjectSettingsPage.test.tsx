@@ -5,12 +5,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthContext, type AuthContextValue } from '../auth/auth-context'
 import { ProjectSettingsPage } from './ProjectSettingsPage'
+import { learningCatalog } from './learning-catalog.fixture'
 import { consensusPipelines } from './resolver-catalog.fixture'
 
 const project = {
   id: 'project-1', name: 'Road defects', description: null, task_type: 'detection', status: 'active', owner_id: 'owner',
   acquisition_strategy: 'random', dataset_layout: 'split', initial_training_size: null, test_set_size: 1,
   test_set_percentage: null, validation_set_size: 1, validation_set_percentage: null, iteration_batch_size: 2,
+  max_acquisition_iterations: 5, learning_solution: null, learning_solution_version: null, learning_configuration: {},
+  evaluation_metric: null, evaluation_interval: null, metric_target: null, completion_reason: null,
   dataset_prepared_at: null, version: 1, created_at: '2026-10-15T12:00:00Z', updated_at: '2026-10-15T12:00:00Z',
 }
 const members = { items: [
@@ -38,7 +41,7 @@ function payload(url: string) {
     ] }
   }
   if (url.endsWith('/members')) return members
-  if (url.endsWith('/capabilities')) return { consensus_pipelines: consensusPipelines }
+  if (url.endsWith('/capabilities')) return { consensus_pipelines: consensusPipelines, ...learningCatalog }
   return project
 }
 
@@ -50,7 +53,7 @@ function renderSettings() {
   vi.stubGlobal('fetch', fetch)
   const context: AuthContextValue = {
     user: { id: 'owner', username: 'owner', display_name: 'Owner', is_administrator: false, is_active: true, version: 1, created_at: '2026-10-15T12:00:00Z' },
-    token: 'token', isLoading: false, login: vi.fn(), logout: vi.fn(),
+    token: 'token', isLoading: false, sessionExpired: false, login: vi.fn(), logout: vi.fn(),
   }
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <AuthContext.Provider value={context}>
@@ -73,7 +76,7 @@ describe('default policy settings', () => {
 
     expect(await screen.findByRole('radio', { name: /Dirichlet vote/ })).toBeChecked()
     expect(screen.getByLabelText('Minimum posterior')).toHaveValue(0.95)
-    expect(await screen.findByText('Not enough project evidence: calibration items (required 50, found 12).')).toBeInTheDocument()
+    expect(await screen.findByText('Available after this project has 50 resolved images annotated by at least three selected annotators.')).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: /Reliability weighted vote/ })).toBeEnabled()
     expect(screen.getByRole('radio', { name: /Dawid skene/ })).toBeDisabled()
     expect(await screen.findByText(/2 batches are still preparing and keep their current snapshots/)).toBeInTheDocument()
@@ -99,6 +102,31 @@ describe('default policy settings', () => {
       review_thresholds: thresholds,
       require_independent_adjudicator: true,
       version: 4,
+    })
+  })
+})
+
+describe('acquisition settings', () => {
+  it('switches to active learning with the iteration limit and the solution settings', async () => {
+    const fetch = renderSettings()
+
+    fireEvent.change(await screen.findByRole('combobox', { name: /Strategy/ }), { target: { value: 'active_learning' } })
+    expect(await screen.findByRole('radio', { name: /Deterministic/ })).toBeChecked()
+    expect(screen.getByRole('spinbutton', { name: /Maximum acquisition iterations/ })).toHaveValue(5)
+    fireEvent.change(screen.getByRole('spinbutton', { name: /Maximum acquisition iterations/ }), { target: { value: '8' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save acquisition' }))
+
+    await waitFor(() => expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH')).toBe(true))
+    const [, request] = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH')!
+    expect(JSON.parse(String((request as RequestInit).body))).toEqual({
+      acquisition_strategy: 'active_learning',
+      max_acquisition_iterations: 8,
+      learning_solution: 'deterministic',
+      learning_configuration: { retain_helper_models: false, model_name: null },
+      evaluation_metric: 'map50',
+      evaluation_interval: 1,
+      metric_target: null,
+      version: 1,
     })
   })
 })

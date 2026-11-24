@@ -46,7 +46,7 @@ from dada_api.models.resolution import (
     RunTrigger,
 )
 from dada_api.models.user import User
-from dada_api.schemas.assignment import AssignmentMedia
+from dada_api.schemas.assignment import AssignmentMedia, AssignmentTarget
 from dada_api.schemas.resolution import (
     AdjudicationRequest,
     AdjudicationView,
@@ -583,7 +583,12 @@ async def _decision_objects(
             )
         )
         errors = annotation_documents.validate_submission(
-            project.task_type, objects, class_ids, width, height
+            project.task_type,
+            objects,
+            class_ids,
+            width,
+            height,
+            target=item.target_key is not None,
         )
         if errors:
             raise ApiError(
@@ -1133,4 +1138,9 @@ async def evidence(
         runs=[run_view(run, proposals.get(run.id)) for run in runs],
         resolutions=[resolution_view(entry) for entry in resolutions],
         work_items=work_item_views,
+        target=(
+            AssignmentTarget(geometry=item.target_geometry, region=item.target_region)
+            if item.target_key is not None
+            else None
+        ),
     )

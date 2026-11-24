@@ -8,6 +8,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from dada_api.active_learning import catalog as solution_catalog
 from dada_api.core.errors import redact_validation_errors
 from dada_api.main import app
 from dada_api.schemas.project import ProjectCreate
@@ -43,8 +44,16 @@ async def test_capabilities_match_frontend_contract(
     assert response.status_code == 200
     body = response.json()
     pipelines = body.pop("consensus_pipelines")
+    solutions = body.pop("active_learning_solutions")
+    metrics = body.pop("evaluation_metrics")
     assert body == {
-        "supported_image_media_types": ["image/jpeg", "image/png", "image/webp"],
+        "supported_image_media_types": [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/heic",
+            "image/heif",
+        ],
         "max_file_bytes": 104857600,
         "max_project_files": 100000,
         "upload_chunk_bytes": 8388608,
@@ -71,6 +80,25 @@ async def test_capabilities_match_frontend_contract(
         "numerator": 2,
         "denominator": 3,
     }
+    assert metrics == {
+        "classification": ["accuracy", "f1"],
+        "detection": ["map50"],
+        "segmentation": ["mean_iou"],
+    }
+    assert [(item["id"], item["development_only"]) for item in solutions] == [
+        ("dada", False),
+        ("deterministic", True),
+    ]
+    dada, deterministic = solutions
+    assert dada["unavailable_reason"] == solution_catalog.unavailable_reason(
+        solution_catalog.DADA
+    )
+    assert dada["supported_tasks"] == ["classification", "detection", "segmentation"]
+    assert {"target_model_name", "uncertainty_method", "proxy_epochs"} <= {
+        item["name"] for item in dada["parameters"]
+    }
+    assert deterministic["unavailable_reason"] is None
+    assert deterministic["parameters"][0]["name"] == "retain_helper_models"
 
 
 async def test_framework_errors_use_common_envelope(

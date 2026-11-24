@@ -54,6 +54,7 @@ from dada_api.models.user import User
 from dada_api.services import (
     annotation_documents,
     performance,
+    quality,
     resolution_runs,
     resolver_quarantines,
 )
@@ -74,6 +75,7 @@ DRAFT = {
     "validation_set_size": 1,
     "initial_training_size": 2,
     "iteration_batch_size": 2,
+    "max_acquisition_iterations": 5,
 }
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 PIPELINES = {
@@ -323,6 +325,12 @@ async def _rows(model: type, *conditions) -> list:
         return list(await session.scalars(select(model).where(*conditions)))
 
 
+async def _quality(project_id: str) -> list[quality.ItemQuality]:
+    """Return what each batch item adds to the project's quality."""
+    async with async_session_factory() as session:
+        return await quality.collect(session, await session.get(Project, project_id))
+
+
 async def test_first_round_acceptance_creates_one_current_resolution(
     database: None,
 ) -> None:
@@ -477,6 +485,8 @@ async def test_low_agreement_reaches_a_reviewer_then_a_second_round(
     assert resolution.version == 1
     [closed] = await _rows(ResolutionWorkItem)
     assert closed.status == "resolved"
+    reviewed = [item for item in await _quality(project["id"]) if item.reviewed]
+    assert [item.status for item in reviewed] == ["resolved"]
 
 
 async def test_a_second_failure_goes_to_an_expert(database: None) -> None:
@@ -1558,6 +1568,31 @@ async def test_detection_resolves_with_box_agreement_observations(
     assert {(row.outcome, row.metric_name) for row in rows} == {("retained", "box_iou")}
     assert all(0.9 < row.metric_value < 1.0 for row in rows)
     assert len(await _rows(ResolutionObjectEvidence)) == 2
+    [measured] = [item for item in await _quality(project["id"]) if item.agreement]
+    [(metric, value)] = measured.agreement
+    assert (measured.status, measured.reviewed, metric) == (
+        "resolved",
+        False,
+        "box_iou",
+    )
+    assert 0.9 < value < 1.0
+    async with _client() as client:
+        report = await client.get(
+            f"/api/v1/projects/{project['id']}/quality",
+            headers=_auth(await _token("owner")),
+        )
+    assert report.status_code == 200, report.text
+    assert report.json() == {
+        "task_type": "detection",
+        "total_items": 4,
+        "resolved_items": 1,
+        "minimum_decisions": 30,
+        "minimum_cell": 5,
+        "suppressed": True,
+        "review_rate": None,
+        "resolution_rate": None,
+        "agreement": [{"metric": "box_iou", "observations": 1, "median": None}],
+    }
 
 
 async def test_a_reviewed_false_positive_is_recorded_without_a_zero_overlap(
@@ -1623,6 +1658,8 @@ async def test_segmentation_resolves_with_mask_agreement_observations(
     assert {row.outcome for row in rows} == {"retained"}
     [summary, _] = performance.summarize(rows)
     assert summary["decisions"] == 1
+    [measured] = [item for item in await _quality(project["id"]) if item.agreement]
+    assert [metric for metric, _ in measured.agreement] == ["mask_iou"]
 
 
 async def _batch_of(client: httpx.AsyncClient, project: dict, purpose: str) -> dict:
@@ -1813,6 +1850,8 @@ async def test_only_owners_and_managers_reach_the_resolution_routes(
             ("get", f"{base}/annotator-performance", None),
             ("get", f"{base}/resolver-eligibility", None),
             ("get", f"{base}/annotation-policy/history", None),
+            ("get", f"{base}/quality", None),
+            ("get", f"{base}/export", None),
         ]
         statuses = {}
         for username in ("annie", "vic", "outsider"):
@@ -1825,7 +1864,7 @@ async def test_only_owners_and_managers_reach_the_resolution_routes(
                 statuses[(username, method, url)] = response.status_code
 
     assert set(statuses.values()) == {403}
-    assert len(statuses) == 33
+    assert len(statuses) == 39
 
 
 async def test_deleting_a_project_removes_its_whole_resolution_history(

@@ -2,11 +2,11 @@ import { LoaderCircle, Maximize, Minus, Plus } from 'lucide-react'
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
-  type WheelEvent,
 } from 'react'
 
 import { Button } from '../../components/ui/Button'
@@ -17,10 +17,15 @@ import type {
   AnnotationObject,
   AnnotationTool,
   AssignmentMedia,
+  AssistPrompt,
 } from './types'
-import { clampZoom, zoomAroundPoint } from './viewport'
+import { fitView, zoomAroundPoint, type View } from './viewport'
 
 type DraftBox = { start: Point; end: Point; pointerId: number }
+
+const ZOOM_STEP = 1.2
+/** A drag shorter than this, in image pixels, is a point prompt rather than a box. */
+const MIN_PROMPT_BOX = 4
 
 type ImageStageProps = {
   media: AssignmentMedia
@@ -30,10 +35,14 @@ type ImageStageProps = {
   selectedClassId: string | null
   selectedObjectId: string | null
   locked: boolean
-  samPending: boolean
+  /** A model suggestion is on its way; the assist tool waits for it. */
+  assistPending?: boolean
+  /** The most objects the document may hold, as for an object target. */
+  maxObjects?: number
   onChange: (document: AnnotationDocument) => void
   onSelectObject: (id: string | null) => void
-  onSamPoint: (point: Point) => void
+  /** Called with a point or box drawn with the assist tool. */
+  onAssist?: (prompt: AssistPrompt) => void
   onNotice: (message: string) => void
   /** Read-only SVG drawn beneath the objects in original-image pixels; it never takes pointer input. */
   overlay?: ReactNode
@@ -47,36 +56,43 @@ export function ImageStage({
   selectedClassId,
   selectedObjectId,
   locked,
-  samPending,
+  assistPending = false,
+  maxObjects,
   onChange,
   onSelectObject,
-  onSamPoint,
+  onAssist,
   onNotice,
   overlay,
 }: ImageStageProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [zoom, setZoom] = useState(1)
-  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const pointer = useRef<Point | null>(null)
+  const [view, setView] = useState<View>({ zoom: 1, offset: { x: 0, y: 0 } })
+  const { zoom, offset } = view
   const [drag, setDrag] = useState<{ pointerId: number; x: number; y: number } | null>(null)
   const [spaceHeld, setSpaceHeld] = useState(false)
   const [draftBox, setDraftBox] = useState<DraftBox | null>(null)
   const [polygonPoints, setPolygonPoints] = useState<Point[]>([])
   const [hoverPoint, setHoverPoint] = useState<Point | null>(null)
 
-  const fit = useCallback(() => {
+  const fit = useCallback((whole: boolean) => {
     const container = containerRef.current
     if (!container) return
-    const padding = 56
-    const nextZoom = clampZoom(Math.min(
-      (container.clientWidth - padding) / media.width,
-      (container.clientHeight - padding) / media.height,
-    ))
-    setZoom(nextZoom)
-    setOffset({
-      x: (container.clientWidth - media.width * nextZoom) / 2,
-      y: (container.clientHeight - media.height * nextZoom) / 2,
-    })
+    setView(fitView(container.clientWidth, container.clientHeight, media.width, media.height, whole))
   }, [media.height, media.width])
+
+  /** Zooms around a stage point, the canvas centre when none is given, so the image stays put (I7-04). */
+  const zoomBy = useCallback((factor: number, point?: Point | null) => {
+    const container = containerRef.current
+    if (!container) return
+    const anchor = point ?? { x: container.clientWidth / 2, y: container.clientHeight / 2 }
+    setView((current) => zoomAroundPoint(current.zoom, current.zoom * factor, current.offset, anchor))
+  }, [])
+
+  const full = useCallback(() => {
+    if (maxObjects === undefined || document.objects.length < maxObjects) return false
+    onNotice('This assignment answers only the highlighted object. Delete the current one to draw it again.')
+    return true
+  }, [document.objects.length, maxObjects, onNotice])
 
   const finishPolygon = useCallback(() => {
     if (polygonPoints.length < 3) {
@@ -87,6 +103,7 @@ export function ImageStage({
       onNotice('Select a class before creating an annotation.')
       return
     }
+    if (full()) return
     onChange(addObject(document, {
       id: crypto.randomUUID(),
       class_id: selectedClassId,
@@ -95,18 +112,30 @@ export function ImageStage({
     }))
     setPolygonPoints([])
     setHoverPoint(null)
-  }, [document, onChange, onNotice, polygonPoints, selectedClassId])
+  }, [document, full, onChange, onNotice, polygonPoints, selectedClassId])
 
-  useEffect(() => {
-    fit()
+  useLayoutEffect(() => {
+    fit(false)
     setDraftBox(null)
     setPolygonPoints([])
     const container = containerRef.current
     if (!container) return
-    const observer = new ResizeObserver(fit)
+    const observer = new ResizeObserver(() => fit(false))
     observer.observe(container)
     return () => observer.disconnect()
   }, [fit, media.id])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    function wheel(event: WheelEvent) {
+      event.preventDefault()
+      const bounds = container!.getBoundingClientRect()
+      zoomBy(event.deltaY > 0 ? 0.88 : 1.12, { x: event.clientX - bounds.left, y: event.clientY - bounds.top })
+    }
+    container.addEventListener('wheel', wheel, { passive: false })
+    return () => container.removeEventListener('wheel', wheel)
+  }, [zoomBy])
 
   useEffect(() => {
     function key(event: KeyboardEvent) {
@@ -116,9 +145,9 @@ export function ImageStage({
         event.preventDefault()
       }
       if (event.type !== 'keydown') return
-      if (event.key === '+' || event.key === '=') setZoom((value) => clampZoom(value * 1.2))
-      if (event.key === '-') setZoom((value) => clampZoom(value / 1.2))
-      if (event.key === '0') fit()
+      if (event.key === '+' || event.key === '=') zoomBy(ZOOM_STEP, pointer.current)
+      if (event.key === '-') zoomBy(1 / ZOOM_STEP, pointer.current)
+      if (event.key === '0') fit(true)
       if (event.key === 'Escape') {
         setDraftBox(null)
         setPolygonPoints([])
@@ -135,16 +164,8 @@ export function ImageStage({
       window.removeEventListener('keydown', key)
       window.removeEventListener('keyup', key)
     }
-  }, [finishPolygon, fit, tool])
+  }, [finishPolygon, fit, tool, zoomBy])
 
-  function handleWheel(event: WheelEvent<HTMLDivElement>) {
-    event.preventDefault()
-    const bounds = event.currentTarget.getBoundingClientRect()
-    const point = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
-    const next = zoomAroundPoint(zoom, zoom * (event.deltaY > 0 ? 0.88 : 1.12), offset, point)
-    setZoom(next.zoom)
-    setOffset(next.offset)
-  }
 
   function stagePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!(tool === 'pan' || spaceHeld || event.button === 1)) return
@@ -153,10 +174,12 @@ export function ImageStage({
   }
 
   function stagePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect()
+    pointer.current = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
     if (!drag || drag.pointerId !== event.pointerId) return
-    setOffset((current) => ({
-      x: current.x + event.clientX - drag.x,
-      y: current.y + event.clientY - drag.y,
+    setView((current) => ({
+      ...current,
+      offset: { x: current.offset.x + event.clientX - drag.x, y: current.offset.y + event.clientY - drag.y },
     }))
     setDrag({ ...drag, x: event.clientX, y: event.clientY })
   }
@@ -166,15 +189,17 @@ export function ImageStage({
     const point = imagePoint(event.clientX, event.clientY, event.currentTarget)
     if (tool === 'box') {
       if (!selectedClassId) return onNotice('Select a class before drawing a box.')
+      if (full()) return
       event.currentTarget.setPointerCapture(event.pointerId)
       setDraftBox({ start: point, end: point, pointerId: event.pointerId })
       onSelectObject(null)
     } else if (tool === 'polygon') {
       if (!selectedClassId) return onNotice('Select a class before drawing a polygon.')
+      if (!polygonPoints.length && full()) return
       setPolygonPoints((current) => [...current, point])
-    } else if (tool === 'sam-point' && !samPending) {
-      if (!selectedClassId) return onNotice('Select a class before using assisted segmentation.')
-      onSamPoint(point)
+    } else if (tool === 'assist' && !assistPending) {
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setDraftBox({ start: point, end: point, pointerId: event.pointerId })
     } else if (tool === 'select') {
       onSelectObject(null)
     }
@@ -187,10 +212,16 @@ export function ImageStage({
   }
 
   function overlayPointerUp(event: ReactPointerEvent<SVGSVGElement>) {
-    if (!draftBox || draftBox.pointerId !== event.pointerId || !selectedClassId) return
+    if (!draftBox || draftBox.pointerId !== event.pointerId) return
     const box = normalizedBox(draftBox.start, draftBox.end)
     setDraftBox(null)
-    if (box.width < 2 || box.height < 2) return
+    if (tool === 'assist') {
+      onAssist?.(box.width < MIN_PROMPT_BOX || box.height < MIN_PROMPT_BOX
+        ? { type: 'point', coordinates: [draftBox.end.x, draftBox.end.y] }
+        : { type: 'box', coordinates: [box.x, box.y, box.width, box.height] })
+      return
+    }
+    if (!selectedClassId || box.width < 2 || box.height < 2) return
     const object: AnnotationObject = {
       id: crypto.randomUUID(),
       class_id: selectedClassId,
@@ -209,9 +240,9 @@ export function ImageStage({
     <div
       ref={containerRef}
       className={`image-stage ${tool === 'pan' || spaceHeld ? 'image-stage--pan' : ''} ${drag ? 'image-stage--dragging' : ''}`}
-      onWheel={handleWheel}
       onPointerDown={stagePointerDown}
       onPointerMove={stagePointerMove}
+      onPointerLeave={() => { pointer.current = null }}
       onPointerUp={() => setDrag(null)}
       onPointerCancel={() => setDrag(null)}
       aria-label="Annotation image canvas"
@@ -244,18 +275,18 @@ export function ImageStage({
               onSelect={() => tool === 'select' && onSelectObject(object.id)}
             />
           ))}
-          {draftRectangle && <rect className="shape-draft" x={draftRectangle.x} y={draftRectangle.y} width={draftRectangle.width} height={draftRectangle.height} style={{ color: classColor(classes, selectedClassId) }} />}
+          {draftRectangle && <rect className={tool === 'assist' ? 'shape-draft assist-draft' : 'shape-draft'} x={draftRectangle.x} y={draftRectangle.y} width={draftRectangle.width} height={draftRectangle.height} style={{ color: classColor(classes, selectedClassId) }} />}
           {draftPolygon.length > 0 && <polyline className="shape-draft" points={draftPolygon.map((point) => `${point.x},${point.y}`).join(' ')} style={{ color: classColor(classes, selectedClassId) }} />}
           {polygonPoints.map((point, index) => <circle key={`${point.x}-${point.y}-${index}`} className="polygon-point" cx={point.x} cy={point.y} r={4 / zoom} style={{ color: classColor(classes, selectedClassId) }} />)}
         </svg>
       </div>
-      {samPending && <div className="sam-progress"><LoaderCircle size={16} /> Predicting mask…</div>}
+      {assistPending && <div className="sam-progress" role="status"><LoaderCircle size={16} /> Asking the model…</div>}
       {locked && <div className="canvas-lock" role="status">Read-only — editing disabled</div>}
       <div className="zoom-controls" aria-label="Zoom controls">
-        <Button variant="ghost" aria-label="Zoom out" onClick={() => setZoom((value) => clampZoom(value / 1.2))}><Minus size={17} /></Button>
-        <button className="zoom-value" onClick={fit} title="Fit image">{Math.round(zoom * 100)}%</button>
-        <Button variant="ghost" aria-label="Zoom in" onClick={() => setZoom((value) => clampZoom(value * 1.2))}><Plus size={17} /></Button>
-        <Button variant="ghost" aria-label="Fit image" onClick={fit}><Maximize size={17} /></Button>
+        <Button variant="ghost" aria-label="Zoom out" onClick={() => zoomBy(1 / ZOOM_STEP)}><Minus size={17} /></Button>
+        <button className="zoom-value" onClick={() => fit(true)} title="Fit image">{Math.round(zoom * 100)}%</button>
+        <Button variant="ghost" aria-label="Zoom in" onClick={() => zoomBy(ZOOM_STEP)}><Plus size={17} /></Button>
+        <Button variant="ghost" aria-label="Fit image" onClick={() => fit(true)}><Maximize size={17} /></Button>
       </div>
     </div>
   )

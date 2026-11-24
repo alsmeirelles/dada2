@@ -49,7 +49,7 @@ function renderBatches() {
   vi.stubGlobal('fetch', fetch)
   const context: AuthContextValue = {
     user: { id: 'owner', username: 'owner', display_name: 'Owner', is_administrator: false, is_active: true, version: 1, created_at: '2026-10-15T12:00:00Z' },
-    token: 'token', isLoading: false, login: vi.fn(), logout: vi.fn(),
+    token: 'token', isLoading: false, sessionExpired: false, login: vi.fn(), logout: vi.fn(),
   }
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <AuthContext.Provider value={context}>

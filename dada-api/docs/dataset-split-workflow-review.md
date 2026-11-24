@@ -108,7 +108,7 @@ recomputed from full provenance. This known limitation is unchanged.
 | Fixed train/validation/test membership | Implemented atomically at activation |
 | Absolute or percentage held-out sizes | Implemented; percentages resolve to saved absolute counts at activation |
 | Annotation work includes all three sets | Delivered as three full-coverage batches; superseded by the Phase 4.1 initial-batch correction |
-| First acquisition waits for all initial annotations | Superseded: Phase 4.1 requires accepted consensus resolutions for every initial image |
+| First acquisition waits for all initial annotations | Superseded: Phase 4.1 requires accepted resolutions for every initial image |
 | Pre-split initial annotation | Deliberately unsupported under the revised decision |
 | Test or validation enlargement | Unsupported, unchanged |
 | Reproducible original split draw | Membership is durable; original split-selection seeds remain unstored |

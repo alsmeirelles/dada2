@@ -15,12 +15,13 @@ export type Ratio = { numerator: number; denominator: number }
 export type Area = { pixels: number; image_ratio: number }
 
 /**
- * One settable resolver field. `name` is dotted inside a group, for example
- * `class_strategy.alpha`; ratio bounds and defaults are `Ratio` objects.
+ * One settable resolver or solution field. `name` is dotted inside a group, for
+ * example `class_strategy.alpha`; ratio bounds and defaults are `Ratio`
+ * objects; a `string` is free text, such as a model name, that the API validates.
  */
 export type ParameterDescriptor = {
   name: string
-  kind: 'ratio' | 'number' | 'integer' | 'enum' | 'boolean' | 'area'
+  kind: 'ratio' | 'number' | 'integer' | 'enum' | 'boolean' | 'area' | 'string'
   default: unknown
   nullable: boolean
   options: string[] | null
@@ -54,6 +55,20 @@ export type PipelineCapability = {
   review_thresholds: ParameterDescriptor[]
 }
 
+/** An active-learning solution a project may select; it is never substituted when unavailable. */
+export type SolutionCapability = {
+  id: string
+  version: string
+  display_name: string
+  description: string
+  supported_tasks: TaskTypeName[]
+  development_only: boolean
+  unavailable_reason: 'dependency_missing' | null
+  parameters: ParameterDescriptor[]
+}
+
+export type EvaluationMetric = 'accuracy' | 'f1' | 'map50' | 'mean_iou'
+
 export type Capabilities = {
   supported_image_media_types: string[]
   max_file_bytes: number
@@ -64,6 +79,8 @@ export type Capabilities = {
   supported_task_types: TaskTypeName[]
   supported_annotation_modes: Array<'single' | 'consensus'>
   consensus_pipelines: Record<TaskTypeName, PipelineCapability>
+  active_learning_solutions: SolutionCapability[]
+  evaluation_metrics: Record<TaskTypeName, EvaluationMetric[]>
   realtime_transport: 'websocket' | 'polling'
 }
 

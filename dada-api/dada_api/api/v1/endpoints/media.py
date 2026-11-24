@@ -32,7 +32,8 @@ async def media_content(
 
     The signature is the authorization: it is issued only inside an
     assignment the caller owns and expires shortly after, so no bearer token
-    is needed and none is ever placed in a URL.
+    is needed and none is ever placed in a URL. An HEIC/HEIF source is served
+    as its lossless WebP rendition (P7-06).
 
     Args:
         media_id: Media item being served.
@@ -45,11 +46,17 @@ async def media_content(
     """
     media_urls.verify_media_url(media_id, expires, signature, datetime.now(UTC))
     content = await ingestion.get_media_content(session, media_id)
+    key = storage.display_key(
+        content.project_id, content.sha256, content.media_type, content.storage_key
+    )
+    heif = content.media_type in storage.HEIF_MEDIA_TYPES
     return StreamingResponse(
-        storage.iter_media(content.storage_key),
-        media_type=content.media_type,
+        storage.iter_media(key),
+        media_type=storage.RENDITION_MEDIA_TYPE if heif else content.media_type,
         headers={
-            "Content-Length": str(content.size_bytes),
+            "Content-Length": str(
+                storage.media_path(key).stat().st_size if heif else content.size_bytes
+            ),
             "Cache-Control": "private, max-age=3600",
         },
     )

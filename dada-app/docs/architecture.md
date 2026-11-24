@@ -28,6 +28,8 @@ may cache server data but must not become a second source of truth.
 - Let a user select a local dataset directory.
 - Recursively discover and review supported image files.
 - Upload bytes with progress, retry, resume, cancellation, and checksums.
+- Upload HEIC/HEIF source bytes unchanged and render the API-provided lossless
+  WebP rendition; the browser does not own image conversion.
 - Upload and review owner/manager annotation-label imports before assignments
   are distributed.
 - Render task-specific annotation tools.
@@ -41,6 +43,8 @@ may cache server data but must not become a second source of truth.
 - Authenticate and authorize every request and real-time connection.
 - Own project, membership, class, media, annotation, and iteration records.
 - Issue upload sessions and verify uploaded content.
+- Retain verified HEIC/HEIF sources and atomically create deterministic,
+  dimension-preserving lossless WebP renditions before media becomes usable.
 - Parse, validate, audit, and retain YOLO detection/COCO segmentation imports;
   seed caller drafts without creating submissions or resolutions.
 - Allocate complete-image annotation assignments atomically. Enforce leases
@@ -72,12 +76,15 @@ The App recursively walks files supplied by the browser and creates a manifest.
 - Preserve each file's path relative to the selected root as metadata.
 - Normalize separators to `/`; reject absolute paths and `..` traversal.
 - Never transmit the selected root's absolute local path.
-- Accept formats advertised by `GET /api/v1/capabilities`; initially JPEG, PNG,
-  and WebP are recommended.
+- Accept formats advertised by `GET /api/v1/capabilities`; Phase 7 supports
+  JPEG, PNG, WebP, HEIC, and HEIF through one shared App format registry.
 - Skip hidden files/directories and unsupported files by default and report
   them in the review screen.
 - Identify a file by SHA-256 plus byte length, not filename alone.
 - Treat equal content at multiple relative paths as a reviewable duplicate.
+- For HEIC/HEIF, use the API's oriented intrinsic width and height as the
+  annotation coordinate plane. The lossless WebP rendition has exactly those
+  pixel dimensions and is not reoriented or resized by the App.
 - Do not follow symbolic links supplied through drag-and-drop APIs.
 
 Chrome and Firefox expose directory selection differently. The implementation

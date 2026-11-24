@@ -56,17 +56,18 @@ describe('ResolverConfigForm', () => {
     expect(dawidSkene).toHaveAccessibleDescription(/project's own resolved images/)
   })
 
-  it('names the exact missing evidence once the API reports it', () => {
+  it('summarizes missing evidence without exposing raw diagnostics', () => {
     renderForm('classification', {
       status: 'ready',
       report: { strategies: [
         { strategy: 'reliability_weighted_vote', eligible: true, missing: [], report: {} },
-        { strategy: 'dawid_skene', eligible: false, missing: [{ requirement: 'convergence', iterations: 100 }], report: {} },
+        { strategy: 'dawid_skene', eligible: false, missing: [{ requirement: 'observations_per_outcome', rater: 'internal-user-id', outcome: 'internal-class-id', required: 5, found: 0 }], report: {} },
       ] },
     })
 
     expect(screen.getByRole('radio', { name: /Reliability weighted vote/ })).toBeEnabled()
-    expect(screen.getByRole('radio', { name: /Dawid skene/ })).toHaveAccessibleDescription('Not enough project evidence: convergence (iterations 100).')
+    expect(screen.getByRole('radio', { name: /Dawid skene/ })).toHaveAccessibleDescription('Available after this project has 5 observations for every class.')
+    expect(screen.queryByText(/internal-user-id|internal-class-id|required 5|found 0/)).not.toBeInTheDocument()
   })
 
   it('shows an unavailable strategy disabled with its reason', () => {

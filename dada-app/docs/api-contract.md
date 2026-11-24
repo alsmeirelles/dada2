@@ -47,7 +47,9 @@ unavailable. A `429` or `503` should include `Retry-After` where meaningful.
 
 The capability response must include `supported_image_media_types`,
 `max_file_bytes`, `max_project_files`, `upload_chunk_bytes`,
-`supported_task_types`, and `realtime_transport`.
+`supported_task_types`, and `realtime_transport`. Phase 7 adds `image/heic` and
+`image/heif`; this list is the App's authority for which entries from its shared
+MIME/extension registry are selectable.
 
 ## User administration and credentials — Phase 4
 
@@ -210,6 +212,24 @@ Rejection reasons are `invalid_relative_path`, `unsupported_media_type`, and
 `file_too_large`. Deduplication is scoped to one project: identical content is
 stored once and may be referenced by more than one relative path.
 
+Phase 7 accepts `.heic` and `.heif` as `image/heic` and `image/heif`. The App
+uploads and hashes the original bytes; it does not decode or transcode them.
+The API verifies the actual format, retains that content-addressed source, and
+creates one atomic, versioned lossless WebP sidecar from the oriented primary
+image before marking media usable. Sequence formats remain unsupported.
+
+The sidecar uses a deterministic 8-bit sRGB RGB or RGBA representation and
+lossless WebP encoding so it adds no compression damage to small visual
+targets. Its pixel width and height exactly equal those of the oriented primary
+HEIC/HEIF image. It is never resized, cropped, padded, or rotated a second time.
+Encoded byte sizes may differ. The media `width` and `height` and all annotation
+geometry use this canonical pixel plane.
+
+Completion reports `invalid_image` when bytes cannot be decoded as the declared
+supported format or exceed decoder security limits, and
+`image_conversion_failed` when a valid decoded source cannot be written as the
+required lossless rendition. Neither failure creates usable media.
+
 Upload status is `pending`, `uploading`, `processing`, `completed`, or `failed`.
 The App must wait for `completed` before activating the project. A failed
 session includes a structured `error` and remains queryable for recovery.
@@ -339,14 +359,19 @@ not assignments, submissions, consensus votes, or canonical resolutions.
 The API creates immutable train/validation/test membership when a project is
 activated. All three initial sets must have accepted image resolutions before
 the first acquisition may start; validation and test remain excluded from
-acquisition. Every iteration records its selection strategy and model/run
+acquisition. Internal active-learning manifests use accepted
+`initial_training` plus prior accepted acquisition data, validation is
+evaluation-only, and test is final-evaluation-only. These runs exist only to
+select later annotation targets; production-model training and export are out
+of scope. Every iteration records its selection strategy and model/run
 identifiers for reproducibility. The initial-training batch is not an
 acquisition iteration, and the final acquisition batch may be smaller than
 `iteration_batch_size`.
 
 Static `single_batch` projects have no split rows or iteration resources.
 
-Iteration states are:
+Iteration states are those of the "Phase 7 implemented shapes" section below,
+which replaced this earlier draft:
 
 ```text
 preparing -> annotating -> closing -> training -> ready
@@ -369,9 +394,15 @@ work is outstanding.
 ## Image annotation assignments — Phase 5 target
 
 The existing global `/api/v1/queue/next` placeholder is superseded by scoped
-direct image-assignment endpoints. An annotation batch item is always one
-complete image; each annotator submits one complete-image document. Annotation
-assignments are not claimed or leased.
+direct image-assignment endpoints. In the Phase 5 full-image workflow, each
+annotation batch item is one complete image and each annotator submits one
+complete-image document. Annotation assignments are not claimed or leased.
+
+For Phase 7 model-guided detection/segmentation acquisition, this full-image
+contract is extended by a target-scoped assignment. The detail still contains
+the source image and a model-generated target box or mask, but the annotator
+may label only that target. The target cue is never a submission or consensus
+vote. Its final request shape and context-area rule are defined by `P7-02`.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -424,7 +455,8 @@ include normalized geometry and always returns the new version.
 The existing `/api/v1/inference/sam-predict` route should additionally require
 `project_id`, `assignment_id`, and optional `embedding_cache_key`. The API verifies
 that the user owns the direct image assignment. Coordinates follow the same
-original-image pixel convention as stored annotations.
+original-image pixel convention as stored annotations. The implemented request
+and result are in "Phase 7 implemented shapes".
 
 ## Real-time endpoint
 
@@ -570,7 +602,11 @@ type SubmissionReceived = {
 **Image URL.** `image_url` is a path relative to the API origin:
 `/api/v1/media/{media_id}/content?expires=…&signature=…`. It is valid for one
 hour and needs no bearer, so it works in an `<img>` or SVG `<image>`. The App
-prefixes it with `VITE_API_BASE_URL`.
+prefixes it with `VITE_API_BASE_URL`. For an HEIC/HEIF source this route returns
+the lossless sidecar with `Content-Type: image/webp` and its own
+`Content-Length`. The response pixels have the intrinsic `media.width` and
+`media.height`; the App must not apply EXIF/HEIF orientation or alter that
+coordinate plane.
 
 **Submitting.** Send `Idempotency-Key: submit:{assignment_id}:{version}`, so a
 retry after a lost response replays the original result.
@@ -1015,3 +1051,221 @@ resolution: {
   objects: AnnotationObject[]
 } | null                                       // set only once the image is resolved
 ```
+
+## Phase 7 implemented shapes
+
+These complement the earlier sections and replace the iteration states and the
+assisted-segmentation request drafted above. Decisions are recorded in
+`dada-api/docs/phases/phase_7.md`.
+
+### Capabilities
+
+`supported_image_media_types` adds `image/heic` and `image/heif` (P7-06). The
+App offers only the formats of its registry that appear in this list, uploads
+HEIC/HEIF bytes unchanged, and shows the API's lossless WebP copy through the
+usual signed `image_url`, whose pixels have the item's `width` and `height`.
+
+```ts
+type SolutionCapability = {
+  id: string; version: string; display_name: string; description: string
+  supported_tasks: TaskType[]
+  development_only: boolean                   // listed only in development and test
+  unavailable_reason: 'dependency_missing' | null
+  parameters: ParameterDescriptor[]           // the solution's configuration
+}
+type EvaluationMetric = 'accuracy' | 'f1' | 'map50' | 'mean_iou'
+
+// GET /api/v1/capabilities gains
+active_learning_solutions: SolutionCapability[]
+evaluation_metrics: Record<TaskType, EvaluationMetric[]>
+// ParameterDescriptor.kind gains 'string': free text, such as a model name, that the API validates
+```
+
+### Project settings
+
+`ProjectCreate`, `ProjectUpdate`, and `Project` gain:
+
+```ts
+max_acquisition_iterations: number | null    // 1..10000; required for split, refused for single_batch, never cleared
+learning_solution: string | null
+learning_configuration: Record<string, unknown>
+evaluation_metric: EvaluationMetric | null
+evaluation_interval: number | null           // K, 1..1000
+metric_target: number | null                 // greater than 0, at most 1
+// response only
+learning_solution_version: string | null
+completion_reason: 'max_iterations' | 'metric_target' | 'pool_exhausted' | null
+```
+
+- The learning fields are accepted only with `active_learning`; a value sent
+  with `random` is `422 learning_settings_not_allowed`.
+- With `active_learning`, omitted fields take the defaults: the first available
+  solution for the task, its default configuration, the task's first metric,
+  `K = 1`, and no target.
+- Other errors, all `422`: `learning_solution_unknown`,
+  `learning_solution_unavailable`, `learning_solution_incompatible`,
+  `learning_configuration_invalid` (`details.errors`), and
+  `evaluation_metric_invalid`.
+- `PATCH` changes them on a `split` project, in `draft` or `active`; every run
+  copies the settings in force, so a change applies from the next run.
+
+### Iterations and statistics
+
+Iteration *n* is run *n* plus batch *n*. Its `id` is the first attempt's and
+stays the same across retries. `stage` comes from the worker while `status` is
+`training`; `eta_seconds` is always null in Phase 7. An acquisition batch opens
+in `preparing`, and an owner or manager starts it from the batches page.
+
+```ts
+type IterationStatus = 'training' | 'preparing' | 'annotating' | 'consolidating' | 'ready' | 'failed'
+
+type Evaluation = {
+  iteration: number; split: 'validation' | 'test'
+  metric: EvaluationMetric; value: number          // 0..1, higher is better
+  metrics: Record<string, number>; model: Record<string, unknown>; created_at: string
+}
+
+type Iteration = {
+  id: string; number: number; purpose: 'selection' | 'final_evaluation'
+  status: IterationStatus; stage: 'training' | 'evaluating' | 'selecting' | null
+  strategy: 'random' | 'active_learning'; attempt: number
+  solution: string | null; solution_version: string | null
+  batch_id: string | null; requested_size: number; selected_count: number | null
+  shortfall_reason: string | null; stop_reason: 'metric_target' | null
+  failure_code: string | null; failure_detail: string | null
+  total_count: number; resolved_count: number; review_required_count: number; available_count: number
+  total_assignment_count: number; submitted_assignment_count: number
+  eta_seconds: number | null
+  metrics: Record<string, number>                  // the validation evaluation, when there is one
+  evaluations: Evaluation[]
+  started_at: string; completed_at: string | null
+}
+
+type IterationPage = { items: Iteration[]; current_iteration: Iteration | null; next_cursor: string | null }
+
+type Statistics = {
+  project_id: string; acquisition_strategy: 'random' | 'active_learning'
+  max_acquisition_iterations: number | null; completed_iterations: number
+  completion_reason: 'max_iterations' | 'metric_target' | 'pool_exhausted' | null
+  evaluation_metric: EvaluationMetric | null; metric_target: number | null
+  evaluations: Evaluation[]
+}
+```
+
+| Method | Endpoint | Result |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/iterations` | `IterationPage`, oldest first |
+| `GET` | `/api/v1/projects/{project_id}/iterations/{iteration_id}` | `Iteration` |
+| `POST` | `/api/v1/projects/{project_id}/iterations/{iteration_id}/close` | `Iteration`; `409 iteration_incomplete` while items remain |
+| `POST` | `/api/v1/projects/{project_id}/iterations/{iteration_id}/retry` | `202 Iteration`, a new attempt over the same snapshots; owners and managers |
+| `GET` | `/api/v1/projects/{project_id}/statistics` | `Statistics` |
+
+A failed run stays failed until someone retries it; nothing is retried
+automatically.
+
+### Object targets
+
+Model-guided detection and segmentation acquisition selects objects inside
+images (D16).
+
+```ts
+type AssignmentTarget = {
+  geometry: RectangleGeometry | PolygonGeometry  // the solution's proposed box or polygon
+  region: [number, number, number, number]       // [x, y, width, height] context around it
+}
+// AssignmentQueueItem, AssignmentDetail, and the manager EvidenceResponse gain
+target: AssignmentTarget | null
+```
+
+The document of a target assignment holds at most one object (`invalid_document`
+code `too_many_objects`); an empty document means there is no object there. The
+cue is never saved into a draft and never counts as a vote.
+
+### Assisted segmentation
+
+`POST /api/v1/inference/sam-predict`, by the annotator who owns the open
+assignment, in detection and segmentation projects:
+
+```ts
+type AssistRequest = {
+  project_id: string; assignment_id: string
+  request_id?: string                            // echoed back; the server makes one up when omitted
+  prompts: [{ type: 'point'; coordinates: [number, number] }
+          | { type: 'box'; coordinates: [number, number, number, number] }]  // exactly one, canonical pixels
+}
+type AssistResponse = {
+  request_id: string; assignment_id: string
+  status: 'suggestion' | 'no_suggestion'
+  geometry: RectangleGeometry | PolygonGeometry | null  // a box for detection, a polygon for segmentation
+  score: number | null; model: Record<string, unknown>
+}
+```
+
+Nothing is saved: the suggestion reaches the draft only when the annotator
+accepts it there.
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `assignment_not_owned` | 403 | Someone else's assignment |
+| `assignment_already_submitted`, `assignment_not_active` | 409 | The assignment takes no more work |
+| `assistance_unavailable` | 409 | `details.reason`: `no_target_model`, `incompatible_target_model`, or `solution_unavailable` |
+| `assistance_not_supported` | 422 | Classification has no assistance |
+| `invalid_prompt` | 422 | The point or box leaves the image |
+| `assistance_timeout` | 503 | No answer within the configured wait (30 s by default), with `Retry-After` |
+| `assistance_failed` | 503 | The worker failed or returned an invalid geometry |
+
+### Quality
+
+`GET /api/v1/projects/{project_id}/quality`, owners and managers only:
+
+```ts
+type QualityReport = {
+  task_type: TaskType
+  total_items: number                    // batch items not cancelled; a target is one item
+  resolved_items: number                 // the decisions counted for suppression
+  minimum_decisions: number              // 30
+  minimum_cell: number                   // 5
+  suppressed: boolean                    // fewer than minimum_decisions resolved items
+  review_rate: number | null             // resolved items that needed reviewers or an expert / resolved items
+  resolution_rate: number | null         // resolved items / total_items
+  agreement: {
+    metric: 'winner_support' | 'box_iou' | 'mask_iou' | 'mask_dice'
+    observations: number                 // first-round candidates of resolved items
+    median: number | null
+  }[]
+}
+```
+
+Every rate and median is null while the report is suppressed, and a median
+backed by fewer than `minimum_cell` observations is null too. The agreement is
+the median of the first-round consensus metric of each candidate; single-mode
+items have none. Nothing names or ranks an annotator.
+
+### Dataset export
+
+`GET /api/v1/projects/{project_id}/export?format=coco|yolo|csv`, owners and
+managers only, streams `application/zip` with
+`Content-Disposition: attachment; filename="<project>-<format>.zip"`. Detection
+and segmentation use `coco` (the default) or `yolo`; classification uses `csv`.
+Another format is `422 export_format_not_supported` with `details.supported`.
+
+The archive holds only current accepted resolutions. Its splits are `train`
+(first training and acquisition batches), `val`, and `test`, or `all` for a
+`single_batch` project.
+
+| Path | Content |
+| --- | --- |
+| `images/<split>/<relative path>` | The image annotators saw; an HEIC/HEIF source is its WebP copy, named `<relative path>.webp` |
+| `annotations/<split>.json` | COCO: `file_name` is the path inside the split folder, `category_id` the class `display_order`, each polygon ring one COCO polygon, and every annotation carries `resolution_id` and `resolution_version` |
+| `labels/<split>/<path without suffix>.txt` and `data.yaml` | YOLO, normalized by the image size; a segmentation line holds the object's largest ring |
+| `annotations/<split>.csv` | Classification: `path` from the archive root, then one 0/1 column per class |
+| `provenance.json` | Per image: source digest and rendition, size, annotation status (`EXHAUSTIVELY_LABELED` or `PARTIALLY_LABELED`), queried regions, and the resolutions it came from |
+
+### App behavior
+
+- A request made with an access token that receives `401` signs the user out
+  and returns to the login page, which says the session ended (I7-05).
+- The annotation canvas opens each image centred across its full width; the
+  zoom buttons and keys zoom around the canvas centre or the pointer, and
+  "Fit image" shows the whole image (I7-04).
+

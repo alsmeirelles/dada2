@@ -402,10 +402,8 @@ function WorkItemEditor({ projectId, evidence, workItem, classes, people, userId
             selectedClassId={selectedClassId}
             selectedObjectId={selectedObjectId}
             locked={!editing}
-            samPending={false}
             onChange={(document) => setObjects(document.objects)}
             onSelectObject={setSelectedObjectId}
-            onSamPoint={() => undefined}
             onNotice={setMessage}
             overlay={<EvidenceShapes
               sources={view.shown}

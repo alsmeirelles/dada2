@@ -142,7 +142,9 @@ class AnnotationBatch(Base):
     selection_seed: Mapped[int] = mapped_column(BigInteger)
     selection_input_fingerprint: Mapped[str] = mapped_column(String(64))
     requested_size: Mapped[int] = mapped_column(Integer)
-    model_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    model_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("learning_runs.id", ondelete="SET NULL"), nullable=True
+    )
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -189,15 +191,30 @@ class AnnotationBatchAnnotator(Base):
 
 
 class BatchItem(Base):
-    """One selected image inside a batch.
+    """One selected image, or one object target inside an image, of a batch.
 
     ``status`` becomes ``resolved`` only when the image has an accepted
     canonical resolution. Submitted assignments alone never set it, which is
     what makes it the signal the first-acquisition guard can trust.
+
+    A model-guided detection or segmentation item names one object target
+    (D16): ``target_geometry`` is the solution's proposed box or polygon and
+    ``target_region`` the ``[x, y, width, height]`` context area shown around
+    it, both in canonical image pixels. The target is only a cue; it never
+    enters a document or a vote. A whole-image item has no target, and the
+    image is unique in its batch; target items are unique by ``target_key``.
     """
 
     __tablename__ = "batch_items"
-    __table_args__ = (UniqueConstraint("batch_id", "media_id", name="uq_batch_item"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_id",
+            "media_id",
+            "target_key",
+            name="uq_batch_item",
+            postgresql_nulls_not_distinct=True,
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36),
@@ -215,6 +232,9 @@ class BatchItem(Base):
     status: Mapped[str] = mapped_column(String(32), default=ItemStatus.pending)
     position: Mapped[int] = mapped_column(Integer)
     initial_evidence_generation: Mapped[int] = mapped_column(Integer, default=1)
+    target_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    target_geometry: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    target_region: Mapped[list[float] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

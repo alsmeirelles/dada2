@@ -3,12 +3,14 @@
 from fastapi import APIRouter, Depends, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dada_api.api.deps import require_administrator
+from dada_api.api.deps import get_current_user, require_administrator
 from dada_api.core.errors import ApiError
 from dada_api.db.session import get_session
 from dada_api.models.user import User
 from dada_api.schemas.user import (
     AdministratorPasswordReset,
+    EligibleAnnotatorPage,
+    EligibleAnnotatorRead,
     UserCreate,
     UserPage,
     UserRead,
@@ -65,6 +67,34 @@ async def list_users(
     items, next_cursor = await user_service.list_users(session, cursor, active)
     return UserPage(
         items=[UserRead.model_validate(item) for item in items],
+        next_cursor=next_cursor,
+    )
+
+
+@router.get("/users/eligible-annotators", response_model=EligibleAnnotatorPage)
+async def list_eligible_annotators(
+    cursor: str | None = Query(default=None),
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> EligibleAnnotatorPage:
+    """List active users that an authenticated project creator may select.
+
+    The project creation flow is available to every active user, so this route
+    uses the same authorization boundary and exposes only identity fields
+    needed by the selector. Global user administration remains administrator
+    only.
+
+    Args:
+        cursor: Opaque cursor from a previous page.
+        _: Authenticated active user.
+        session: Active database session.
+
+    Returns:
+        One page of active users ordered by username.
+    """
+    items, next_cursor = await user_service.list_users(session, cursor, active=True)
+    return EligibleAnnotatorPage(
+        items=[EligibleAnnotatorRead.model_validate(item) for item in items],
         next_cursor=next_cursor,
     )
 

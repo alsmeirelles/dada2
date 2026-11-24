@@ -212,6 +212,43 @@
         "title": "AdministratorPasswordReset",
         "type": "object"
       },
+      "AgreementSummary": {
+        "description": "The median first-round agreement of one consensus metric.\n\n``median`` is null when the report is suppressed or fewer than\n``minimum_cell`` candidates measured it.",
+        "properties": {
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median"
+          },
+          "metric": {
+            "enum": [
+              "winner_support",
+              "box_iou",
+              "mask_iou",
+              "mask_dice"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "observations": {
+            "title": "Observations",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "metric",
+          "observations",
+          "median"
+        ],
+        "title": "AgreementSummary",
+        "type": "object"
+      },
       "AnnotationImportCreate": {
         "description": "Create-import request naming the source format and its files.",
         "properties": {
@@ -577,7 +614,7 @@
         "type": "object"
       },
       "AssignmentDetail": {
-        "description": "One assignment opened by its annotator.\n\n``objects`` is the caller's draft while the work is open and their latest\nsubmission once it is submitted. ``seeded_from_import`` says the work began\nfrom imported labels without exposing the import itself. ``resolution``\nis present only once the image is resolved.",
+        "description": "One assignment opened by its annotator.\n\n``objects`` is the caller's draft while the work is open and their latest\nsubmission once it is submitted. ``seeded_from_import`` says the work began\nfrom imported labels without exposing the import itself. ``resolution``\nis present only once the image is resolved. ``target`` is present when the\nassignment answers one object target inside the image.",
         "properties": {
           "batch_id": {
             "format": "uuid",
@@ -675,6 +712,16 @@
               }
             ],
             "title": "Submitted At"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "task_type": {
             "enum": [
@@ -819,6 +866,16 @@
             "title": "Status",
             "type": "string"
           },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -894,6 +951,44 @@
           "annotator_id"
         ],
         "title": "AssignmentReassign",
+        "type": "object"
+      },
+      "AssignmentTarget": {
+        "description": "The object target an assignment answers, shown as a cue (D16).\n\n``geometry`` is the solution's proposed box or polygon and ``region`` the\n``[x, y, width, height]`` context area around it, in canonical image\npixels. The document describes only this object, or is empty when there\nis none; the cue itself is never an annotation or a vote.",
+        "properties": {
+          "geometry": {
+            "discriminator": {
+              "mapping": {
+                "polygon": "#/components/schemas/CanonicalPolygonGeometry",
+                "rectangle": "#/components/schemas/RectangleGeometry"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RectangleGeometry"
+              },
+              {
+                "$ref": "#/components/schemas/CanonicalPolygonGeometry"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "region": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Region",
+            "type": "array"
+          }
+        },
+        "required": [
+          "geometry",
+          "region"
+        ],
+        "title": "AssignmentTarget",
         "type": "object"
       },
       "BatchAssignment": {
@@ -1432,11 +1527,28 @@
       "CapabilitiesResponse": {
         "description": "Limits and features that clients must discover at runtime.",
         "properties": {
+          "active_learning_solutions": {
+            "items": {
+              "$ref": "#/components/schemas/SolutionCapability"
+            },
+            "title": "Active Learning Solutions",
+            "type": "array"
+          },
           "consensus_pipelines": {
             "additionalProperties": {
               "$ref": "#/components/schemas/PipelineCapability"
             },
             "title": "Consensus Pipelines",
+            "type": "object"
+          },
+          "evaluation_metrics": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Evaluation Metrics",
             "type": "object"
           },
           "max_file_bytes": {
@@ -1514,6 +1626,8 @@
           "supported_task_types",
           "supported_annotation_modes",
           "consensus_pipelines",
+          "active_learning_solutions",
+          "evaluation_metrics",
           "realtime_transport"
         ],
         "title": "CapabilitiesResponse",
@@ -1691,6 +1805,58 @@
         "title": "DraftSaved",
         "type": "object"
       },
+      "EligibleAnnotatorPage": {
+        "description": "Cursor-paginated users who may be added to an annotation project.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EligibleAnnotatorRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "EligibleAnnotatorPage",
+        "type": "object"
+      },
+      "EligibleAnnotatorRead": {
+        "description": "Minimal active-user identity exposed to project creators.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name"
+        ],
+        "title": "EligibleAnnotatorRead",
+        "type": "object"
+      },
       "ErrorBody": {
         "description": "Stable machine- and human-readable error details.",
         "properties": {
@@ -1733,8 +1899,67 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
+      "EvaluationView": {
+        "description": "One target-model evaluation on a held-out split.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "iteration": {
+            "title": "Iteration",
+            "type": "integer"
+          },
+          "metric": {
+            "enum": [
+              "accuracy",
+              "f1",
+              "map50",
+              "mean_iou"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "model": {
+            "additionalProperties": true,
+            "title": "Model",
+            "type": "object"
+          },
+          "split": {
+            "enum": [
+              "validation",
+              "test"
+            ],
+            "title": "Split",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "iteration",
+          "split",
+          "metric",
+          "value",
+          "metrics",
+          "model",
+          "created_at"
+        ],
+        "title": "EvaluationView",
+        "type": "object"
+      },
       "EvidenceResponse": {
-        "description": "Everything an owner or manager needs to review one image.",
+        "description": "Everything an owner or manager needs to review one image.\n\n``target`` is present when the item answers one object target; its cue is\nshown for context and is never one of the submissions.",
         "properties": {
           "batch_id": {
             "format": "uuid",
@@ -1796,6 +2021,16 @@
             },
             "title": "Submissions",
             "type": "array"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "task_type": {
             "title": "Task Type",
@@ -2039,6 +2274,296 @@
         "title": "ImportReport",
         "type": "object"
       },
+      "IterationPage": {
+        "description": "Cursor-paginated iterations plus the most recent one.",
+        "properties": {
+          "current_iteration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IterationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IterationResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "current_iteration"
+        ],
+        "title": "IterationPage",
+        "type": "object"
+      },
+      "IterationResponse": {
+        "description": "One acquisition iteration: its latest run attempt plus its batch (D6).\n\n``id`` is the first attempt's identifier and stays stable across retries.\n``stage`` is reported by the worker while ``status`` is ``training``.\nCounts are zero until the iteration has a batch, and ``eta_seconds`` is\nalways null in Phase 7.",
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "available_count": {
+            "title": "Available Count",
+            "type": "integer"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "eta_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta Seconds"
+          },
+          "evaluations": {
+            "items": {
+              "$ref": "#/components/schemas/EvaluationView"
+            },
+            "title": "Evaluations",
+            "type": "array"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Detail"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "purpose": {
+            "enum": [
+              "selection",
+              "final_evaluation"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          },
+          "requested_size": {
+            "title": "Requested Size",
+            "type": "integer"
+          },
+          "resolved_count": {
+            "title": "Resolved Count",
+            "type": "integer"
+          },
+          "review_required_count": {
+            "title": "Review Required Count",
+            "type": "integer"
+          },
+          "selected_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Count"
+          },
+          "shortfall_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shortfall Reason"
+          },
+          "solution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solution"
+          },
+          "solution_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solution Version"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "enum": [
+                  "training",
+                  "evaluating",
+                  "selecting"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "training",
+              "preparing",
+              "annotating",
+              "consolidating",
+              "ready",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "const": "metric_target",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Reason"
+          },
+          "strategy": {
+            "enum": [
+              "random",
+              "active_learning"
+            ],
+            "title": "Strategy",
+            "type": "string"
+          },
+          "submitted_assignment_count": {
+            "title": "Submitted Assignment Count",
+            "type": "integer"
+          },
+          "total_assignment_count": {
+            "title": "Total Assignment Count",
+            "type": "integer"
+          },
+          "total_count": {
+            "title": "Total Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "purpose",
+          "status",
+          "stage",
+          "strategy",
+          "attempt",
+          "solution",
+          "solution_version",
+          "batch_id",
+          "requested_size",
+          "selected_count",
+          "shortfall_reason",
+          "stop_reason",
+          "failure_code",
+          "failure_detail",
+          "total_count",
+          "resolved_count",
+          "review_required_count",
+          "available_count",
+          "total_assignment_count",
+          "submitted_assignment_count",
+          "eta_seconds",
+          "metrics",
+          "evaluations",
+          "started_at",
+          "completed_at"
+        ],
+        "title": "IterationResponse",
+        "type": "object"
+      },
       "LeaseResponse": {
         "description": "An active edit lease on one work item.",
         "properties": {
@@ -2203,7 +2728,7 @@
         "type": "object"
       },
       "ParameterDescriptor": {
-        "description": "One settable resolver field, described so a client can render and\nvalidate it without hard-coding its meaning.\n\n``name`` is dotted for fields inside a nested group. Ratio bounds and\ndefaults are ``{\"numerator\", \"denominator\"}`` objects; an ``area`` value\nis ``{\"pixels\", \"image_ratio\"}``.",
+        "description": "One settable resolver field, described so a client can render and\nvalidate it without hard-coding its meaning.\n\n``name`` is dotted for fields inside a nested group. Ratio bounds and\ndefaults are ``{\"numerator\", \"denominator\"}`` objects; an ``area`` value\nis ``{\"pixels\", \"image_ratio\"}``; a ``string`` is free text, such as a\nmodel name, that the API validates.",
         "properties": {
           "advanced": {
             "title": "Advanced",
@@ -2230,7 +2755,8 @@
               "integer",
               "enum",
               "boolean",
-              "area"
+              "area",
+              "string"
             ],
             "title": "Kind",
             "type": "string"
@@ -2812,7 +3338,7 @@
         "type": "object"
       },
       "ProjectCreate": {
-        "description": "Create-project request contract.\n\nA ``split`` project requires ``iteration_batch_size`` and one count or\npercentage for each held-out split. ``initial_training_size`` is optional:\nwhen omitted, the first training batch uses ``iteration_batch_size``.\n\nA ``single_batch`` project annotates every image once and never trains, so\nit accepts no size at all and only the ``random`` acquisition strategy.",
+        "description": "Create-project request contract.\n\nA ``split`` project requires ``iteration_batch_size``,\n``max_acquisition_iterations``, and one count or percentage for each\nheld-out split. ``initial_training_size`` is optional: when omitted, the\nfirst training batch uses ``iteration_batch_size``.\n\nA ``single_batch`` project annotates every image once and never trains, so\nit accepts no size, no iteration limit, and only the ``random``\nacquisition strategy.",
         "properties": {
           "acquisition_strategy": {
             "default": "random",
@@ -2844,6 +3370,36 @@
             ],
             "title": "Description"
           },
+          "evaluation_interval": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Interval"
+          },
+          "evaluation_metric": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accuracy",
+                  "f1",
+                  "map50",
+                  "mean_iou"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Metric"
+          },
           "initial_training_size": {
             "anyOf": [
               {
@@ -2867,6 +3423,57 @@
               }
             ],
             "title": "Iteration Batch Size"
+          },
+          "learning_configuration": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learning Configuration"
+          },
+          "learning_solution": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learning Solution"
+          },
+          "max_acquisition_iterations": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Acquisition Iterations"
+          },
+          "metric_target": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Target"
           },
           "name": {
             "maxLength": 200,
@@ -3091,6 +3698,22 @@
             "title": "Acquisition Strategy",
             "type": "string"
           },
+          "completion_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "max_iterations",
+                  "metric_target",
+                  "pool_exhausted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Reason"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -3127,6 +3750,34 @@
             ],
             "title": "Description"
           },
+          "evaluation_interval": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Interval"
+          },
+          "evaluation_metric": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accuracy",
+                  "f1",
+                  "map50",
+                  "mean_iou"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Metric"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -3153,6 +3804,55 @@
               }
             ],
             "title": "Iteration Batch Size"
+          },
+          "learning_configuration": {
+            "additionalProperties": true,
+            "title": "Learning Configuration",
+            "type": "object"
+          },
+          "learning_solution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learning Solution"
+          },
+          "learning_solution_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learning Solution Version"
+          },
+          "max_acquisition_iterations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Acquisition Iterations"
+          },
+          "metric_target": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Target"
           },
           "name": {
             "title": "Name",
@@ -3254,6 +3954,14 @@
           "validation_set_size",
           "validation_set_percentage",
           "iteration_batch_size",
+          "max_acquisition_iterations",
+          "learning_solution",
+          "learning_solution_version",
+          "learning_configuration",
+          "evaluation_metric",
+          "evaluation_interval",
+          "metric_target",
+          "completion_reason",
           "dataset_prepared_at",
           "version",
           "created_at",
@@ -3263,7 +3971,7 @@
         "type": "object"
       },
       "ProjectUpdate": {
-        "description": "Optimistically versioned editable project fields.\n\n``acquisition_strategy`` may change on a ``split`` project, before or\nafter activation. It decides how later training acquisition batches are\nchosen; it never alters the fixed splits or the initial batches.",
+        "description": "Optimistically versioned editable project fields.\n\n``acquisition_strategy``, ``max_acquisition_iterations``, and the learning\nsettings may change on a ``split`` project, before or after activation.\nThey decide how later acquisition iterations run; they never alter the\nfixed splits, the initial batches, or a run already created.",
         "properties": {
           "acquisition_strategy": {
             "anyOf": [
@@ -3291,6 +3999,87 @@
               }
             ],
             "title": "Description"
+          },
+          "evaluation_interval": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Interval"
+          },
+          "evaluation_metric": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accuracy",
+                  "f1",
+                  "map50",
+                  "mean_iou"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Metric"
+          },
+          "learning_configuration": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learning Configuration"
+          },
+          "learning_solution": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learning Solution"
+          },
+          "max_acquisition_iterations": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Acquisition Iterations"
+          },
+          "metric_target": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Target"
           },
           "name": {
             "anyOf": [
@@ -3370,6 +4159,82 @@
           "created_at"
         ],
         "title": "ProposalView",
+        "type": "object"
+      },
+      "QualityReport": {
+        "description": "Project-level quality measures for owners and managers (D20).\n\nAn item is one image or one object target. Every rate and median is null\nuntil ``minimum_decisions`` items are resolved, and a value backed by\nfewer than ``minimum_cell`` observations is null as well. Nothing here\nnames or ranks an annotator.",
+        "properties": {
+          "agreement": {
+            "items": {
+              "$ref": "#/components/schemas/AgreementSummary"
+            },
+            "title": "Agreement",
+            "type": "array"
+          },
+          "minimum_cell": {
+            "title": "Minimum Cell",
+            "type": "integer"
+          },
+          "minimum_decisions": {
+            "title": "Minimum Decisions",
+            "type": "integer"
+          },
+          "resolution_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Rate"
+          },
+          "resolved_items": {
+            "title": "Resolved Items",
+            "type": "integer"
+          },
+          "review_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Rate"
+          },
+          "suppressed": {
+            "title": "Suppressed",
+            "type": "boolean"
+          },
+          "task_type": {
+            "enum": [
+              "classification",
+              "detection",
+              "segmentation"
+            ],
+            "title": "Task Type",
+            "type": "string"
+          },
+          "total_items": {
+            "title": "Total Items",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "task_type",
+          "total_items",
+          "resolved_items",
+          "minimum_decisions",
+          "minimum_cell",
+          "suppressed",
+          "review_rate",
+          "resolution_rate",
+          "agreement"
+        ],
+        "title": "QualityReport",
         "type": "object"
       },
       "ReadinessResponse": {
@@ -4313,70 +5178,130 @@
         "type": "object"
       },
       "SamPredictRequest": {
-        "description": "SAM prediction request.",
+        "description": "A prompt from the annotator who owns the assignment (P7-07).\n\n``request_id`` lets the client match an answer to its prompt; the server\nmakes one up when it is omitted.",
         "properties": {
-          "image_id": {
-            "minLength": 1,
-            "title": "Image Id",
+          "assignment_id": {
+            "format": "uuid",
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
             "type": "string"
           },
           "prompts": {
             "items": {
               "$ref": "#/components/schemas/SamPrompt"
             },
+            "maxItems": 1,
             "minItems": 1,
             "title": "Prompts",
             "type": "array"
-          }
-        },
-        "required": [
-          "image_id",
-          "prompts"
-        ],
-        "title": "SamPredictRequest",
-        "type": "object"
-      },
-      "SamPredictResponse": {
-        "description": "SAM prediction response.",
-        "properties": {
-          "embedding_cache_key": {
+          },
+          "request_id": {
             "anyOf": [
               {
+                "maxLength": 64,
+                "minLength": 1,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Embedding Cache Key"
-          },
-          "image_id": {
-            "title": "Image Id",
-            "type": "string"
-          },
-          "polygons": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Polygons",
-            "type": "array"
+            "title": "Request Id"
           }
         },
         "required": [
-          "image_id",
-          "polygons"
+          "project_id",
+          "assignment_id",
+          "prompts"
+        ],
+        "title": "SamPredictRequest",
+        "type": "object"
+      },
+      "SamPredictResponse": {
+        "description": "A suggestion for the annotator to preview, or ``no_suggestion``.\n\n``geometry`` is a rectangle for detection and a polygon for segmentation,\nin canonical pixels. Nothing is saved: the suggestion reaches the draft\nonly when the annotator accepts it there (A7-03).",
+        "properties": {
+          "assignment_id": {
+            "format": "uuid",
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "polygon": "#/components/schemas/CanonicalPolygonGeometry",
+                    "rectangle": "#/components/schemas/RectangleGeometry"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RectangleGeometry"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CanonicalPolygonGeometry"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "model": {
+            "additionalProperties": true,
+            "title": "Model",
+            "type": "object"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "status": {
+            "enum": [
+              "suggestion",
+              "no_suggestion"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "assignment_id",
+          "status",
+          "geometry",
+          "score",
+          "model"
         ],
         "title": "SamPredictResponse",
         "type": "object"
       },
       "SamPrompt": {
-        "description": "Prompt sent to the assisted segmentation endpoint.",
+        "description": "A point ``[x, y]`` or a box ``[x, y, width, height]`` in canonical image\npixels.",
         "properties": {
           "coordinates": {
             "items": {
               "type": "number"
             },
+            "maxItems": 4,
             "minItems": 2,
             "title": "Coordinates",
             "type": "array"
@@ -4406,6 +5331,169 @@
           "coordinates"
         ],
         "title": "SamPrompt",
+        "type": "object"
+      },
+      "SolutionCapability": {
+        "description": "An active-learning solution a project may select.\n\nA ``development_only`` solution exists only in development and test\nenvironments. A non-null ``unavailable_reason`` means it cannot be\nselected; nothing is ever substituted for it.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "development_only": {
+            "title": "Development Only",
+            "type": "boolean"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ParameterDescriptor"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "supported_tasks": {
+            "items": {
+              "enum": [
+                "classification",
+                "detection",
+                "segmentation"
+              ],
+              "type": "string"
+            },
+            "title": "Supported Tasks",
+            "type": "array"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "const": "dependency_missing",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "display_name",
+          "description",
+          "supported_tasks",
+          "development_only",
+          "unavailable_reason",
+          "parameters"
+        ],
+        "title": "SolutionCapability",
+        "type": "object"
+      },
+      "StatisticsResponse": {
+        "description": "Acquisition progress and the target-model evaluations so far.",
+        "properties": {
+          "acquisition_strategy": {
+            "enum": [
+              "random",
+              "active_learning"
+            ],
+            "title": "Acquisition Strategy",
+            "type": "string"
+          },
+          "completed_iterations": {
+            "title": "Completed Iterations",
+            "type": "integer"
+          },
+          "completion_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "max_iterations",
+                  "metric_target",
+                  "pool_exhausted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Reason"
+          },
+          "evaluation_metric": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accuracy",
+                  "f1",
+                  "map50",
+                  "mean_iou"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Metric"
+          },
+          "evaluations": {
+            "items": {
+              "$ref": "#/components/schemas/EvaluationView"
+            },
+            "title": "Evaluations",
+            "type": "array"
+          },
+          "max_acquisition_iterations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Acquisition Iterations"
+          },
+          "metric_target": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Target"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "acquisition_strategy",
+          "max_acquisition_iterations",
+          "completed_iterations",
+          "completion_reason",
+          "evaluation_metric",
+          "metric_target",
+          "evaluations"
+        ],
+        "title": "StatisticsResponse",
         "type": "object"
       },
       "StrategyCapability": {
@@ -5922,7 +7010,7 @@
     },
     "/api/v1/capabilities": {
       "get": {
-        "description": "Return upload limits, media formats, tasks, resolvers, and transport.\n\nResolver availability reflects the installed dependency versions and any\nopen operator quarantine.",
+        "description": "Return upload limits, media formats, tasks, resolvers, solutions, and\ntransport.\n\nResolver availability reflects the installed dependency versions and any\nopen operator quarantine. Active-learning solutions are listed with the\nevaluation metrics each task allows.",
         "operationId": "read_capabilities_api_v1_capabilities_get",
         "responses": {
           "200": {
@@ -5984,8 +7072,8 @@
     },
     "/api/v1/inference/sam-predict": {
       "post": {
-        "description": "Run SAM prompted segmentation for an assigned image.\n\nArgs:\n    _: Prompt payload.\n    __: Authenticated user.\n\nRaises:\n    HTTPException: 501 until Phase 6 implements the assisted segmentation\n        contract and lease authorization.",
-        "operationId": "predict_sam_polygons_api_v1_inference_sam_predict_post",
+        "description": "Suggest a box or polygon for a prompt on the caller's open assignment.\n\nThe project's latest target model answers within the configured timeout\n(D18). The suggestion is only returned; it reaches the draft when the\nannotator accepts it there, so a timeout or failure changes nothing.\n\nArgs:\n    request: The prompt and the assignment it belongs to.\n    user: The annotator.\n    session: Active database session.\n    dispatch: Sender to the assistance worker.\n\nReturns:\n    The suggestion, or ``no_suggestion``.",
+        "operationId": "predict_api_v1_inference_sam_predict_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6053,7 +7141,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Predict Sam Polygons",
+        "summary": "Predict",
         "tags": [
           "inference"
         ]
@@ -6061,7 +7149,7 @@
     },
     "/api/v1/media/{media_id}/content": {
       "get": {
-        "description": "Stream one image's bytes to the holder of a signed link.\n\nThe signature is the authorization: it is issued only inside an\nassignment the caller owns and expires shortly after, so no bearer token\nis needed and none is ever placed in a URL.\n\nArgs:\n    media_id: Media item being served.\n    expires: Expiry time from the signed link, as a Unix timestamp.\n    signature: Signature from the signed link.\n    session: Active database session.\n\nReturns:\n    The image bytes with their media type.",
+        "description": "Stream one image's bytes to the holder of a signed link.\n\nThe signature is the authorization: it is issued only inside an\nassignment the caller owns and expires shortly after, so no bearer token\nis needed and none is ever placed in a URL. An HEIC/HEIF source is served\nas its lossless WebP rendition (P7-06).\n\nArgs:\n    media_id: Media item being served.\n    expires: Expiry time from the signed link, as a Unix timestamp.\n    signature: Signature from the signed link.\n    session: Active database session.\n\nReturns:\n    The image bytes with their media type.",
         "operationId": "media_content_api_v1_media__media_id__content_get",
         "parameters": [
           {
@@ -9114,6 +10202,456 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/export": {
+      "get": {
+        "description": "Download the annotated dataset as a ZIP archive (D19).\n\nIt holds only current accepted resolutions, split by training,\nvalidation, and test (or ``all`` for a static project), with the display\ncopies of the images and ``provenance.json``. Detection and segmentation\nuse ``coco`` (the default) or ``yolo``; classification uses ``csv``.\n\nArgs:\n    export_format: Label format; the task's default when omitted.\n    project: Project authorized to manage learning.\n    session: Active database session.\n\nReturns:\n    The archive, streamed while it is written.",
+        "operationId": "export_dataset_api_v1_projects__project_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coco",
+                    "yolo",
+                    "csv"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {}
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Dataset",
+        "tags": [
+          "outputs"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/iterations": {
+      "get": {
+        "description": "List a project's acquisition iterations, oldest first.\n\nIterations carry aggregate progress only, never peer identity or content.\n\nArgs:\n    cursor: Opaque cursor from a previous page.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    One page of iterations, the current one, and the next cursor.",
+        "operationId": "list_iterations_api_v1_projects__project_id__iterations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IterationPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Iterations",
+        "tags": [
+          "iterations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/iterations/{iteration_id}": {
+      "get": {
+        "description": "Return one iteration with its counts, state, and metrics.\n\nArgs:\n    iteration_id: First run attempt identifying the iteration.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The iteration.",
+        "operationId": "read_iteration_api_v1_projects__project_id__iterations__iteration_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "iteration_id",
+            "required": true,
+            "schema": {
+              "title": "Iteration Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IterationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Iteration",
+        "tags": [
+          "iterations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/iterations/{iteration_id}/close": {
+      "post": {
+        "description": "Check an iteration's completion and open the next one when it is due.\n\nThe server opens iterations on its own; this idempotent check only lets\na client reconcile a missed event.\n\nArgs:\n    iteration_id: First run attempt identifying the iteration.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The iteration after the check.",
+        "operationId": "close_iteration_api_v1_projects__project_id__iterations__iteration_id__close_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "iteration_id",
+            "required": true,
+            "schema": {
+              "title": "Iteration Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IterationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Close Iteration",
+        "tags": [
+          "iterations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/iterations/{iteration_id}/retry": {
+      "post": {
+        "description": "Queue a new attempt of a failed iteration over the same snapshots.\n\nArgs:\n    iteration_id: First run attempt identifying the iteration.\n    project: Project authorized to manage learning.\n    user: Owner or manager recorded as the actor.\n    session: Active database session.\n\nReturns:\n    The iteration with its new attempt.",
+        "operationId": "retry_iteration_api_v1_projects__project_id__iterations__iteration_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "iteration_id",
+            "required": true,
+            "schema": {
+              "title": "Iteration Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IterationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retry Iteration",
+        "tags": [
+          "iterations"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/media": {
       "get": {
         "description": "List a project's ingested images ordered by relative path.\n\nArgs:\n    cursor: Opaque cursor from a previous page.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    One page of media with the cursor for the next one.",
@@ -9560,6 +11098,84 @@
         "summary": "Change Member Role",
         "tags": [
           "members"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/quality": {
+      "get": {
+        "description": "Return the project's review rate, resolution rate, and agreement.\n\nArgs:\n    project: Project authorized for performance reading.\n    session: Active database session.\n\nReturns:\n    The quality report, suppressed below the minimum sample.",
+        "operationId": "read_quality_api_v1_projects__project_id__quality_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Quality",
+        "tags": [
+          "outputs"
         ]
       }
     },
@@ -10482,6 +12098,84 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/statistics": {
+      "get": {
+        "description": "Return the loop's progress and every target-model evaluation.\n\nArgs:\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    Progress counts and evaluations ordered by iteration.",
+        "operationId": "read_statistics_api_v1_projects__project_id__statistics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatisticsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Statistics",
+        "tags": [
+          "iterations"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/uploads": {
       "post": {
         "description": "Create an upload session and classify every file in the manifest.\n\nArgs:\n    request: Validated manifest describing the client's local files.\n    project: Project resolved and authorized by the dependency.\n    session: Active database session.\n\nReturns:\n    The created session with each file's disposition.",
@@ -11073,6 +12767,91 @@
           }
         ],
         "summary": "Create User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/eligible-annotators": {
+      "get": {
+        "description": "List active users that an authenticated project creator may select.\n\nThe project creation flow is available to every active user, so this route\nuses the same authorization boundary and exposes only identity fields\nneeded by the selector. Global user administration remains administrator\nonly.\n\nArgs:\n    cursor: Opaque cursor from a previous page.\n    _: Authenticated active user.\n    session: Active database session.\n\nReturns:\n    One page of active users ordered by username.",
+        "operationId": "list_eligible_annotators_api_v1_users_eligible_annotators_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EligibleAnnotatorPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State or version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Semantic or schema validation failure"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Eligible Annotators",
         "tags": [
           "users"
         ]

@@ -27,7 +27,8 @@ the same remote API deployment:
 
 1. Login, token expiry, logout, and protected-route redirects.
 2. Recursive directory selection, including nested paths and rejected files.
-3. Interrupted/resumed uploads and offline recovery messaging.
+3. HEIC/HEIF selection plus interrupted/resumed uploads and offline recovery
+   messaging. Confirm the delivered WebP keeps the oriented source dimensions.
 4. Classification, boxes, polygons, zoom/pan, shortcuts, and autosave.
 5. Two simultaneous annotators competing for the same queue item.
 6. WebSocket disconnection, polling fallback, reconnect, and sequence gaps.
@@ -63,7 +64,10 @@ The minimum API regression matrix includes:
 1. Authentication expiry, refresh rotation, replay prevention, logout, and all
    project role/action combinations.
 2. Manifest path normalization, limits, media inspection, checksum failures,
-   resumed chunks, duplicate completion, and cancellation.
+   resumed chunks, duplicate completion, cancellation, and HEIC/HEIF format
+   sniffing. HEIC/HEIF fixtures must retain their source digest and produce a
+   versioned lossless WebP with exact canonical width, height, and decoded
+   8-bit pixel equality.
 3. Project and iteration transition validation, immutable test splits, and
    reproducible selection metadata.
 4. Direct image-assignment access by each configured consensus annotator, stale
@@ -89,4 +93,7 @@ sessions to annotate the same assigned image independently and, where enabled,
 to test resolution-work-item lease contention. Include at least one interrupted upload across
 an API process restart and one iteration completed through the fake or staging
 worker. The released App's expected OpenAPI version must be recorded with the
-test result.
+test result. Include portrait and landscape HEIC/HEIF fixtures with small edge
+objects; annotate and reload them in Chrome and Firefox and compare saved box,
+polygon, and mask coordinates with the retained source's canonical oriented
+pixel plane.

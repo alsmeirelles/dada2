@@ -345,10 +345,13 @@ provenance, not a request parameter. The candidate order is
 selection input is something a client can already read.
 
 An acquisition batch is created only after all initial image batch items have
-accepted consensus resolutions. Random acquisition may then select from the
+accepted resolutions. Those may come directly from single-mode submissions or
+from consensus/adjudication. Random acquisition may then select from the
 eligible train pool; active learning additionally needs a trained/evaluated
-model. The learning port delivers that orchestration, and the `purpose` column
-already carries the acquisition value.
+model. Classification active learning selects media; detection and segmentation
+select model-proposed object targets within media. The learning port delivers
+that orchestration, and the `purpose` column already carries the acquisition
+value.
 
 ## Deletion and retention
 
@@ -366,7 +369,7 @@ project, matching the existing treatment of `activate_project`.
 ## Current placeholders
 
 The assisted-segmentation inference route remains a `501` placeholder until
-Phase 7. The prototype `/api/v1/queue` routes were removed in Phase 5; see
+Phase 7 block 2. The prototype `/api/v1/queue` routes were removed in Phase 5; see
 [Image assignments](#image-assignments-phase-5).
 
 `GET /api/v1/capabilities` is served from validated settings and now advertises
@@ -627,3 +630,144 @@ install the scripted fake adapter (`dada_api.consensus.fake.ScriptedPipeline`)
 through `dada_api.consensus.pipeline.ADAPTERS`, or run the real pipelines.
 Pure pipeline tests replay the committed golden fixtures under
 `tests/fixtures/consensus/`.
+
+## Acquisition loop (Phase 7)
+
+Once every image of the test, validation, and initial-training batches has an
+accepted resolution, the loop opens acquisition iterations on its own. Each
+batch that becomes `resolved` writes a `learning.batch_resolved.v1` outbox
+event, and the relay that already runs for consensus opens the next
+iteration:
+
+- **Random acquisition** draws the batch in the relay itself and opens it in
+  `preparing`.
+- **Active learning** writes immutable manifests (`dada-coco-pai/1`) of the
+  accepted training data, the eligible pool, and, when an evaluation is due,
+  validation and test, under `<media root>/<project>/learning/snapshots/`. A
+  run then goes to the Celery queue `learning`, where the project's solution
+  evaluates and selects. The API validates the answer and opens the batch in
+  `preparing`.
+
+A manager starts every acquisition batch from the batches page, as with the
+initial batches. Decisions and their reasons are in
+[Phase 7](phases/phase_7.md#decisões).
+
+### Running it locally
+
+```bash
+make run                              # terminal 1: the API
+make consensus                        # terminal 2: relay and consensus workers
+make worker-learning                  # terminal 3: the active-learning worker
+make worker-assistance                # terminal 4: the assisted-annotation worker
+```
+
+On Windows, use `CELERY_POOL=solo` with the workers. In `development` and
+`test`, the catalog includes a `deterministic` solution that needs no model
+or GPU, so the whole loop, object targets, and assisted annotation can be
+exercised locally.
+
+The `dada` solution is listed everywhere but is available only where the
+`learning` extra is installed (`torch`, `torchvision`, `ultralytics`, `timm`,
+`scikit-learn`), in the API and in both workers:
+
+```bash
+uv sync --extra dev --extra consensus --extra learning
+```
+
+### Settings
+
+A `split` project requires `max_acquisition_iterations`. With
+`active_learning`, `learning_solution`, `learning_configuration`,
+`evaluation_metric`, `evaluation_interval` (K), and `metric_target` receive
+defaults when omitted, and `PATCH /projects/{id}` changes them for the next
+run. `GET /capabilities` lists the solutions and the metrics of each task.
+`DADA_LEARNING_TIMEOUT_SECONDS` (default 86400) bounds one run; the relay
+fails a run that reports nothing within it.
+
+### Iterations
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/projects/{id}/iterations` | Iterations, oldest first, plus the current one |
+| `GET` | `/projects/{id}/iterations/{iteration_id}` | One iteration with counts, state, stage, and metrics |
+| `POST` | `/projects/{id}/iterations/{iteration_id}/close` | Idempotent completion check; `409 iteration_incomplete` while images remain |
+| `POST` | `/projects/{id}/iterations/{iteration_id}/retry` | New attempt of a failed iteration over the same snapshots (`manage_learning`) |
+| `GET` | `/projects/{id}/statistics` | Progress and every target-model evaluation |
+
+A failed run stays failed until a manager retries it; nothing is retried
+automatically. The project becomes `completed` with `completion_reason`
+`max_iterations`, `metric_target`, or `pool_exhausted`.
+
+### Object targets
+
+Model-guided detection and segmentation choose object targets, not whole
+images. Each target is one batch item with the proposed box or polygon and a
+context region around it; the annotator answers only that object, with one
+object or an empty document meaning "no object here". The answered image
+stays in the pool, marked `PARTIALLY_LABELED` in later manifests with every
+answered region as a queried ROI (`CONFIRMED_OBJECT` or
+`EXPLICIT_HARD_NEGATIVE`). In consensus mode the answers to a target form its
+single candidate; the proposed geometry is never a vote. Classification and
+random acquisition keep whole images.
+
+### DADA
+
+`dada_api/active_learning/dada_al/` implements the DADA specification: proxy
+training, a two-tier subpool, pre-NMS or TTA uncertainty, PCA and k-means
+quotas, and region-aware training of partially labeled images. When an
+evaluation is due, it trains and measures the target model first and keeps
+it under `<media root>/<project>/learning/assistance/` for assisted
+annotation; pretrained checkpoints are downloaded under
+`learning/state/dada/weights/`.
+
+## Assisted annotation (Phase 7)
+
+`POST /api/v1/inference/sam-predict` takes `project_id`, `assignment_id`, an
+optional `request_id`, and one point or box prompt in canonical pixels. Only
+the annotator who owns the open assignment may ask, and only in detection and
+segmentation projects. The project's last evaluated target model answers on
+the `assistance` queue within `DADA_ASSISTANCE_TIMEOUT_SECONDS` (default 30):
+a box picks the instance that overlaps it most, a point the most confident
+instance that contains it. The answer is a `suggestion` with a typed geometry
+or `no_suggestion`; nothing is saved. A project with no compatible target
+model answers `409 assistance_unavailable`; a timeout or worker failure
+answers `503` and leaves the draft untouched.
+
+## Dataset export (Phase 7)
+
+`GET /api/v1/projects/{id}/export?format=coco|yolo|csv` streams a ZIP of the
+current accepted resolutions; owners and managers only (`manage_learning`).
+Detection and segmentation take `coco` (the default) or `yolo`, classification
+takes `csv`. The archive is written while it is sent, so memory stays bounded
+by one image block, and nothing is kept on the server afterwards.
+
+| Path | Content |
+| --- | --- |
+| `images/<split>/` | The display copies, under their relative paths; an HEIC/HEIF source gains `.webp` |
+| `annotations/<split>.json` | COCO, with `display_order` as `category_id` and the resolution of every annotation |
+| `labels/<split>/`, `data.yaml` | YOLO, normalized; a segmentation line keeps the largest ring |
+| `annotations/<split>.csv` | Classification: path and one 0/1 column per class |
+| `provenance.json` | Source digest, rendition, size, annotation status, queried regions, and resolution versions of every image |
+
+Splits are `train`, `val`, and `test`, or `all` for a `single_batch` project.
+Unresolved, raw, imported, and proposed annotations never enter the archive.
+
+## Quality statistics (Phase 7)
+
+`GET /api/v1/projects/{id}/quality` reports, for owners and managers
+(`read_annotator_performance`), the review rate, the resolution rate, and the
+median first-round agreement of each consensus metric. Nothing is shown below
+30 resolved items, and a median of fewer than 5 candidates stays hidden. The
+report is computed on read from the batch items, the work items, and the
+first-round proposals; it names no one.
+
+## HEIC/HEIF ingestion (Phase 7)
+
+`image/heic` and `image/heif` are accepted. At upload completion the API
+decodes the primary image once, with its HEIF orientation applied, and
+writes a lossless 8-bit sRGB WebP rendition at
+`<media root>/<project>/renders/v1/<source sha256>.webp` before the source is
+promoted. The source keeps its digest; its recorded width and height are the
+rendition's. The signed content route serves the rendition as `image/webp`.
+A local `.env` copied from an older example must add both types to
+`DADA_SUPPORTED_IMAGE_MEDIA_TYPES`.

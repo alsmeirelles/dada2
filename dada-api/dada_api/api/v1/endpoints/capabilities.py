@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dada_api.active_learning import catalog as solutions
 from dada_api.consensus import catalog
 from dada_api.core.config import get_settings
 from dada_api.db.session import get_session
@@ -16,10 +17,12 @@ router = APIRouter()
 async def read_capabilities(
     session: AsyncSession = Depends(get_session),
 ) -> CapabilitiesResponse:
-    """Return upload limits, media formats, tasks, resolvers, and transport.
+    """Return upload limits, media formats, tasks, resolvers, solutions, and
+    transport.
 
     Resolver availability reflects the installed dependency versions and any
-    open operator quarantine.
+    open operator quarantine. Active-learning solutions are listed with the
+    evaluation metrics each task allows.
     """
     settings = get_settings()
     return CapabilitiesResponse(
@@ -34,5 +37,9 @@ async def read_capabilities(
         consensus_pipelines=catalog.capabilities(
             quarantined=await resolution_runs.quarantined_keys(session)
         ),
+        active_learning_solutions=solutions.capabilities(),
+        evaluation_metrics={
+            task: list(metrics) for task, metrics in solutions.METRICS.items()
+        },
         realtime_transport=settings.realtime_transport,
     )

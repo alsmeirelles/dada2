@@ -1,0 +1,1433 @@
+"""Phase 7 acquisition loop: settings, random and active-learning iterations,
+worker attempts, retries, stale results, stopping, object targets, assisted
+annotation, and the dataset export, over real HTTP."""
+
+import io
+import json
+import os
+import zipfile
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+
+import httpx
+import pytest
+from sqlalchemy import delete, select
+
+from dada_api.active_learning.contract import (
+    AdapterError,
+    AssistanceModel,
+    AssistanceRequest,
+    BaseModelAdapter,
+    BatchRequest,
+    BatchResult,
+    ManifestRef,
+    read_assistance_model,
+    read_manifest,
+    write_assistance_model,
+)
+from dada_api.active_learning.deterministic import DeterministicAdapter
+from dada_api.api.v1.endpoints.inference import get_dispatcher
+from dada_api.core.config import get_settings
+from dada_api.core.security import hash_password
+from dada_api.db.session import async_session_factory
+from dada_api.main import app
+from dada_api.models.annotation import AnnotationSubmission, ResolvedAnnotation
+from dada_api.models.annotation_policy import (
+    AnnotationPolicyAnnotator,
+    AnnotationPolicyDefault,
+)
+from dada_api.models.audit import AuditEntry
+from dada_api.models.batch import (
+    AnnotationAssignment,
+    AnnotationBatch,
+    AnnotationBatchAnnotator,
+    BatchItem,
+)
+from dada_api.models.consensus import OutboxEvent
+from dada_api.models.dataset import DatasetSplit
+from dada_api.models.idempotency import IdempotencyRecord
+from dada_api.models.label_import import AnnotationImport
+from dada_api.models.learning import LearningRun, ModelEvaluation
+from dada_api.models.media import ContentObject, Media
+from dada_api.models.project import Project, ProjectClass, ProjectMember
+from dada_api.models.user import User
+from dada_api.services import learning_runs
+from dada_api.workers import assistance, learning
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("DADA_RUN_INTEGRATION") != "1",
+    reason="set DADA_RUN_INTEGRATION=1 with PostgreSQL and Redis running",
+)
+
+PASSWORD = "phase7-learning-password"
+MEDIA_COUNT = 8
+DRAFT = {
+    "name": "Belt",
+    "description": None,
+    "task_type": "detection",
+    "test_set_size": 1,
+    "validation_set_size": 1,
+    "initial_training_size": 2,
+    "iteration_batch_size": 2,
+    "max_acquisition_iterations": 5,
+}
+LEARNING = {
+    **DRAFT,
+    "acquisition_strategy": "active_learning",
+    "max_acquisition_iterations": 2,
+}
+
+
+class Broker:
+    """Collects the commands the relay sends instead of a Celery broker."""
+
+    def __init__(self) -> None:
+        self.commands: list[learning_runs.Command] = []
+
+    def __call__(self, command: learning_runs.Command, _: LearningRun) -> None:
+        self.commands.append(command)
+
+
+def _client() -> httpx.AsyncClient:
+    """Return an HTTP client bound to the ASGI application."""
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    )
+
+
+def _auth(token: str) -> dict[str, str]:
+    """Return the bearer header for a token."""
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _reset_database() -> None:
+    """Remove every record these tests create."""
+    async with async_session_factory() as session:
+        for model in (
+            IdempotencyRecord,
+            ResolvedAnnotation,
+            AnnotationSubmission,
+            AnnotationAssignment,
+            ModelEvaluation,
+            AnnotationImport,
+            BatchItem,
+            AnnotationBatchAnnotator,
+            AnnotationBatch,
+            LearningRun,
+            OutboxEvent,
+            DatasetSplit,
+            AuditEntry,
+            AnnotationPolicyAnnotator,
+            AnnotationPolicyDefault,
+            ProjectClass,
+            Media,
+            ContentObject,
+            ProjectMember,
+            Project,
+            User,
+        ):
+            await session.execute(delete(model))
+        await session.commit()
+
+
+@pytest.fixture
+async def database() -> AsyncIterator[None]:
+    """Provide an empty database around each test."""
+    await _reset_database()
+    yield
+    await _reset_database()
+
+
+async def _user(username: str) -> str:
+    """Persist a user and return an access token for it."""
+    async with async_session_factory() as session:
+        session.add(
+            User(
+                username=username,
+                display_name=username.title(),
+                password_hash=hash_password(PASSWORD),
+                is_administrator=False,
+                is_active=True,
+                version=1,
+            )
+        )
+        await session.commit()
+    async with _client() as client:
+        response = await client.post(
+            "/api/v1/auth/token", json={"username": username, "password": PASSWORD}
+        )
+    assert response.status_code == 200, response.text
+    return response.json()["access_token"]
+
+
+async def _add_media(project_id: str) -> None:
+    """Persist media rows and their bytes directly."""
+    async with async_session_factory() as session:
+        for index in range(MEDIA_COUNT):
+            digest = f"{index + 100:064x}"
+            key = f"{project_id}/{digest[:2]}/{digest[2:4]}/{digest}"
+            path = get_settings().media_root / key
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(f"belt-{index}".encode())
+            content = ContentObject(
+                project_id=project_id,
+                sha256=digest,
+                size_bytes=len(f"belt-{index}"),
+                media_type="image/png",
+                width=640,
+                height=480,
+                storage_key=key,
+            )
+            session.add(content)
+            await session.flush()
+            session.add(
+                Media(
+                    project_id=project_id,
+                    content_object_id=content.id,
+                    relative_path=f"belt/frame-{index:04d}.png",
+                )
+            )
+        await session.commit()
+
+
+async def _project(client: httpx.AsyncClient, token: str, body: dict) -> dict:
+    """Create, prepare, and activate a project with one class and media."""
+    created = await client.post("/api/v1/projects", headers=_auth(token), json=body)
+    assert created.status_code == 201, created.text
+    project = created.json()
+    added = await client.post(
+        f"/api/v1/projects/{project['id']}/classes",
+        headers=_auth(token),
+        json={"name": "bottle", "color": "#00FF00", "display_order": 0},
+    )
+    assert added.status_code == 201, added.text
+    project["class_id"] = added.json()["id"]
+    await _add_media(project["id"])
+    prepared = await client.post(
+        f"/api/v1/projects/{project['id']}/dataset-layout/prepare",
+        headers=_auth(token),
+    )
+    assert prepared.status_code == 201, prepared.text
+    activated = await client.post(
+        f"/api/v1/projects/{project['id']}/activate", headers=_auth(token)
+    )
+    assert activated.status_code == 200, activated.text
+    return {**project, **activated.json()}
+
+
+async def _annotate_everything(
+    client: httpx.AsyncClient,
+    token: str,
+    project_id: str,
+    objects: list[dict] | None = None,
+) -> None:
+    """Start every preparing batch and submit every open assignment."""
+    listed = await client.get(
+        f"/api/v1/projects/{project_id}/batches", headers=_auth(token)
+    )
+    for batch in listed.json()["items"]:
+        if batch["status"] == "preparing":
+            started = await client.post(
+                f"/api/v1/projects/{project_id}/batches/{batch['id']}/start",
+                headers=_auth(token),
+            )
+            assert started.status_code == 200, started.text
+    queue = await client.get(
+        f"/api/v1/projects/{project_id}/assignments", headers=_auth(token)
+    )
+    for item in queue.json()["items"]:
+        if item["status"] == "submitted":
+            continue
+        submitted = await client.post(
+            f"/api/v1/projects/{project_id}/assignments/{item['id']}/submit",
+            headers=_auth(token),
+            json={"version": item["version"], "objects": objects or []},
+        )
+        assert submitted.status_code == 200, submitted.text
+
+
+async def _relay(broker: Broker | None = None, now: datetime | None = None) -> dict:
+    """Run one learning relay pass."""
+    async with async_session_factory() as session:
+        return await learning_runs.relay_once(
+            session, broker or Broker(), now or datetime.now(UTC)
+        )
+
+
+async def _execute(
+    command: learning_runs.Command, adapter: BaseModelAdapter | None = None
+) -> None:
+    """Run one worker attempt with an in-process adapter."""
+    await learning.execute(
+        command,
+        async_session_factory,
+        load_adapter=lambda *_: adapter or DeterministicAdapter(),
+    )
+
+
+async def _runs(project_id: str) -> list[LearningRun]:
+    """Return a project's runs in iteration and attempt order."""
+    async with async_session_factory() as session:
+        return list(
+            await session.scalars(
+                select(LearningRun)
+                .where(LearningRun.project_id == project_id)
+                .order_by(LearningRun.iteration, LearningRun.attempt)
+            )
+        )
+
+
+async def _iterations(client: httpx.AsyncClient, token: str, project_id: str) -> dict:
+    """Return the project's iteration page."""
+    response = await client.get(
+        f"/api/v1/projects/{project_id}/iterations", headers=_auth(token)
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _manifest(run: LearningRun, name: str) -> dict:
+    """Read one of a run's snapshots back from disk."""
+    return read_manifest(
+        str(get_settings().media_root), ManifestRef(**run.snapshots[name])
+    )
+
+
+async def test_learning_settings_receive_defaults_and_are_validated(
+    database: None,
+) -> None:
+    token = await _user("owner")
+    async with _client() as client:
+        created = await client.post(
+            "/api/v1/projects", headers=_auth(token), json=LEARNING
+        )
+        unknown = await client.post(
+            "/api/v1/projects",
+            headers=_auth(token),
+            json={**LEARNING, "learning_solution": "missing"},
+        )
+        wrong_metric = await client.post(
+            "/api/v1/projects",
+            headers=_auth(token),
+            json={**LEARNING, "evaluation_metric": "accuracy"},
+        )
+        bad_configuration = await client.post(
+            "/api/v1/projects",
+            headers=_auth(token),
+            json={**LEARNING, "learning_configuration": {"unknown": 1}},
+        )
+        random_with_settings = await client.post(
+            "/api/v1/projects",
+            headers=_auth(token),
+            json={**DRAFT, "metric_target": 0.5},
+        )
+        no_limit = await client.post(
+            "/api/v1/projects",
+            headers=_auth(token),
+            json={
+                key: value
+                for key, value in DRAFT.items()
+                if key != "max_acquisition_iterations"
+            },
+        )
+        project = created.json()
+        changed = await client.patch(
+            f"/api/v1/projects/{project['id']}",
+            headers=_auth(token),
+            json={
+                "version": 1,
+                "metric_target": 0.8,
+                "evaluation_interval": 3,
+                "max_acquisition_iterations": 4,
+            },
+        )
+        to_random = await client.patch(
+            f"/api/v1/projects/{project['id']}",
+            headers=_auth(token),
+            json={"version": 2, "acquisition_strategy": "random"},
+        )
+
+    assert created.status_code == 201, created.text
+    assert {
+        key: project[key]
+        for key in (
+            "learning_solution",
+            "learning_solution_version",
+            "learning_configuration",
+            "evaluation_metric",
+            "evaluation_interval",
+            "metric_target",
+            "max_acquisition_iterations",
+            "completion_reason",
+        )
+    } == {
+        "learning_solution": "deterministic",
+        "learning_solution_version": "1.0.0",
+        "learning_configuration": {"retain_helper_models": False},
+        "evaluation_metric": "map50",
+        "evaluation_interval": 1,
+        "metric_target": None,
+        "max_acquisition_iterations": 2,
+        "completion_reason": None,
+    }
+    assert unknown.json()["error"]["code"] == "learning_solution_unknown"
+    assert wrong_metric.json()["error"]["code"] == "evaluation_metric_invalid"
+    assert bad_configuration.json()["error"]["code"] == "learning_configuration_invalid"
+    assert random_with_settings.status_code == 422
+    assert no_limit.status_code == 422
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["metric_target"] == 0.8
+    assert changed.json()["evaluation_interval"] == 3
+    assert changed.json()["max_acquisition_iterations"] == 4
+    assert to_random.json()["learning_solution"] is None
+    assert to_random.json()["max_acquisition_iterations"] == 4
+
+    async with async_session_factory() as session:
+        entries = list(
+            await session.scalars(
+                select(AuditEntry)
+                .where(AuditEntry.action == "project.learning_settings_changed")
+                .order_by(AuditEntry.created_at)
+            )
+        )
+    assert entries[0].after["metric_target"] == 0.8
+    assert entries[1].after["learning_solution"] is None
+
+
+async def test_random_acquisition_opens_iterations_until_the_pool_runs_out(
+    database: None,
+) -> None:
+    token = await _user("owner")
+    async with _client() as client:
+        project = await _project(client, token, DRAFT)
+        assert (await _relay())["opened"] == 0
+        await _annotate_everything(client, token, project["id"])
+        first_pass = await _relay()
+        first = await _iterations(client, token, project["id"])
+        await _annotate_everything(client, token, project["id"])
+        await _relay()
+        await _annotate_everything(client, token, project["id"])
+        await _relay()
+        statistics = await client.get(
+            f"/api/v1/projects/{project['id']}/statistics", headers=_auth(token)
+        )
+        reread = await client.get(
+            f"/api/v1/projects/{project['id']}", headers=_auth(token)
+        )
+        final = await _iterations(client, token, project["id"])
+
+    assert first_pass["opened"] == 1
+    [opened] = first["items"]
+    assert opened["number"] == 1
+    assert opened["status"] == "preparing"
+    assert opened["strategy"] == "random"
+    assert opened["selected_count"] == 2
+    assert opened["total_count"] == 2
+    assert first["current_iteration"]["id"] == opened["id"]
+
+    assert [item["status"] for item in final["items"]] == ["ready", "ready"]
+    assert reread.json()["status"] == "completed"
+    assert reread.json()["completion_reason"] == "pool_exhausted"
+    assert statistics.json()["completed_iterations"] == 2
+    assert statistics.json()["evaluations"] == []
+
+    async with async_session_factory() as session:
+        acquisitions = list(
+            await session.scalars(
+                select(AnnotationBatch).where(
+                    AnnotationBatch.project_id == project["id"],
+                    AnnotationBatch.purpose == "acquisition",
+                )
+            )
+        )
+        splits = {
+            row.media_id: row.split
+            for row in await session.scalars(
+                select(DatasetSplit).where(DatasetSplit.project_id == project["id"])
+            )
+        }
+        chosen = list(
+            await session.scalars(
+                select(BatchItem.media_id).where(
+                    BatchItem.batch_id.in_([batch.id for batch in acquisitions])
+                )
+            )
+        )
+        events = list(
+            await session.scalars(
+                select(OutboxEvent).where(
+                    OutboxEvent.event_type == "learning.batch_resolved.v1"
+                )
+            )
+        )
+    assert all(batch.model_run_id for batch in acquisitions)
+    assert len(chosen) == len(set(chosen)) == 4
+    assert {splits[media_id] for media_id in chosen} == {"train"}
+    assert len(events) == 5
+    assert all(event.published_at is not None for event in events)
+
+
+def _archive(content: bytes) -> dict[str, object]:
+    """Read an exported ZIP: JSON as data, text as strings, images as bytes."""
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        assert archive.testzip() is None
+        files: dict[str, object] = {}
+        for name in archive.namelist():
+            data = archive.read(name)
+            if name.endswith(".json"):
+                files[name] = json.loads(data)
+            elif name.startswith("images/"):
+                files[name] = data
+            else:
+                files[name] = data.decode()
+        return files
+
+
+async def test_an_export_holds_only_accepted_resolutions(database: None) -> None:
+    token = await _user("owner")
+    annotator = await _user("annie")
+    async with _client() as client:
+        project = await _project(client, token, DRAFT)
+        box = {
+            "id": "bottle-1",
+            "class_id": project["class_id"],
+            "geometry": {"type": "rectangle", "coordinates": [10.0, 20.0, 30.0, 40.0]},
+            "attributes": {},
+        }
+        await _annotate_everything(client, token, project["id"], [box])
+        await _relay()
+        joined = await client.post(
+            f"/api/v1/projects/{project['id']}/members",
+            headers=_auth(token),
+            json={"username": "annie", "role": "annotator"},
+        )
+        assert joined.status_code == 201, joined.text
+        base = f"/api/v1/projects/{project['id']}/export"
+        coco = await client.get(base, headers=_auth(token))
+        yolo = await client.get(base, params={"format": "yolo"}, headers=_auth(token))
+        wrong = await client.get(base, params={"format": "csv"}, headers=_auth(token))
+        forbidden = await client.get(base, headers=_auth(annotator))
+
+    assert coco.status_code == 200, coco.text
+    assert coco.headers["content-type"] == "application/zip"
+    assert coco.headers["content-disposition"] == 'attachment; filename="Belt-coco.zip"'
+    assert wrong.status_code == 422
+    assert wrong.json()["error"]["code"] == "export_format_not_supported"
+    assert forbidden.status_code == 403
+
+    async with async_session_factory() as session:
+        resolutions = {
+            resolution.id: resolution.version
+            for resolution in await session.scalars(select(ResolvedAnnotation))
+        }
+        selected = set(
+            await session.scalars(
+                select(BatchItem.media_id)
+                .join(AnnotationBatch, AnnotationBatch.id == BatchItem.batch_id)
+                .where(AnnotationBatch.purpose == "acquisition")
+            )
+        )
+    assert len(resolutions) == 4 and len(selected) == 2
+
+    files = _archive(coco.content)
+    images = sorted(name for name in files if name.startswith("images/"))
+    assert [name.split("/")[1] for name in images] == ["test", "train", "train", "val"]
+    train = files["annotations/train.json"]
+    assert [image["file_name"] for image in train["images"]] == [
+        name.removeprefix("images/train/") for name in images if "/train/" in name
+    ]
+    assert train["categories"] == [{"id": 0, "name": "bottle"}]
+    for annotation in train["annotations"]:
+        assert annotation["bbox"] == [10.0, 20.0, 30.0, 40.0]
+        assert annotation["area"] == 1200.0
+        assert annotation["category_id"] == 0
+        assert (
+            resolutions[annotation["resolution_id"]] == annotation["resolution_version"]
+        )
+    provenance = files["provenance.json"]
+    assert provenance["schema"] == "dada-export/1"
+    assert set(provenance["splits"]) == {"train", "val", "test"}
+    recorded = {
+        entry["resolution_id"]: entry["resolution_version"]
+        for split in provenance["splits"].values()
+        for image in split
+        for entry in image["resolutions"]
+    }
+    assert recorded == resolutions
+    exported = {
+        image["media_id"] for split in provenance["splits"].values() for image in split
+    }
+    assert len(exported) == 4
+    assert not exported & selected
+    for split in provenance["splits"].values():
+        for image in split:
+            assert image["annotation_status"] == "EXHAUSTIVELY_LABELED"
+            assert image["rendition"] == "source"
+            assert (
+                files[image["file"]]
+                == (
+                    get_settings().media_root
+                    / f"{project['id']}/{image['source_sha256'][:2]}"
+                    f"/{image['source_sha256'][2:4]}/{image['source_sha256']}"
+                ).read_bytes()
+            )
+
+    labels = _archive(yolo.content)
+    assert labels["data.yaml"] == (
+        "path: .\ntrain: images/train\nval: images/val\ntest: images/test\n"
+        'names:\n  0: "bottle"\n'
+    )
+    label_files = sorted(name for name in labels if name.startswith("labels/"))
+    assert [name.split("/")[1] for name in label_files] == [
+        "test",
+        "train",
+        "train",
+        "val",
+    ]
+    for name in label_files:
+        assert labels[name] == "0 0.039062 0.083333 0.046875 0.083333\n"
+
+
+async def test_a_classification_export_is_a_table_of_classes(database: None) -> None:
+    token = await _user("owner")
+    async with _client() as client:
+        project = await _project(
+            client, token, {**DRAFT, "task_type": "classification"}
+        )
+        label = {
+            "id": "label",
+            "class_id": project["class_id"],
+            "geometry": None,
+            "attributes": {},
+        }
+        await _annotate_everything(client, token, project["id"], [label])
+        exported = await client.get(
+            f"/api/v1/projects/{project['id']}/export", headers=_auth(token)
+        )
+        coco = await client.get(
+            f"/api/v1/projects/{project['id']}/export",
+            params={"format": "coco"},
+            headers=_auth(token),
+        )
+
+    assert exported.status_code == 200, exported.text
+    files = _archive(exported.content)
+    rows = files["annotations/train.csv"].splitlines()
+    assert rows[0] == "path,bottle"
+    assert len(rows) == 3
+    assert all(row.startswith("images/train/belt/frame-") for row in rows[1:])
+    assert all(row.endswith(",1") for row in rows[1:])
+    assert coco.status_code == 422
+
+
+async def test_random_acquisition_stops_at_the_iteration_limit(database: None) -> None:
+    token = await _user("owner")
+    async with _client() as client:
+        project = await _project(
+            client, token, {**DRAFT, "max_acquisition_iterations": 1}
+        )
+        await _annotate_everything(client, token, project["id"])
+        await _relay()
+        await _annotate_everything(client, token, project["id"])
+        await _relay()
+        reread = await client.get(
+            f"/api/v1/projects/{project['id']}", headers=_auth(token)
+        )
+    assert reread.json()["status"] == "completed"
+    assert reread.json()["completion_reason"] == "max_iterations"
+    assert len(await _runs(project["id"])) == 1
+
+
+async def test_active_learning_runs_through_the_worker_to_its_final_evaluation(
+    database: None,
+) -> None:
+    token = await _user("owner")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(client, token, LEARNING)
+        await _annotate_everything(client, token, project["id"])
+        opened = await _relay(broker)
+        queued = await _iterations(client, token, project["id"])
+        await _execute(broker.commands[0])
+        selected = await _iterations(client, token, project["id"])
+        await _annotate_everything(client, token, project["id"])
+        await _relay(broker)
+        await _execute(broker.commands[1])
+        await _annotate_everything(client, token, project["id"])
+        await _relay(broker)
+        await _execute(broker.commands[2])
+        statistics = await client.get(
+            f"/api/v1/projects/{project['id']}/statistics", headers=_auth(token)
+        )
+        reread = await client.get(
+            f"/api/v1/projects/{project['id']}", headers=_auth(token)
+        )
+        final = await _iterations(client, token, project["id"])
+
+    assert opened == {"opened": 1, "expired": 0, "dispatched": 1}
+    assert queued["items"][0]["status"] == "training"
+    first = selected["items"][0]
+    assert first["status"] == "preparing"
+    assert first["strategy"] == "active_learning"
+    assert first["solution"] == "deterministic"
+    assert first["selected_count"] == 2
+    assert first["evaluations"] == []
+
+    runs = await _runs(project["id"])
+    assert [(run.iteration, run.purpose, run.status) for run in runs] == [
+        (1, "selection", "succeeded"),
+        (2, "selection", "succeeded"),
+        (3, "final_evaluation", "succeeded"),
+    ]
+    assert runs[0].evaluation is None
+    assert runs[1].evaluation["metric"] == "map50"
+    assert runs[2].evaluation["final"] is True
+    assert set(runs[2].snapshots) == {"training", "validation", "test"}
+
+    training = _manifest(runs[1], "training")
+    pool = _manifest(runs[1], "pool")
+    validation = _manifest(runs[1], "validation")
+    assert training["info"]["schema"] == "dada-coco-pai/1"
+    assert len(training["images"]) == 4
+    assert sorted(image["annotation_status"] for image in training["images"]) == [
+        "EXHAUSTIVELY_LABELED",
+        "EXHAUSTIVELY_LABELED",
+        "PARTIALLY_LABELED",
+        "PARTIALLY_LABELED",
+    ]
+    assert sorted(image["annotation_status"] for image in pool["images"]) == [
+        "PARTIALLY_LABELED",
+        "PARTIALLY_LABELED",
+        "UNLABELED",
+        "UNLABELED",
+    ]
+    assert len(validation["images"]) == 1
+    held_out = {image["id"] for image in validation["images"]}
+    assert held_out.isdisjoint(image["id"] for image in training["images"])
+    assert held_out.isdisjoint(image["id"] for image in pool["images"])
+    assert training["categories"] == [
+        {"id": 0, "name": "bottle", "class_id": project["class_id"]}
+    ]
+
+    assert [item["status"] for item in final["items"]] == ["ready", "ready", "ready"]
+    assert final["items"][2]["purpose"] == "final_evaluation"
+    assert reread.json()["status"] == "completed"
+    assert reread.json()["completion_reason"] == "max_iterations"
+    evaluations = statistics.json()["evaluations"]
+    assert [(item["iteration"], item["split"]) for item in evaluations] == [
+        (2, "validation"),
+        (3, "validation"),
+        (3, "test"),
+    ]
+    assert evaluations[-1]["value"] == 1.0
+    assert evaluations[0]["model"] == {"name": "deterministic", "version": "1.0.0"}
+    artifacts = get_settings().media_root / project["id"] / "learning" / "runs"
+    assert not any(artifacts.glob("iteration-*"))
+    retained = read_assistance_model(
+        str(get_settings().media_root / project["id"] / "learning" / "assistance")
+    )
+    assert retained.iteration == 3
+    assert retained.class_ids == [project["class_id"]]
+
+
+async def test_a_met_metric_target_stops_with_a_test_evaluation(
+    database: None,
+) -> None:
+    token = await _user("owner")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(
+            client,
+            token,
+            {**LEARNING, "metric_target": 0.5, "max_acquisition_iterations": 5},
+        )
+        await _annotate_everything(client, token, project["id"])
+        await _relay(broker)
+        await _execute(broker.commands[0])
+        await _annotate_everything(client, token, project["id"])
+        await _relay(broker)
+        await _execute(broker.commands[1])
+        reread = await client.get(
+            f"/api/v1/projects/{project['id']}", headers=_auth(token)
+        )
+        page = await _iterations(client, token, project["id"])
+
+    runs = await _runs(project["id"])
+    assert set(runs[1].snapshots) == {"training", "pool", "validation", "test"}
+    assert runs[1].result["stop_reason"] == "metric_target"
+    assert runs[1].result["selected"] == 0
+    assert reread.json()["completion_reason"] == "metric_target"
+    assert page["items"][1]["stop_reason"] == "metric_target"
+    assert page["items"][1]["status"] == "ready"
+    assert page["items"][1]["metrics"] == {"map50": 0.666667}
+
+
+class Failing(BaseModelAdapter):
+    """Reports a typed failure, as a solution that cannot run would."""
+
+    def select_batch(self, request: BatchRequest, report_stage=None) -> BatchResult:
+        report_stage("training")
+        raise AdapterError("training_failed", "out of memory")
+
+
+class Invalid(DeterministicAdapter):
+    """Returns a well-formed answer that does not fit its request."""
+
+    def __init__(self, change: str) -> None:
+        self.change = change
+
+    def select_batch(self, request: BatchRequest, report_stage=None) -> BatchResult:
+        result = super().select_batch(request, report_stage)
+        if self.change == "solution":
+            return result.model_copy(update={"solution_id": "another"})
+        images = list(result.selection["images"])
+        if self.change == "ineligible":
+            images[0] = {**images[0], "id": "not-in-the-pool"}
+        if self.change == "oversized":
+            images = images + [{**images[0], "id": "extra"}]
+        if self.change == "repeated":
+            images = [images[0], images[0]]
+        return result.model_copy(
+            update={"selection": {**result.selection, "images": images}}
+        )
+
+
+async def test_failures_are_recorded_and_a_retry_reuses_the_snapshots(
+    database: None,
+) -> None:
+    owner = await _user("owner")
+    viewer = await _user("viewer")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(client, owner, LEARNING)
+        await _annotate_everything(client, owner, project["id"])
+        await _relay(broker)
+        joined = await client.post(
+            f"/api/v1/projects/{project['id']}/members",
+            headers=_auth(owner),
+            json={"username": "viewer", "role": "annotator"},
+        )
+        assert joined.status_code == 201, joined.text
+        await _execute(broker.commands[0], Failing())
+        failed = await _iterations(client, owner, project["id"])
+        iteration_id = failed["items"][0]["id"]
+        forbidden = await client.post(
+            f"/api/v1/projects/{project['id']}/iterations/{iteration_id}/retry",
+            headers=_auth(viewer),
+        )
+        retried = await client.post(
+            f"/api/v1/projects/{project['id']}/iterations/{iteration_id}/retry",
+            headers=_auth(owner),
+        )
+        again = await client.post(
+            f"/api/v1/projects/{project['id']}/iterations/{iteration_id}/retry",
+            headers=_auth(owner),
+        )
+        await _relay(broker)
+        await _execute(broker.commands[1])
+        recovered = await _iterations(client, owner, project["id"])
+
+    assert failed["items"][0]["status"] == "failed"
+    assert failed["items"][0]["failure_code"] == "training_failed"
+    assert failed["items"][0]["failure_detail"] == "out of memory"
+    assert forbidden.status_code == 403
+    assert retried.status_code == 202, retried.text
+    assert retried.json()["attempt"] == 2
+    assert retried.json()["status"] == "training"
+    assert again.json()["error"]["code"] == "iteration_not_failed"
+    assert recovered["items"][0]["id"] == iteration_id
+    assert recovered["items"][0]["status"] == "preparing"
+
+    first, second = await _runs(project["id"])
+    assert second.attempt == 2
+    assert second.snapshots == first.snapshots
+    assert second.seed == first.seed
+    assert second.configuration_fingerprint == first.configuration_fingerprint
+    assert second.requested_by is not None
+
+
+@pytest.mark.parametrize("change", ["solution", "ineligible", "oversized", "repeated"])
+async def test_a_result_that_does_not_fit_its_request_fails_the_run(
+    database: None, change: str
+) -> None:
+    token = await _user("owner")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(client, token, LEARNING)
+        await _annotate_everything(client, token, project["id"])
+        await _relay(broker)
+        await _execute(broker.commands[0], Invalid(change))
+
+    [run] = await _runs(project["id"])
+    assert run.status == "failed"
+    assert run.failure_code == "solution_output_invalid"
+    async with async_session_factory() as session:
+        acquisitions = await session.scalar(
+            select(AnnotationBatch.id).where(
+                AnnotationBatch.project_id == project["id"],
+                AnnotationBatch.purpose == "acquisition",
+            )
+        )
+    assert acquisitions is None
+
+
+async def test_duplicate_late_and_timed_out_results_change_nothing(
+    database: None,
+) -> None:
+    token = await _user("owner")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(client, token, LEARNING)
+        await _annotate_everything(client, token, project["id"])
+        await _relay(broker)
+        command = broker.commands[0]
+        await _execute(command)
+        await _execute(command)
+        async with async_session_factory() as session:
+            late = await learning_runs.ingest(
+                session,
+                command,
+                learning_runs.Failure("worker_failed", "late"),
+                datetime.now(UTC),
+            )
+        await _annotate_everything(client, token, project["id"])
+        await _relay(broker)
+        timed_out = broker.commands[1]
+        async with async_session_factory() as session:
+            request = await learning_runs.start_attempt(
+                session, timed_out, datetime.now(UTC)
+            )
+        async with async_session_factory() as session:
+            await learning_runs.record_stage(session, timed_out, "evaluating")
+        staged = (await _runs(project["id"]))[1].stage
+        expired = await _relay(
+            broker,
+            datetime.now(UTC)
+            + timedelta(seconds=get_settings().learning_timeout_seconds + 120),
+        )
+        async with async_session_factory() as session:
+            delayed = await learning_runs.ingest(
+                session,
+                timed_out,
+                DeterministicAdapter().select_batch(request),
+                datetime.now(UTC),
+            )
+
+    assert late is False
+    assert request is not None
+    assert staged == "evaluating"
+    assert expired["expired"] == 1
+    assert delayed is False
+    first, second = await _runs(project["id"])
+    assert first.status == "succeeded"
+    assert second.status == "failed"
+    assert second.failure_code == "worker_failed"
+    async with async_session_factory() as session:
+        acquisitions = list(
+            await session.scalars(
+                select(AnnotationBatch).where(
+                    AnnotationBatch.project_id == project["id"],
+                    AnnotationBatch.purpose == "acquisition",
+                )
+            )
+        )
+    assert len(acquisitions) == 1
+
+
+async def test_closing_reports_unfinished_work_and_reconciles_a_missed_event(
+    database: None,
+) -> None:
+    token = await _user("owner")
+    async with _client() as client:
+        project = await _project(client, token, DRAFT)
+        await _annotate_everything(client, token, project["id"])
+        await _relay()
+        [first] = (await _iterations(client, token, project["id"]))["items"]
+        url = f"/api/v1/projects/{project['id']}/iterations/{first['id']}/close"
+        incomplete = await client.post(url, headers=_auth(token))
+        await _annotate_everything(client, token, project["id"])
+        async with async_session_factory() as session:
+            for event in await session.scalars(select(OutboxEvent)):
+                event.published_at = datetime.now(UTC)
+            await session.commit()
+        closed = await client.post(url, headers=_auth(token))
+        repeated = await client.post(url, headers=_auth(token))
+        page = await _iterations(client, token, project["id"])
+        missing = await client.get(
+            f"/api/v1/projects/{project['id']}/iterations/{project['id']}",
+            headers=_auth(token),
+        )
+
+    assert incomplete.status_code == 409
+    assert incomplete.json()["error"]["code"] == "iteration_incomplete"
+    assert incomplete.json()["error"]["details"] == {"remaining_items": 2}
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["status"] == "ready"
+    assert repeated.status_code == 200
+    assert [item["number"] for item in page["items"]] == [1, 2]
+    assert missing.status_code == 404
+
+
+async def test_a_manifest_carries_accepted_geometry_in_the_shared_format(
+    database: None,
+) -> None:
+    token = await _user("owner")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(client, token, LEARNING)
+        box = {
+            "id": "bottle-1",
+            "class_id": project["class_id"],
+            "geometry": {"type": "rectangle", "coordinates": [10.0, 20.0, 30.0, 40.0]},
+            "attributes": {},
+        }
+        await _annotate_everything(client, token, project["id"], [box])
+        await _relay(broker)
+
+    [run] = await _runs(project["id"])
+    training = _manifest(run, "training")
+    async with async_session_factory() as session:
+        resolutions = {
+            resolution.id: resolution
+            for resolution in await session.scalars(select(ResolvedAnnotation))
+        }
+    assert len(training["annotations"]) == 2
+    for annotation in training["annotations"]:
+        assert annotation["bbox"] == [10.0, 20.0, 30.0, 40.0]
+        assert annotation["category_id"] == 0
+        assert annotation["origin"] == "FULL_IMAGE"
+        assert annotation["resolution_id"] in resolutions
+        assert annotation["image_id"] in {image["id"] for image in training["images"]}
+    stored = (
+        get_settings().media_root / run.snapshots["training"]["path"]
+    ).read_bytes()
+    assert json.loads(stored) == training
+
+
+async def _acquisition_items(project_id: str) -> list[BatchItem]:
+    """Return the items of a project's acquisition batches in item order."""
+    async with async_session_factory() as session:
+        return list(
+            await session.scalars(
+                select(BatchItem)
+                .join(AnnotationBatch, AnnotationBatch.id == BatchItem.batch_id)
+                .where(
+                    AnnotationBatch.project_id == project_id,
+                    AnnotationBatch.purpose == "acquisition",
+                )
+                .order_by(BatchItem.position)
+            )
+        )
+
+
+async def test_object_targets_are_answered_one_object_at_a_time(
+    database: None,
+) -> None:
+    token = await _user("owner")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(client, token, LEARNING)
+        await _annotate_everything(client, token, project["id"])
+        await _relay(broker)
+        await _execute(broker.commands[0])
+        listed = await client.get(
+            f"/api/v1/projects/{project['id']}/batches", headers=_auth(token)
+        )
+        batch = next(
+            item for item in listed.json()["items"] if item["purpose"] == "acquisition"
+        )
+        started = await client.post(
+            f"/api/v1/projects/{project['id']}/batches/{batch['id']}/start",
+            headers=_auth(token),
+        )
+        assert started.status_code == 200, started.text
+        queue = await client.get(
+            f"/api/v1/projects/{project['id']}/assignments",
+            params={"purpose": "acquisition"},
+            headers=_auth(token),
+        )
+        first, second = queue.json()["items"]
+        detail = await client.get(
+            f"/api/v1/projects/{project['id']}/assignments/{first['id']}",
+            headers=_auth(token),
+        )
+        box = {
+            "class_id": project["class_id"],
+            "geometry": {
+                "type": "rectangle",
+                "coordinates": [170.0, 130.0, 300.0, 220.0],
+            },
+            "attributes": {},
+        }
+        crowded = await client.post(
+            f"/api/v1/projects/{project['id']}/assignments/{first['id']}/submit",
+            headers=_auth(token),
+            json={
+                "version": first["version"],
+                "objects": [{**box, "id": "one"}, {**box, "id": "two"}],
+            },
+        )
+        found = await client.post(
+            f"/api/v1/projects/{project['id']}/assignments/{first['id']}/submit",
+            headers=_auth(token),
+            json={"version": first["version"], "objects": [{**box, "id": "one"}]},
+        )
+        empty = await client.post(
+            f"/api/v1/projects/{project['id']}/assignments/{second['id']}/submit",
+            headers=_auth(token),
+            json={"version": second["version"], "objects": []},
+        )
+        await _relay(broker)
+
+    items = await _acquisition_items(project["id"])
+    assert len(items) == 2
+    assert all(item.target_key.startswith("t-") for item in items)
+    assert items[0].target_geometry == {
+        "type": "rectangle",
+        "coordinates": [160.0, 120.0, 320.0, 240.0],
+    }
+    assert items[0].target_region == [112.0, 84.0, 416.0, 312.0]
+
+    cue = {
+        "geometry": {"type": "rectangle", "coordinates": [160.0, 120.0, 320.0, 240.0]},
+        "region": [112.0, 84.0, 416.0, 312.0],
+    }
+    assert first["target"] == cue
+    assert detail.json()["target"] == cue
+    assert detail.json()["objects"] == []
+    assert crowded.status_code == 422
+    assert crowded.json()["error"]["details"]["errors"] == [
+        {"object_id": None, "code": "too_many_objects"}
+    ]
+    assert found.status_code == 200, found.text
+    assert found.json()["image_resolved"] is True
+    assert empty.status_code == 200, empty.text
+
+    runs = await _runs(project["id"])
+    assert len(runs) == 2
+    training = _manifest(runs[1], "training")
+    pool = _manifest(runs[1], "pool")
+    by_item = {item.media_id: item for item in items}
+    partial = [
+        image
+        for image in training["images"]
+        if image["annotation_status"] == "PARTIALLY_LABELED"
+    ]
+    assert {image["id"] for image in partial} == set(by_item)
+    rois = {roi["roi_id"]: roi for image in partial for roi in image["queried_rois"]}
+    assert rois == {
+        items[0].id: {
+            "roi_id": items[0].id,
+            "bbox_xyxy": [112.0, 84.0, 528.0, 396.0],
+            "al_iteration": 1,
+            "resolution": "CONFIRMED_OBJECT",
+        },
+        items[1].id: {
+            "roi_id": items[1].id,
+            "bbox_xyxy": [112.0, 84.0, 528.0, 396.0],
+            "al_iteration": 1,
+            "resolution": "EXPLICIT_HARD_NEGATIVE",
+        },
+    }
+    [queried] = [
+        annotation
+        for annotation in training["annotations"]
+        if annotation["origin"] == "AL_OBJECT_QUERY"
+    ]
+    assert queried["roi_id"] == items[0].id
+    assert queried["image_id"] == items[0].media_id
+    assert queried["bbox"] == [170.0, 130.0, 300.0, 220.0]
+    partial_pool = [
+        image
+        for image in pool["images"]
+        if image["annotation_status"] == "PARTIALLY_LABELED"
+    ]
+    assert [image["queried_rois"] for image in partial_pool] == [
+        image["queried_rois"] for image in partial
+    ]
+    assert [annotation["roi_id"] for annotation in pool["annotations"]] == [items[0].id]
+
+    async with _client() as client:
+        exported = await client.get(
+            f"/api/v1/projects/{project['id']}/export", headers=_auth(token)
+        )
+    assert exported.status_code == 200, exported.text
+    provenance = _archive(exported.content)["provenance.json"]
+    partial_export = {
+        image["media_id"]: image
+        for image in provenance["splits"]["train"]
+        if image["annotation_status"] == "PARTIALLY_LABELED"
+    }
+    assert set(partial_export) == set(by_item)
+    assert partial_export[items[0].media_id]["queried_rois"] == [rois[items[0].id]]
+    [answer] = partial_export[items[0].media_id]["resolutions"]
+    assert answer["origin"] == "AL_OBJECT_QUERY"
+    assert answer["roi_id"] == items[0].id
+
+
+class Targets(DeterministicAdapter):
+    """Returns object targets changed so that they no longer fit."""
+
+    def __init__(self, change: str) -> None:
+        self.change = change
+
+    def select_batch(self, request: BatchRequest, report_stage=None) -> BatchResult:
+        result = super().select_batch(request, report_stage)
+        selection = json.loads(json.dumps(result.selection))
+        images, annotations = selection["images"], selection["annotations"]
+        target, roi = annotations[0], images[0]["queried_rois"][-1]
+        if self.change == "outside_region":
+            target["bbox"] = [0.0, 0.0, 10.0, 10.0]
+        if self.change == "region_outside_image":
+            roi["bbox_xyxy"] = [0.0, 0.0, 700.0, 480.0]
+        if self.change == "unknown_region":
+            target["roi_id"] = "nowhere"
+        if self.change == "no_box":
+            del target["bbox"]
+        if self.change == "repeated":
+            annotations.append(dict(target))
+        if self.change == "image_without_target":
+            pool = read_manifest(request.media_root, request.pool)
+            spare = next(
+                image
+                for image in pool["images"]
+                if image["id"] not in {item["id"] for item in images}
+            )
+            images.append(spare)
+        if self.change == "oversized":
+            images[0]["queried_rois"].append({**roi, "roi_id": "extra"})
+            annotations.append(
+                {**target, "roi_id": "extra", "bbox": [170.0, 130.0, 100.0, 100.0]}
+            )
+        return result.model_copy(update={"selection": selection})
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "outside_region",
+        "region_outside_image",
+        "unknown_region",
+        "no_box",
+        "repeated",
+        "image_without_target",
+        "oversized",
+    ],
+)
+async def test_a_target_that_does_not_fit_fails_the_run(
+    database: None, change: str
+) -> None:
+    token = await _user("owner")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(client, token, LEARNING)
+        await _annotate_everything(client, token, project["id"])
+        await _relay(broker)
+        await _execute(broker.commands[0], Targets(change))
+
+    [run] = await _runs(project["id"])
+    assert run.status == "failed"
+    assert run.failure_code == "solution_output_invalid"
+    assert await _acquisition_items(project["id"]) == []
+
+
+async def test_classification_acquires_whole_images(database: None) -> None:
+    token = await _user("owner")
+    broker = Broker()
+    async with _client() as client:
+        project = await _project(
+            client, token, {**LEARNING, "task_type": "classification"}
+        )
+        label = {
+            "id": "label",
+            "class_id": project["class_id"],
+            "geometry": None,
+            "attributes": {},
+        }
+        await _annotate_everything(client, token, project["id"], [label])
+        await _relay(broker)
+        await _execute(broker.commands[0])
+
+    items = await _acquisition_items(project["id"])
+    assert len(items) == 2
+    assert {item.target_key for item in items} == {None}
+
+
+async def _assisted(
+    client: httpx.AsyncClient, token: str, project_id: str, assignment_id: str, prompt
+) -> httpx.Response:
+    """Ask for a suggestion on one assignment."""
+    return await client.post(
+        "/api/v1/inference/sam-predict",
+        headers=_auth(token),
+        json={
+            "project_id": project_id,
+            "assignment_id": assignment_id,
+            "request_id": "prompt-1",
+            "prompts": [prompt],
+        },
+    )
+
+
+def _retain(project: dict, class_ids: list[str] | None = None) -> None:
+    """Leave a deterministic target model in the project's assistance folder."""
+    write_assistance_model(
+        str(get_settings().media_root / project["id"] / "learning" / "assistance"),
+        AssistanceModel(
+            solution_id="deterministic",
+            solution_version="1.0.0",
+            task="detection",
+            class_ids=class_ids or [project["class_id"]],
+            iteration=1,
+            request_id="run",
+            weights=None,
+        ),
+    )
+
+
+async def _in_process(request: AssistanceRequest, _: float) -> dict:
+    """Answer a prompt the way the assistance worker does."""
+    return assistance.run(request.model_dump())
+
+
+async def _too_slow(_: AssistanceRequest, __: float) -> dict:
+    """Behave like a worker that never answers."""
+    raise TimeoutError
+
+
+async def _broken(_: AssistanceRequest, __: float) -> dict:
+    """Behave like a worker whose model failed."""
+    return {"failure": {"code": "assistance_failed", "detail": "out of memory"}}
+
+
+async def test_assistance_answers_the_owner_and_never_touches_the_draft(
+    database: None,
+) -> None:
+    owner = await _user("owner")
+    peer = await _user("peer")
+    outsider = await _user("outsider")
+    broker = Broker()
+    point = {"type": "point", "coordinates": [320.0, 240.0], "label": "foreground"}
+    try:
+        async with _client() as client:
+            project = await _project(client, owner, LEARNING)
+            await _annotate_everything(client, owner, project["id"])
+            await _relay(broker)
+            await _execute(broker.commands[0])
+            listed = await client.get(
+                f"/api/v1/projects/{project['id']}/batches", headers=_auth(owner)
+            )
+            batch = next(
+                item
+                for item in listed.json()["items"]
+                if item["purpose"] == "acquisition"
+            )
+            await client.post(
+                f"/api/v1/projects/{project['id']}/batches/{batch['id']}/start",
+                headers=_auth(owner),
+            )
+            joined = await client.post(
+                f"/api/v1/projects/{project['id']}/members",
+                headers=_auth(owner),
+                json={"username": "peer", "role": "annotator"},
+            )
+            assert joined.status_code == 201, joined.text
+            queue = await client.get(
+                f"/api/v1/projects/{project['id']}/assignments",
+                params={"purpose": "acquisition"},
+                headers=_auth(owner),
+            )
+            first, second = queue.json()["items"][:2]
+            box = {
+                "id": "mine",
+                "class_id": project["class_id"],
+                "geometry": {
+                    "type": "rectangle",
+                    "coordinates": [10.0, 10.0, 20.0, 20.0],
+                },
+                "attributes": {},
+            }
+            saved = await client.put(
+                f"/api/v1/projects/{project['id']}/assignments/{first['id']}/draft",
+                headers=_auth(owner),
+                json={"version": first["version"], "objects": [box]},
+            )
+            assert saved.status_code == 200, saved.text
+
+            app.dependency_overrides[get_dispatcher] = lambda: _in_process
+            missing = await _assisted(client, owner, project["id"], first["id"], point)
+            _retain(project)
+            suggested = await _assisted(
+                client, owner, project["id"], first["id"], point
+            )
+            boxed = await _assisted(
+                client,
+                owner,
+                project["id"],
+                first["id"],
+                {"type": "box", "coordinates": [100.0, 100.0, 50.0, 40.0]},
+            )
+            foreign = await _assisted(client, peer, project["id"], first["id"], point)
+            stranger = await _assisted(
+                client, outsider, project["id"], first["id"], point
+            )
+            outside = await _assisted(
+                client,
+                owner,
+                project["id"],
+                first["id"],
+                {"type": "point", "coordinates": [700.0, 10.0]},
+            )
+            app.dependency_overrides[get_dispatcher] = lambda: _too_slow
+            slow = await _assisted(client, owner, project["id"], first["id"], point)
+            app.dependency_overrides[get_dispatcher] = lambda: _broken
+            broken = await _assisted(client, owner, project["id"], first["id"], point)
+            app.dependency_overrides[get_dispatcher] = lambda: _in_process
+            _retain(project, ["another-class"])
+            stale = await _assisted(client, owner, project["id"], first["id"], point)
+            _retain(project)
+            submitted = await client.post(
+                f"/api/v1/projects/{project['id']}/assignments/{second['id']}/submit",
+                headers=_auth(owner),
+                json={"version": second["version"], "objects": []},
+            )
+            assert submitted.status_code == 200, submitted.text
+            closed = await _assisted(client, owner, project["id"], second["id"], point)
+            detail = await client.get(
+                f"/api/v1/projects/{project['id']}/assignments/{first['id']}",
+                headers=_auth(owner),
+            )
+    finally:
+        app.dependency_overrides.pop(get_dispatcher, None)
+
+    assert missing.status_code == 409
+    assert missing.json()["error"]["code"] == "assistance_unavailable"
+    assert missing.json()["error"]["details"] == {"reason": "no_target_model"}
+    assert suggested.status_code == 200, suggested.text
+    assert suggested.json() == {
+        "request_id": "prompt-1",
+        "assignment_id": first["id"],
+        "status": "suggestion",
+        "geometry": {
+            "type": "rectangle",
+            "coordinates": [260.0, 180.0, 120.0, 120.0],
+        },
+        "score": 1.0,
+        "model": {"solution": "deterministic", "version": "1.0.0", "iteration": 1},
+    }
+    assert boxed.json()["geometry"]["coordinates"] == [100.0, 100.0, 50.0, 40.0]
+    assert foreign.status_code == 403
+    assert foreign.json()["error"]["code"] == "assignment_not_owned"
+    assert stranger.status_code == 403
+    assert stranger.json()["error"]["code"] == "forbidden"
+    assert outside.status_code == 422
+    assert outside.json()["error"]["code"] == "invalid_prompt"
+    assert slow.status_code == 503
+    assert slow.json()["error"]["code"] == "assistance_timeout"
+    assert broken.status_code == 503
+    assert broken.json()["error"]["code"] == "assistance_failed"
+    assert stale.json()["error"]["details"] == {"reason": "incompatible_target_model"}
+    assert closed.status_code == 409
+    assert closed.json()["error"]["code"] == "assignment_already_submitted"
+    assert detail.json()["version"] == saved.json()["version"]
+    assert detail.json()["objects"] == [box]

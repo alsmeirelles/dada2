@@ -37,6 +37,13 @@ from dada_api.models.label_import import (
     ImportFormat,
     ImportStatus,
 )
+from dada_api.models.learning import (
+    CompletionReason,
+    LearningRun,
+    LearningRunPurpose,
+    LearningRunStatus,
+    ModelEvaluation,
+)
 from dada_api.models.media import ContentObject, Media
 from dada_api.models.project import (
     AcquisitionStrategy,
@@ -87,6 +94,7 @@ __all__ = [
     "BatchStatus",
     "BootstrapRecord",
     "CalibrationSnapshot",
+    "CompletionReason",
     "ContentObject",
     "DatasetLayout",
     "DatasetSplit",
@@ -95,7 +103,11 @@ __all__ = [
     "ImportFormat",
     "ImportStatus",
     "ItemStatus",
+    "LearningRun",
+    "LearningRunPurpose",
+    "LearningRunStatus",
     "Media",
+    "ModelEvaluation",
     "OutboxEvent",
     "PerformanceObservation",
     "Project",

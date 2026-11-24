@@ -8,7 +8,7 @@ import { useAuth } from './auth-context'
 type LocationState = { from?: { pathname?: string } }
 
 export function LoginPage() {
-  const { login } = useAuth()
+  const { login, sessionExpired } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [error, setError] = useState<string | null>(null)
@@ -46,6 +46,7 @@ export function LoginPage() {
         <h1 id="login-title">Welcome back</h1>
         <p className="muted">Sign in to manage projects and annotate datasets.</p>
 
+        {sessionExpired && !error && <p className="notice" role="status">Your session ended. Sign in again to continue.</p>}
         <form className="form-stack" onSubmit={handleSubmit}>
           <label>
             Username
